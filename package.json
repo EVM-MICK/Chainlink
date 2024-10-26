@@ -4,8 +4,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "npx hardhat test",
-    "console:fork": "@aave/package.json/FORK=main hardhat console"
+     "start": "node index.js",
+    "test": "npx hardhat test"
   },
   "keywords": [],
   "author": "",
