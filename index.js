@@ -13,10 +13,13 @@ const HEADERS = { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json'
 
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/137";
 const FUSION_API_URL = "https://fusion.1inch.io/v6.0/137";
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Address of the deployed Solidity contract
+// Instantiate the contract
+const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
 
 // Primary Function to Manage Hybrid Arbitrage
 async function findAndExecuteArbitrage() {
-    // Step 1: Get optimal swap path using Pathfinder
+    // Step 1: Get optimal swap path
     const { bestRoute, bestOutput } = await getOptimalSwapPath();
     const expectedProfit = bestOutput.minus(CAPITAL);
 
@@ -25,28 +28,54 @@ async function findAndExecuteArbitrage() {
     if (bestRoute) {
         // Step 2: Check allowance for the 1inch router
         const allowance = await checkAllowance(bestRoute[0], process.env.WALLET_ADDRESS);
-        if (allowance.isLessThan(bestRoute.amount)) {
+        if (allowance.isLessThan(CAPITAL)) {
             console.log("Router lacks allowance, creating approval transaction...");
-            await approveRouter(bestRoute[0], bestRoute.amount);
+            await approveRouter(bestRoute[0], CAPITAL);
         }
 
-        // Step 3: Decide between Pathfinder immediate execution or Fusion fallback
+        // Step 3: Evaluate gas and initiate flash loan if profitable
         const gasPrice = await getGasPrice();
         const estimatedGasCost = gasPrice.multipliedBy(2000000); // Estimated gas cost for transaction
         const netProfit = expectedProfit.minus(estimatedGasCost);
 
-        if (netProfit.isGreaterThanOrEqualTo(TARGET_PROFIT)) {
-            console.log("Executing arbitrage via Pathfinder...");
-            const receipt = await executeSwap(bestRoute); // Execute swap directly if profitable
-            console.log("Swap executed with transaction receipt:", receipt);
-        } else {
-            console.log("Falling back to Fusion Mode for intent-based execution...");
-            await placeFusionIntent(bestRoute, expectedProfit);
+       if (netProfit.isGreaterThanOrEqualTo(TARGET_PROFIT)) {
+    console.log("Profitable opportunity found. Initiating flash loan and swap...");
+
+    // Encode 1inch swap data for `routeData`
+    const routeData = await encode1InchSwapData(bestRoute, CAPITAL);
+
+    // Initiate flash loan and execute swap
+    await initiateFlashLoan(bestRoute[0], CAPITAL, routeData);
+}
+ else {
+            console.log("Not profitable after gas costs.");
         }
     } else {
         console.log("No profitable route found.");
     }
 }
+
+// Function to call the contract to initiate flash loan and execute trade
+async function initiateFlashLoan(asset, amount, routeData) {
+    try {
+        const txData = contract.methods.fn_RequestFlashLoan(asset, amount.toFixed(), routeData).encodeABI();
+
+        const tx = {
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData,
+            gas: 3000000,
+            gasPrice: await getGasPrice().toFixed(),
+        };
+
+        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
+        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        console.log("Flash loan and trade executed, transaction receipt:", receipt);
+    } catch (error) {
+        console.error("Error initiating flash loan and executing trade:", error);
+    }
+}
+
 
 // Retrieve the full list of tokens on Polygon supported by 1inch
 async function getTokenList() {
@@ -54,7 +83,7 @@ async function getTokenList() {
     return Object.keys(response.data.tokens);  // Return an array of token addresses
 }
 
-// Fetch optimal path by evaluating all token pairs
+// Function to get optimal path by evaluating token pairs
 async function getOptimalSwapPath() {
     const tokens = await getTokenList();
     let bestRoute = null;
@@ -75,6 +104,25 @@ async function getOptimalSwapPath() {
 
     return { bestRoute, bestOutput };
 }
+
+
+// Helper function to encode the 1inch swap data
+async function encode1InchSwapData(route, amount) {
+    const swapData = await axios.get(`${PATHFINDER_API_URL}/swap`, {
+        headers: HEADERS,
+        params: {
+            fromTokenAddress: route[0],
+            toTokenAddress: route[route.length - 1],
+            amount: amount.toFixed(),
+            fromAddress: process.env.WALLET_ADDRESS,
+            slippage: 1,  // Set appropriate slippage
+            disableEstimate: false
+        }
+    });
+
+    return swapData.data.tx.data;  // Returns the encoded calldata for 1inch
+}
+
 
 // Simulate multi-hop quotes
 async function getMultiHopQuote(tokens, amount) {
@@ -113,6 +161,7 @@ async function getQuote(fromToken, toToken, amount) {
     }
 }
 
+
 // Check allowance for the 1inch Router
 async function checkAllowance(tokenAddress, walletAddress) {
     const response = await axios.get(`${PATHFINDER_API_URL}/approve/allowance`, {
@@ -139,6 +188,7 @@ async function approveRouter(tokenAddress, amount) {
     const receipt = await web3.eth.sendSignedTransaction(signedApproveTx.rawTransaction);
     console.log("Approval transaction receipt:", receipt);
 }
+
 
 // Execute swap using Pathfinder for high-frequency, immediate arbitrage
 async function executeSwap(route) {
