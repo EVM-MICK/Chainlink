@@ -6,8 +6,8 @@ const BigNumber = require('bignumber.js');
 const ABI = require('./YourSmartContractABI.json'); // ABI of the Solidity contract
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 
-const CAPITAL = new BigNumber(100000 * 1e6);  // USDT with 6 decimals on Polygon
-const TARGET_PROFIT = new BigNumber(1500 * 1e6);  // Minimum $1,500 profit in USDT
+const CAPITAL =  new BigNumber(process.env.CAPITAL || 100000 * 1e6);  // USDT with 6 decimals on Polygon
+const TARGET_PROFIT = new BigNumber(process.env.TARGET_PROFIT || 1500 * 1e6); // Minimum $1,500 profit in USDT
 const API_KEY = process.env.ONEINCH_API_KEY;
 const HEADERS = { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' };
 
@@ -19,41 +19,36 @@ const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
 
 // Primary Function to Manage Hybrid Arbitrage
 async function findAndExecuteArbitrage() {
-    // Step 1: Get optimal swap path
-    const { bestRoute, bestOutput } = await getOptimalSwapPath();
-    const expectedProfit = bestOutput.minus(CAPITAL);
+    try {
+        const { bestRoute, bestOutput } = await getOptimalSwapPath();
+        const expectedProfit = bestOutput.minus(CAPITAL);
 
-    console.log(`Best expected profit: ${expectedProfit.toFixed()} (target: ${TARGET_PROFIT.toFixed()})`);
+        if (bestRoute) {
+            const allowance = await checkAllowance(bestRoute[0], process.env.WALLET_ADDRESS);
+            if (allowance.isLessThan(CAPITAL)) {
+                logger.info("Router lacks allowance, creating approval transaction...");
+                await approveRouter(bestRoute[0], CAPITAL);
+            }
 
-    if (bestRoute) {
-        // Step 2: Check allowance for the 1inch router
-        const allowance = await checkAllowance(bestRoute[0], process.env.WALLET_ADDRESS);
-        if (allowance.isLessThan(CAPITAL)) {
-            console.log("Router lacks allowance, creating approval transaction...");
-            await approveRouter(bestRoute[0], CAPITAL);
+            const gasPrice = await getGasPrice();
+            const estimatedGasCost = gasPrice.multipliedBy(2000000); 
+            const netProfit = expectedProfit.minus(estimatedGasCost);
+
+            if (netProfit.isGreaterThanOrEqualTo(TARGET_PROFIT)) {
+                logger.info("Profitable opportunity found. Initiating flash loan and swap...");
+                const routeData = await encode1InchSwapData(bestRoute, CAPITAL);
+                await initiateFlashLoan(bestRoute[0], CAPITAL, routeData);
+            } else {
+                logger.info("Not profitable after gas costs.");
+            }
+        } else {
+            logger.info("No profitable route found.");
         }
-
-        // Step 3: Evaluate gas and initiate flash loan if profitable
-        const gasPrice = await getGasPrice();
-        const estimatedGasCost = gasPrice.multipliedBy(2000000); // Estimated gas cost for transaction
-        const netProfit = expectedProfit.minus(estimatedGasCost);
-
-       if (netProfit.isGreaterThanOrEqualTo(TARGET_PROFIT)) {
-    console.log("Profitable opportunity found. Initiating flash loan and swap...");
-
-    // Encode 1inch swap data for `routeData`
-    const routeData = await encode1InchSwapData(bestRoute, CAPITAL);
-
-    // Initiate flash loan and execute swap
-    await initiateFlashLoan(bestRoute[0], CAPITAL, routeData);
-}
- else {
-            console.log("Not profitable after gas costs.");
-        }
-    } else {
-        console.log("No profitable route found.");
+    } catch (error) {
+        logger.error(`Error in arbitrage execution: ${error}`);
     }
 }
+
 
 // Function to call the contract to initiate flash loan and execute trade
 async function initiateFlashLoan(asset, amount, routeData) {
@@ -89,21 +84,24 @@ async function getOptimalSwapPath() {
     let bestRoute = null;
     let bestOutput = CAPITAL;
 
-    for (let i = 0; i < tokens.length; i++) {
+    await Promise.all(tokens.map(async (tokenA, i) => {
         for (let j = i + 1; j < tokens.length; j++) {
-            const route = [tokens[i], tokens[j]];
+            const tokenB = tokens[j];
+            const route = [tokenA, tokenB];
             const outputAmount = await getMultiHopQuote(route, CAPITAL);
             const expectedProfit = outputAmount.minus(CAPITAL);
 
             if (expectedProfit.isGreaterThan(TARGET_PROFIT) && outputAmount.isGreaterThan(bestOutput)) {
                 bestOutput = outputAmount;
                 bestRoute = route;
+                logger.info(`New best route found: ${route} with profit: ${expectedProfit.toFixed()}`);
             }
         }
-    }
-
+    }));
+    
     return { bestRoute, bestOutput };
 }
+
 
 
 // Helper function to encode the 1inch swap data
