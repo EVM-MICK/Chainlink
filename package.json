@@ -7,14 +7,14 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "dotenv": "^10.0.0",        // Loads environment variables from .env file
-    "axios": "^0.24.0",         // For making HTTP requests to APIs
-    "web3": "^1.6.0",           // Ethereum-compatible JavaScript API for interacting with smart contracts
-    "bignumber.js": "^9.0.0",   // Library for handling large numbers and decimals
-    "winston": "^3.3.3"         // Logging library for structured logs
+    "dotenv": "^10.0.0", 
+    "axios": "^0.24.0", 
+    "web3": "^1.6.0",     
+    "bignumber.js": "^9.0.0",  
+    "winston": "^3.3.3"        
   },
   "engines": {
-    "node": ">=14.0.0"         // Specify a Node.js version compatible with Render
+    "node": ">=14.0.0"        
   },
   "repository": {
     "type": "git",
