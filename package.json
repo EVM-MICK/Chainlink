@@ -1,16 +1,33 @@
 {
-  "name": "flashloan-arbitrage",
+  "name": "polygon-arbitrage-bot",
   "version": "1.0.0",
-  "description": "Flash loan arbitrage bot for 1inch and Aave on Polygon",
+  "description": "An arbitrage bot for Polygon mainnet that finds profitable swap routes and executes flash loans.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "web3": "^1.6.0",
-    "axios": "^0.21.4",
-    "bignumber.js": "^9.0.0",
-    "dotenv": "^10.0.0",
-    "@openzeppelin/contracts": "^4.3.2"
-  }
+    "dotenv": "^10.0.0",        // Loads environment variables from .env file
+    "axios": "^0.24.0",         // For making HTTP requests to APIs
+    "web3": "^1.6.0",           // Ethereum-compatible JavaScript API for interacting with smart contracts
+    "bignumber.js": "^9.0.0",   // Library for handling large numbers and decimals
+    "winston": "^3.3.3"         // Logging library for structured logs
+  },
+  "engines": {
+    "node": ">=14.0.0"         // Specify a Node.js version compatible with Render
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/polygon-arbitrage-bot.git"
+  },
+  "keywords": [
+    "polygon",
+    "arbitrage",
+    "flash-loan",
+    "crypto",
+    "1inch",
+    "ethereum"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
