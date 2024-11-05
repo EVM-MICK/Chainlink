@@ -1,48 +1,16 @@
 {
-  "name": "esmodule",
+  "name": "flashloan-arbitrage",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Flash loan arbitrage bot for 1inch and Aave on Polygon",
   "main": "index.js",
   "scripts": {
-     "start": "node index.js",
-    "test": "npx hardhat test"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "devDependencies": {
-    "@nomicfoundation/hardhat-chai-matchers": "^2.0.8",
-    "@nomicfoundation/hardhat-ethers": "^3.0.8",
-    "@nomicfoundation/hardhat-ignition": "^0.15.5",
-    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.5",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
-    "@nomicfoundation/hardhat-verify": "^2.0.11",
-    "@nomicfoundation/ignition-core": "^0.15.5",
-    "@typechain/ethers-v6": "^0.5.1",
-    "@typechain/hardhat": "^9.1.0",
-    "@types/chai": "^4.3.19",
-    "@types/mocha": "^10.0.8",
-    "chai": "^4.5.0",
-    "ethers": "^6.13.3",
-    "hardhat": "^2.22.12",
-    "hardhat-gas-reporter": "^1.0.10",
-    "solidity-coverage": "^0.8.13",
-    "ts-node": "^10.9.2",
-    "typechain": "^8.3.2",
-    "typescript": "^5.6.2"
+    "start": "node index.js"
   },
   "dependencies": {
-    "@aave/protocol-v2": "^1.0.1",
-    "@chainlink/contracts": "^1.2.0",
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@openzeppelin/contracts": "^5.0.2",
-    "@uniswap/v2-periphery": "^1.1.0-beta.0",
-    "axios": "^1.7.7",
-    "body-parser": "^1.20.3",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "crypto": "^1.0.1",
-    "npm": "^10.8.3"
+    "web3": "^1.6.0",
+    "axios": "^0.21.4",
+    "bignumber.js": "^9.0.0",
+    "dotenv": "^10.0.0",
+    "@openzeppelin/contracts": "^4.3.2"
   }
 }
