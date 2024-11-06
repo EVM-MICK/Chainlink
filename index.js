@@ -191,9 +191,35 @@ function generateRoutes(tokens, maxHops) {
     return routes;
 }
 
-// Function to evaluate the profitability of a given route
-// Function to evaluate the profitability of a given route
+
+// Fetch current gas price in Gwei from Polygon Gas Station
+async function fetchGasPrice() {
+    try {
+        const response = await axios.get("https://gasstation-mainnet.matic.network/v2");
+        const gasPriceGwei = new BigNumber(response.data.fast.maxFee); // Fast gas price in Gwei
+        return gasPriceGwei.multipliedBy(1e9); // Convert Gwei to Wei
+    } catch (error) {
+        console.error("Error fetching gas price:", error);
+        return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei in Wei if API fails
+    }
+}
+
+// Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
+async function calculateDynamicMinimumProfit() {
+    const gasPrice = await fetchGasPrice();
+    const estimatedGas = new BigNumber(200000); // Example estimated gas; adjust based on actual route complexity
+    const gasCost = gasPrice.multipliedBy(estimatedGas);
+
+    // Flash loan fee (0.05% of CAPITAL)
+    const flashLoanFee = CAPITAL.multipliedBy(0.0005);
+
+    // Total dynamic minimum profit required
+    return MINIMUM_BASE_PROFIT.plus(gasCost).plus(flashLoanFee);
+}
+
+// Evaluate the profitability of a given route with dynamic profit adjustment
 async function evaluateRouteProfit(route) {
+    const minimumProfitThreshold = await calculateDynamicMinimumProfit();
     let amountIn = CAPITAL;
 
     for (let i = 0; i < route.length - 1; i++) {
@@ -204,33 +230,32 @@ async function evaluateRouteProfit(route) {
         try {
             amountIn = await getSwapQuote(fromToken, toToken, amountIn);
             
-            // Check if swap quote returned a valid output amount
             if (amountIn.isZero()) {
                 console.log(`Route ${route} failed at hop ${fromToken} -> ${toToken}: received zero amount.`);
-                return new BigNumber(0);  // Exit if any hop fails or returns zero
+                return new BigNumber(0); // Exit if any hop fails or returns zero
             }
-            
-            // Log the amount after each successful hop for debugging
+
             console.log(`Hop ${fromToken} -> ${toToken}: amount after swap = ${amountIn.dividedBy(1e6).toFixed(2)} (USD equivalent)`);
             
         } catch (error) {
             console.error(`Error fetching quote for hop ${fromToken} -> ${toToken} in route ${route}:`, error);
-            return new BigNumber(0);  // Exit if there’s an error in any hop
+            return new BigNumber(0); // Exit if there’s an error in any hop
         }
     }
 
-    // Calculate and return the profit after the final output
+    // Calculate final profit
     const profit = amountIn.minus(CAPITAL);
 
-    // Check if profit meets the minimum threshold
-    if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD) && profit.isGreaterThanOrEqualTo(MINIMUM_PROFIT_THRESHOLD)) {
+    // Check if profit meets the dynamic minimum threshold
+    if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD) && profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
         console.log(`Final profit for route ${route}: $${profit.dividedBy(1e6).toFixed(2)}`);
         return profit;
     } else {
-        console.log(`Route ${route} profit below minimum threshold: $${profit.dividedBy(1e6).toFixed(2)}`);
-        return new BigNumber(0);  // Return zero if profit does not meet the minimum threshold
+        console.log(`Route ${route} profit below dynamic threshold: $${profit.dividedBy(1e6).toFixed(2)}`);
+        return new BigNumber(0); // Return zero if profit does not meet the dynamic threshold
     }
 }
+
 
 function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
@@ -265,8 +290,7 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
     }
 }
 
-// Execute the best profitable route found
-// Function to execute the profitable route using flash loan and swap
+// Function to execute the profitable route using flash loan and swap Execute the best profitable route found
 async function executeRoute(route, profit) {
     try {
         // Initial token in the route
