@@ -14,10 +14,11 @@ const ABI = require('./YourSmartContractABI.json'); // ABI of the Solidity contr
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 
 // Configurable parameters
-const CAPITAL = new BigNumber(100000 * 1e6);  // $100,000 in USDT (6 decimals)
-const PROFIT_THRESHOLD = new BigNumber(0.3 * 1e6); // 0.3% to 0.5% profit threshold ($300 - $500)
+const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDT (6 decimals)
+const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units // 0.3% to 0.5% profit threshold ($300 - $500)
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/137";
 const HEADERS = { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, Accept: 'application/json' };
+const USDT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 // Stable, high-liquidity tokens to include in route evaluations
 const STABLE_TOKENS = ["USDT", "USDC", "DAI", "ETH", "MATIC"];
@@ -324,14 +325,14 @@ async function encodeSwapData(route, amount, slippagePercent) {
 async function initiateFlashLoan(asset, amount, routeData) {
     // Determine token decimals for `amount` formatting
     const tokenDecimals = STABLE_TOKENS.includes(asset) ? 6 : 18;
-    const formattedAmount = formatAmount(amount, tokenDecimals);  // Format amount for flash loan
+   const formattedCapital = CAPITAL.toFixed(0);  // Format amount for flash loan
 
     // Step 1: Approve token if needed
     await approveTokenIfNeeded(asset, amount);
 
     try {
         // Step 2: Encode calldata to request flash loan and initiate swap
-        const txData = contract.methods.fn_RequestFlashLoan(asset, formattedAmount, routeData).encodeABI();
+        const txData = contract.methods.fn_RequestFlashLoan( USDT_ADDRESS, formattedCapital, routeData).encodeABI();
 
         // Step 3: Estimate gas and fetch optimal gas price
         const gasEstimate = await web3.eth.estimateGas({
