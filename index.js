@@ -16,6 +16,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 // Configurable parameters
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDT (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units // 0.3% to 0.5% profit threshold ($300 - $500)
+const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/137";
 const HEADERS = { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, Accept: 'application/json' };
 const USDT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
@@ -190,8 +191,7 @@ function generateRoutes(tokens, maxHops) {
     return routes;
 }
 
-
-
+// Function to evaluate the profitability of a given route
 // Function to evaluate the profitability of a given route
 async function evaluateRouteProfit(route) {
     let amountIn = CAPITAL;
@@ -221,9 +221,15 @@ async function evaluateRouteProfit(route) {
 
     // Calculate and return the profit after the final output
     const profit = amountIn.minus(CAPITAL);
-    console.log(`Final profit for route ${route}: $${profit.dividedBy(1e6).toFixed(2)}`);
-    
-    return profit;
+
+    // Check if profit meets the minimum threshold
+    if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD) && profit.isGreaterThanOrEqualTo(MINIMUM_PROFIT_THRESHOLD)) {
+        console.log(`Final profit for route ${route}: $${profit.dividedBy(1e6).toFixed(2)}`);
+        return profit;
+    } else {
+        console.log(`Route ${route} profit below minimum threshold: $${profit.dividedBy(1e6).toFixed(2)}`);
+        return new BigNumber(0);  // Return zero if profit does not meet the minimum threshold
+    }
 }
 
 function formatAmount(amount, decimals) {
