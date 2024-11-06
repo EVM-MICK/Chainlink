@@ -2,277 +2,247 @@ require('dotenv').config();
 const axios = require('axios');
 const Web3 = require('web3');
 const BigNumber = require('bignumber.js');
-const winston = require('winston');  // For structured logging
 
-// Load environment variables
-const ABI = require('./YourSmartContractABI.json');
-const web3 = new Web3(process.env.INFURA_URL);
-const CAPITAL = new BigNumber(process.env.CAPITAL || 100000 * 1e6); // USDT with 6 decimals
-const TARGET_PROFIT = new BigNumber(process.env.TARGET_PROFIT || 1500 * 1e6);
-const API_KEY = process.env.ONEINCH_API_KEY;
-const HEADERS = { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' };
+if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONTRACT_ADDRESS || !process.env.WALLET_ADDRESS) {
+    console.error("Environment variables are missing. Please check .env configuration.");
+    process.exit(1);
+}
+
+const ABI = require('./YourSmartContractABI.json'); // ABI of the Solidity contract
+const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
+
+// Configurable parameters
+const CAPITAL = new BigNumber(100000 * 1e6);  // $100,000 in USDT (6 decimals)
+const PROFIT_THRESHOLD = new BigNumber(0.3 * 1e6); // 0.3% to 0.5% profit threshold ($300 - $500)
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/137";
-const FUSION_API_URL = "https://fusion.1inch.io/v6.0/137";
-const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const HEADERS = { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, Accept: 'application/json' };
+
+// Stable, high-liquidity tokens to include in route evaluations
+const STABLE_TOKENS = ["USDT", "USDC", "DAI", "ETH", "MATIC"];
+const MAX_HOPS = 3;
+
+// Contract configuration
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
 const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
 
-
-// Logger Configuration for debugging and monitoring
-const logger = winston.createLogger({
-    transports: [
-        new winston.transports.Console(),
-        new winston.transports.File({ filename: 'arbitrage.log' })
-    ]
-});
-
-// Primary Function to Manage Hybrid Arbitrage
-async function findAndExecuteArbitrage() {
-    try {
-        const { bestRoute, bestOutput } = await getOptimalSwapPath();
-        if (!bestRoute) {
-            logger.info("No profitable route found.");
-            return;
+// Primary function to run the arbitrage bot with automated monitoring
+async function runArbitrageBot() {
+    console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
+    setInterval(async () => {
+        try {
+            const profitableRoutes = await findProfitableRoutes();
+            if (profitableRoutes.length > 0) {
+                // Execute the first profitable route found
+                const bestRoute = profitableRoutes[0];
+                await executeRoute(bestRoute.route, bestRoute.profit);
+            }
+        } catch (error) {
+            console.error("Error in monitoring loop:", error);
         }
-
-        const expectedProfit = bestOutput.minus(CAPITAL);
-
-        // Check and approve allowance if needed
-        const allowance = await checkAllowance(bestRoute[0], process.env.WALLET_ADDRESS);
-        if (allowance.isLessThan(CAPITAL)) {
-            logger.info("Router lacks allowance, creating approval transaction...");
-            await approveRouter(bestRoute[0], CAPITAL);
-        }
-
-        // Dynamic gas price retrieval
-        const gasPrice = await getGasPrice();
-        const estimatedGasCost = gasPrice.multipliedBy(2000000); // Estimated gas
-        const netProfit = expectedProfit.minus(estimatedGasCost);
-
-        if (netProfit.isGreaterThanOrEqualTo(TARGET_PROFIT)) {
-            logger.info("Profitable opportunity found. Initiating flash loan and swap...");
-            const routeData = await encode1InchSwapData(bestRoute, CAPITAL);
-            await initiateFlashLoan(bestRoute[0], CAPITAL, routeData);
-        } else {
-            logger.info("Not profitable after gas costs.");
-        }
-    } catch (error) {
-        logger.error(`Error in arbitrage execution: ${error}`);
-    }
+    }, 1000);  // Check for opportunities every 1 second
 }
 
-// Function to call the contract to initiate flash loan and execute trade
-async function initiateFlashLoan(asset, amount, routeData) {
-    try {
-        const txData = contract.methods.fn_RequestFlashLoan(asset, amount.toFixed(), routeData).encodeABI();
+// Step 1: Find profitable routes within high-liquidity stable pairs
+async function findProfitableRoutes() {
+    const tokens = await getStableTokenList();
+    const allRoutes = generateRoutes(tokens, MAX_HOPS);
+    const profitableRoutes = [];
 
-        const tx = {
-            from: process.env.WALLET_ADDRESS,
-            to: CONTRACT_ADDRESS,
-            data: txData,
-            gas: 3000000,
-            gasPrice: await getGasPrice().toFixed(),
-        };
+    // Evaluate routes in parallel using Promise.all for speed
+    const routePromises = allRoutes.map(async route => {
+        const profit = await evaluateRouteProfit(route);
+        if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD)) {
+            console.log(`Profitable route found: ${route} with profit: $${profit.dividedBy(1e6).toFixed(2)}`);
+            const message = `Profitable route found: ${route} with profit: $${profit.dividedBy(1e6).toFixed(2)}`;
+            console.log(message);
+            await sendTelegramMessage(message);  // Send notification
+            return { route, profit };
+        }
+        return null;
+    });
 
-        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
-        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
-        logger.info("Flash loan and trade executed, transaction receipt:", receipt);
-    } catch (error) {
-        logger.error("Error initiating flash loan and executing trade:", error);
-    }
+    // Filter out null results and return profitable routes
+    const results = await Promise.all(routePromises);
+    return results.filter(route => route !== null);
 }
 
-
-// Retrieve the full list of tokens on Polygon supported by 1inch
-async function getTokenList() {
-    try {
-        const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
-        return Object.keys(response.data.tokens);
-    } catch (error) {
-        logger.error("Error fetching token list:", error);
-        throw error;
-    }
+// Get stable, high-liquidity tokens to focus on profitable paths
+async function getStableTokenList() {
+    const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+    const tokens = Object.keys(response.data.tokens).filter(token => STABLE_TOKENS.includes(response.data.tokens[token].symbol));
+    return tokens;
 }
 
-// Function to get optimal path by evaluating token pairs
-async function getOptimalSwapPath() {
-    const tokens = await getTokenList();
-    let bestRoute = null;
-    let bestOutput = CAPITAL;
+// Generate all possible routes within max hops limit
+function generateRoutes(tokens, maxHops) {
+    const routes = [];
 
-    await Promise.all(tokens.map(async (tokenA, i) => {
-        for (let j = i + 1; j < tokens.length; j++) {
-            const tokenB = tokens[j];
-            const route = [tokenA, tokenB];
-            const outputAmount = await getMultiHopQuote(route, CAPITAL);
-            const expectedProfit = outputAmount.minus(CAPITAL);
-
-            if (expectedProfit.isGreaterThan(TARGET_PROFIT) && outputAmount.isGreaterThan(bestOutput)) {
-                bestOutput = outputAmount;
-                bestRoute = route;
-                logger.info(`New best route found: ${route} with profit: ${expectedProfit.toFixed()}`);
+    function permute(path) {
+        if (path.length > 1 && path.length <= maxHops) {
+            routes.push([...path]);
+        }
+        if (path.length < maxHops) {
+            for (const token of tokens) {
+                if (!path.includes(token) && STABLE_TOKENS.includes(token)) { // Only allow stable, liquid tokens
+                    path.push(token);
+                    permute(path);
+                    path.pop();
+                }
             }
         }
-    }));
-
-    return { bestRoute, bestOutput };
-}
-
-// Helper function to encode the 1inch swap data
-async function encode1InchSwapData(route, amount) {
-    try {
-        const swapData = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            headers: HEADERS,
-            params: {
-                fromTokenAddress: route[0],
-                toTokenAddress: route[route.length - 1],
-                amount: amount.toFixed(),
-                fromAddress: process.env.WALLET_ADDRESS,
-                slippage: 1,
-                disableEstimate: false
-            }
-        });
-        return swapData.data.tx.data;
-    } catch (error) {
-        logger.error("Error encoding swap data:", error);
-        throw error;
     }
+
+    for (const token of tokens) {
+        permute([token]);
+    }
+
+    return routes;
 }
 
-// Simulate multi-hop quotes
-async function getMultiHopQuote(tokens, amount) {
-    let currentAmount = amount;
-    for (let i = 0; i < tokens.length - 1; i++) {
-        const fromToken = tokens[i];
-        const toToken = tokens[i + 1];
+// Evaluate profit for a given route
+async function evaluateRouteProfit(route) {
+    let amountIn = CAPITAL;
 
-        const outputAmount = await getQuote(fromToken, toToken, currentAmount);
-        if (outputAmount.isEqualTo(0)) {
-            logger.warn(`No liquidity for ${fromToken} to ${toToken}`);
-            return new BigNumber(0);
+    for (let i = 0; i < route.length - 1; i++) {
+        const fromToken = route[i];
+        const toToken = route[i + 1];
+        amountIn = await getSwapQuote(fromToken, toToken, amountIn);
+        if (amountIn.isZero()) {
+            return new BigNumber(0);  // Exit if any hop fails or returns zero
         }
-
-        currentAmount = outputAmount;
     }
-    return currentAmount;
+
+    return amountIn.minus(CAPITAL);  // Calculate profit after final output
 }
 
-// Get quote for a token pair
-async function getQuote(fromToken, toToken, amount) {
+// Get a swap quote for a single hop with retry logic
+// Function to format amount based on token decimals
+function formatAmount(amount, decimals) {
+    return amount.toFixed(decimals);
+}
+
+// Get a swap quote for a single hop with retry logic
+async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
+    const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
+    const formattedAmount = formatAmount(amount, tokenDecimals);
+
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
             headers: HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
-                amount: amount.toFixed(),
+                amount: formattedAmount,
                 disableEstimate: false
             }
         });
         return new BigNumber(response.data.toTokenAmount);
     } catch (error) {
-        logger.error(`Error fetching quote for ${fromToken} to ${toToken}:`, error);
-        return new BigNumber(0);
+        if (retries > 0) {
+            console.warn(`Retrying getSwapQuote for ${fromToken} to ${toToken}. Retries left: ${retries - 1}`);
+            return getSwapQuote(fromToken, toToken, amount, retries - 1);
+        } else {
+            const errorMessage = `Error fetching quote for ${fromToken} to ${toToken}: ${error}`;
+            console.error(errorMessage);
+            await sendTelegramMessage(errorMessage);  // Notify error
+            return new BigNumber(0);
+        }
     }
 }
 
-
-// Check allowance for the 1inch Router
-async function checkAllowance(tokenAddress, walletAddress) {
+// Execute the best profitable route found
+async function executeRoute(route, profit) {
     try {
-        const response = await axios.get(`${PATHFINDER_API_URL}/approve/allowance`, {
-            headers: HEADERS,
-            params: { tokenAddress, walletAddress }
-        });
-        return new BigNumber(response.data.allowance);
+        const initialToken = route[0];
+        const routeData = await encodeSwapData(route, CAPITAL, 0.5);
+        console.log(`Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`);
+        console.log(`Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`);
+       await sendTelegramMessage(`Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`);  // Notify execution
+        await initiateFlashLoan(initialToken, CAPITAL, routeData);
+        
     } catch (error) {
-        logger.error("Error checking allowance:", error);
-        throw error;
+        console.error("Error executing route:", error);
     }
 }
 
 
-// Approve 1inch router if allowance is insufficient
-async function approveRouter(tokenAddress, amount) {
-    try {
-        const approvalData = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
-            headers: HEADERS,
-            params: { tokenAddress, amount }
-        });
-
-        const approveTx = {
-            ...approvalData.data,
-            from: process.env.WALLET_ADDRESS,
-            gas: await web3.eth.estimateGas({ ...approvalData.data, from: process.env.WALLET_ADDRESS })
-        };
-
-        const signedApproveTx = await web3.eth.accounts.signTransaction(approveTx, process.env.PRIVATE_KEY);
-        const receipt = await web3.eth.sendSignedTransaction(signedApproveTx.rawTransaction);
-        logger.info("Approval transaction receipt:", receipt);
-    } catch (error) {
-        logger.error("Error during approval transaction:", error);
-    }
-}
-
-
-// Execute swap using Pathfinder for high-frequency, immediate arbitrage
-async function executeSwap(route) {
+// Encode the swap data for route with adjustable slippage
+async function encodeSwapData(route, amount, slippagePercent) {
+    const formattedAmount1 = formatAmount(amount, tokenDecimals);
     const swapData = await axios.get(`${PATHFINDER_API_URL}/swap`, {
         headers: HEADERS,
         params: {
             fromTokenAddress: route[0],
             toTokenAddress: route[route.length - 1],
-            amount: CAPITAL.toFixed(),
+            amount: formattedAmount1,
             fromAddress: process.env.WALLET_ADDRESS,
-            slippage: 1,  // Set appropriate slippage
+            slippage: slippagePercent,
             disableEstimate: false
         }
     });
-
-    const swapTx = {
-        ...swapData.data.tx,
-        gas: await web3.eth.estimateGas({ ...swapData.data.tx, from: process.env.WALLET_ADDRESS })
-    };
-
-    const signedSwapTx = await web3.eth.accounts.signTransaction(swapTx, process.env.PRIVATE_KEY);
-    return await web3.eth.sendSignedTransaction(signedSwapTx.rawTransaction);
+    return swapData.data.tx.data;  // Returns the encoded calldata for 1inch
 }
 
-// Place Fusion intent order for cost-saving, lower-frequency arbitrage
-async function placeFusionIntent(route, expectedProfit) {
+// Initiate flash loan through Solidity contract to execute trade
+async function initiateFlashLoan(asset, amount, routeData) {
+     const formattedAmount2 = formatAmount(amount, tokenDecimals);
     try {
-        const fusionOrder = {
-            fromTokenAddress: route[0],
-            toTokenAddress: route[route.length - 1],
-            amount: CAPITAL.toFixed(),
-            minReturnAmount: expectedProfit.toFixed(),
-            gasPrice: "0",
-            gasLimit: 2000000,
-            allowPartialFill: false,
-            parts: 1,
-            mainRouteParts: 1,
-            complexityLevel: 1,
+        const txData = contract.methods.fn_RequestFlashLoan(asset, formattedAmount2, routeData).encodeABI();
+        const gasEstimate = await web3.eth.estimateGas({ from: process.env.WALLET_ADDRESS, to: CONTRACT_ADDRESS, data: txData });
+        const gasPrice = await getOptimalGasPrice(new BigNumber(50).multipliedBy(1e9));  // 50 Gwei max gas price
+
+        if (!gasPrice) {
+            console.log("Gas price too high; skipping execution.");
+            return;
+        }
+
+        const tx = {
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData,
+            gas: gasEstimate,
+            gasPrice: gasPrice.toFixed()
         };
 
-        const response = await axios.post(`${FUSION_API_URL}/swap`, fusionOrder, { headers: HEADERS });
-        console.log("Fusion intent order placed successfully:", response.data);
+        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
+        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        console.log("Flash loan and trade executed, transaction receipt:", receipt);
     } catch (error) {
-        console.error("Error placing Fusion intent order:", error);
+        console.error("Error executing flash loan:", error);
     }
 }
 
-// Fetch current gas price from Polygon Gas Station API
-async function getGasPrice() {
+// Fetch current gas price with a maximum threshold
+async function getOptimalGasPrice(maxGasPriceInWei) {
     try {
         const response = await axios.get("https://gasstation-mainnet.matic.network/v2");
-        const gasPrice = response.data.fast.maxFee;
-        return new BigNumber(web3.utils.toWei(gasPrice.toString(), 'gwei'));
+        const gasPrice = new BigNumber(web3.utils.toWei(response.data.fast.maxFee.toString(), 'gwei'));
+
+        return gasPrice.isLessThanOrEqualTo(maxGasPriceInWei) ? gasPrice : null;
     } catch (error) {
-        logger.warn("Failed to fetch gas price from Polygon Gas Station. Using default gas price.");
-        return new BigNumber(web3.utils.toWei('100', 'gwei'));  // Default to 100 gwei if API fails
+        console.error("Error fetching gas price:", error);
+        return null;
     }
 }
 
-// Run Hybrid Arbitrage
-(async () => {
-    await findAndExecuteArbitrage();
-})();
+// Function to send Telegram notifications
+async function sendTelegramMessage(message) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+    try {
+        await axios.post(url, {
+            chat_id: chatId,
+            text: message,
+            parse_mode: "Markdown"  // Optional: Format message with Markdown
+        });
+        console.log("Telegram notification sent:", message);
+    } catch (error) {
+        console.error("Failed to send Telegram message:", error);
+    }
+}
+
+
+// Start the arbitrage bot
+runArbitrageBot();
