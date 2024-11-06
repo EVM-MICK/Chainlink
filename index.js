@@ -292,28 +292,46 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
 
 // Function to execute the profitable route using flash loan and swap Execute the best profitable route found
 async function executeRoute(route, profit) {
-    try {
-        // Initial token in the route
-        const initialToken = route[0];
-        
-        // Encode swap data with a slippage tolerance of 0.5%
-        const routeData = await encodeSwapData(route, CAPITAL, 0.5);
-        
-        // Log and send notification about the route and expected profit
-        const profitMessage = `Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`;
-        console.log(profitMessage);
-        await sendTelegramMessage(profitMessage);
-        
-        // Initiate flash loan and perform swap
-        await initiateFlashLoan(initialToken, CAPITAL, routeData);
+    await retry(async (bail) => {
+        try {
+            // Initial token in the route
+            const initialToken = route[0];
 
-    } catch (error) {
-        console.error("Error executing route:", error);
+            // Encode swap data with a slippage tolerance of 0.5%
+            const routeData = await encodeSwapData(route, CAPITAL, 0.5);
 
-        // Optionally send an error notification to Telegram
-        const errorMessage = `Error executing route ${route}: ${error.message}`;
-        await sendTelegramMessage(errorMessage);
-    }
+            // Log and send notification about the route and expected profit
+            const profitMessage = `Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`;
+            console.log(profitMessage);
+            await sendTelegramMessage(profitMessage);
+
+            // Initiate flash loan and perform swap
+            await initiateFlashLoan(initialToken, CAPITAL, routeData);
+
+            console.log("Route executed successfully.");
+        } catch (error) {
+            console.error("Error executing route:", error);
+
+            // Optionally send an error notification to Telegram
+            const errorMessage = `Error executing route ${route}: ${error.message}`;
+            await sendTelegramMessage(errorMessage);
+
+            // Stop retrying for certain errors (e.g., insufficient funds or incorrect parameters)
+            if (error.message.includes("insufficient funds") || error.message.includes("invalid parameters")) {
+                bail(new Error("Non-retryable error encountered"));
+            }
+
+            // Rethrow to trigger retry
+            throw error;
+        }
+    }, {
+        retries: 3,                // Number of retry attempts
+        minTimeout: 2000,          // Minimum delay between retries (2 seconds)
+        maxTimeout: 8000,          // Maximum delay between retries (8 seconds)
+        onRetry: (error, attempt) => {
+            console.warn(`Retry attempt ${attempt} for executing route failed:`, error.message);
+        }
+    });
 }
 
 
