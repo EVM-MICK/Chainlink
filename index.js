@@ -335,8 +335,7 @@ async function executeRoute(route, profit) {
 }
 
 
-// Encode the swap data for route with adjustable slippage
-// Helper function to encode calldata for a multi-hop route using 1inch API
+// Helper function to encode calldata for a multi-hop route using 1inch API  Encode the swap data for route with adjustable slippage
 async function encodeSwapData(route, amount, slippagePercent) {
     const fromToken = route[0];  // Initial token in the route
     const toToken = route[route.length - 1];  // Final token in the route
