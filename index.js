@@ -64,24 +64,36 @@ async function approveTokenIfNeeded(tokenAddress, amount) {
 }
 
 // Fetch swap data
-async function getSwapData(fromToken, toToken, amount, slippage) {
+async function getSwapData(fromToken, toToken, amount, slippage, pools) {
+    const isMultiHop = pools.length > 1; // Check if route is multi-hop
     const url = apiRequestUrl("/swap", {
         fromTokenAddress: fromToken,
         toTokenAddress: toToken,
         amount: formatAmount(amount, STABLE_TOKENS.includes(fromToken) ? 6 : 18),
-        fromAddress: process.env.WALLET_ADDRESS,
-        slippage: slippage,
-        disableEstimate: false
+        fromAddress: WALLET_ADDRESS,
+        slippage,
+        disableEstimate: false,
+        allowPartialFill: false
     });
 
     try {
         const response = await axios.get(url, { headers: HEADERS });
-        return response.data.tx.data;  // Returns calldata for 1inch swap
+        const txData = response.data.tx.data;
+        
+        // Dynamically set the selector based on whether the route is single or multi-hop
+        const selector = isMultiHop
+            ? web3.eth.abi.encodeFunctionSignature("multiSwap(address,address,uint256,address[],uint256)")
+            : web3.eth.abi.encodeFunctionSignature("swap(address,address,uint256,uint256)");
+
+        // Construct final routeData by combining the selector with the 1inch tx data
+        const routeData = `${selector}${txData.slice(2)}`;
+        return routeData;
     } catch (error) {
         console.error("Error fetching swap data:", error);
         throw error;
     }
 }
+
 
 
 
@@ -294,40 +306,30 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
 async function executeRoute(route, profit) {
     await retry(async (bail) => {
         try {
-            // Initial token in the route
             const initialToken = route[0];
-
-            // Encode swap data with a slippage tolerance of 0.5%
             const routeData = await encodeSwapData(route, CAPITAL, 0.5);
 
-            // Log and send notification about the route and expected profit
             const profitMessage = `Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`;
             console.log(profitMessage);
             await sendTelegramMessage(profitMessage);
 
-            // Initiate flash loan and perform swap
             await initiateFlashLoan(initialToken, CAPITAL, routeData);
 
             console.log("Route executed successfully.");
         } catch (error) {
             console.error("Error executing route:", error);
-
-            // Optionally send an error notification to Telegram
             const errorMessage = `Error executing route ${route}: ${error.message}`;
             await sendTelegramMessage(errorMessage);
 
-            // Stop retrying for certain errors (e.g., insufficient funds or incorrect parameters)
             if (error.message.includes("insufficient funds") || error.message.includes("invalid parameters")) {
                 bail(new Error("Non-retryable error encountered"));
             }
-
-            // Rethrow to trigger retry
             throw error;
         }
     }, {
-        retries: 3,                // Number of retry attempts
-        minTimeout: 2000,          // Minimum delay between retries (2 seconds)
-        maxTimeout: 8000,          // Maximum delay between retries (8 seconds)
+        retries: 3,
+        minTimeout: 2000,
+        maxTimeout: 8000,
         onRetry: (error, attempt) => {
             console.warn(`Retry attempt ${attempt} for executing route failed:`, error.message);
         }
@@ -337,14 +339,10 @@ async function executeRoute(route, profit) {
 
 // Helper function to encode calldata for a multi-hop route using 1inch API  Encode the swap data for route with adjustable slippage
 async function encodeSwapData(route, amount, slippagePercent) {
-    const fromToken = route[0];  // Initial token in the route
-    const toToken = route[route.length - 1];  // Final token in the route
+    const fromToken = route[0];
+    const toToken = route[route.length - 1];
+    const formattedAmount = formatAmount(amount, STABLE_TOKENS.includes(fromToken) ? 6 : 18);
 
-    // Determine token decimals for formatting amount
-    const tokenDecimals = STABLE_TOKENS.includes(fromToken) ? 6 : 18;
-    const formattedAmount = formatAmount(amount, tokenDecimals);  // Format amount with correct decimals
-
-    // Call 1inch swap API to get swap data
     try {
         const response = await axios.get(`${API_BASE_URL}/swap`, {
             headers: HEADERS,
@@ -352,14 +350,14 @@ async function encodeSwapData(route, amount, slippagePercent) {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
                 amount: formattedAmount,
-                fromAddress: process.env.WALLET_ADDRESS,
+                fromAddress: WALLET_ADDRESS,
                 slippage: slippagePercent,
                 disableEstimate: false,
-                allowPartialFill: false  // Ensure full swaps only
+                allowPartialFill: false
             }
         });
 
-        return response.data.tx.data;  // Returns calldata to perform the multi-hop swap on 1inch
+        return response.data.tx.data;
     } catch (error) {
         console.error("Error fetching swap data:", error);
         throw error;
@@ -367,7 +365,6 @@ async function encodeSwapData(route, amount, slippagePercent) {
 }
 
 
-// Initiate flash loan through Solidity contract to execute trade
 // Function to initiate a flash loan and execute swap via the contract
 async function initiateFlashLoan(asset, amount, routeData) {
     // Determine token decimals for `amount` formatting
