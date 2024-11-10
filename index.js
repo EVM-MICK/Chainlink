@@ -55,8 +55,8 @@ async function requestTokenApproval(tokenAddress, amount) {
 async function approveTokenIfNeeded(tokenAddress, amount) {
     const allowance = await checkAllowance(tokenAddress);
     if (allowance.isLessThan(amount)) {
-        console.log(`Insufficient allowance. Approving ${formatAmount(amount, 6)} for 1inch Router.`);
-        const approvalTx = await requestTokenApproval(tokenAddress, formatAmount(amount, 6));
+        console.log(`Approving ${amount.shiftedBy(-6)} for 1inch Router.`);
+        const approvalTx = await requestTokenApproval(tokenAddress, amount.toFixed(0));
         const signedTx = await web3.eth.accounts.signTransaction(approvalTx, process.env.PRIVATE_KEY);
         const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
         console.log("Approval Transaction Hash:", receipt.transactionHash);
@@ -65,29 +65,19 @@ async function approveTokenIfNeeded(tokenAddress, amount) {
 
 // Fetch swap data
 async function getSwapData(fromToken, toToken, amount, slippage, pools) {
-    const isMultiHop = pools.length > 1; // Check if route is multi-hop
-    const url = apiRequestUrl("/swap", {
-        fromTokenAddress: fromToken,
-        toTokenAddress: toToken,
-        amount: formatAmount(amount, STABLE_TOKENS.includes(fromToken) ? 6 : 18),
-        fromAddress: WALLET_ADDRESS,
-        slippage,
-        disableEstimate: false,
-        allowPartialFill: false
-    });
-
     try {
-        const response = await axios.get(url, { headers: HEADERS });
-        const txData = response.data.tx.data;
-        
-        // Dynamically set the selector based on whether the route is single or multi-hop
-        const selector = isMultiHop
-            ? web3.eth.abi.encodeFunctionSignature("multiSwap(address,address,uint256,address[],uint256)")
-            : web3.eth.abi.encodeFunctionSignature("swap(address,address,uint256,uint256)");
+        const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
+            fromTokenAddress: fromToken,
+            toTokenAddress: toToken,
+            amount: amount.toFixed(0),
+            fromAddress: process.env.WALLET_ADDRESS,
+            slippage,
+            allowPartialFill: false,
+            disableEstimate: false,
+        }).toString()}`;
 
-        // Construct final routeData by combining the selector with the 1inch tx data
-        const routeData = `${selector}${txData.slice(2)}`;
-        return routeData;
+        const response = await axios.get(url, { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` } });
+        return response.data.tx.data;  // `routeData` for swap execution
     } catch (error) {
         console.error("Error fetching swap data:", error);
         throw error;
@@ -305,36 +295,39 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
 
 // Function to execute the profitable route using flash loan and swap Execute the best profitable route found
 async function executeRoute(route, profit) {
-    await retry(async (bail) => {
-        try {
-            const initialToken = USDT_ADDRESS;
-            const routeData = await encodeSwapData(route, CAPITAL, 0.5);
+    const initialToken = USDT_ADDRESS;
+    const routeData = await getSwapData(route[0], route[route.length - 1], CAPITAL, 0.5, route); 
 
-            const profitMessage = `Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`;
-            console.log(profitMessage);
-            await sendTelegramMessage(profitMessage);
-
-            await initiateFlashLoan(initialToken, CAPITAL, routeData);
-
-            console.log("Route executed successfully.");
-        } catch (error) {
-            console.error("Error executing route:", error);
-            const errorMessage = `Error executing route ${route}: ${error.message}`;
-            await sendTelegramMessage(errorMessage);
-
-            if (error.message.includes("insufficient funds") || error.message.includes("invalid parameters")) {
-                bail(new Error("Non-retryable error encountered"));
-            }
-            throw error;
+    try {
+        await approveTokenIfNeeded(initialToken, CAPITAL);
+        const txData = contract.methods.fn_RequestFlashLoan(initialToken, CAPITAL, routeData).encodeABI();
+        const gasEstimate = await web3.eth.estimateGas({
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData
+        });
+        const gasPrice = await fetchOptimalGasPrice(new BigNumber(50).multipliedBy(1e9));
+        if (!gasPrice) {
+            console.log("Gas price too high; skipping execution.");
+            return;
         }
-    }, {
-        retries: 3,
-        minTimeout: 2000,
-        maxTimeout: 8000,
-        onRetry: (error, attempt) => {
-            console.warn(`Retry attempt ${attempt} for executing route failed:`, error.message);
-        }
-    });
+
+        const tx = {
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData,
+            gas: gasEstimate,
+            gasPrice: gasPrice.toFixed()
+        };
+
+        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
+        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        profitMessage = console.log("Flash loan and trade executed, transaction receipt:", receipt);
+        await sendTelegramMessage(profitMessage) 
+    } catch (error) {
+        console.error("Error executing route:", error);
+        throw error;
+    }
 }
 
 
@@ -366,59 +359,11 @@ async function encodeSwapData(route, amount, slippagePercent) {
 }
 
 
-// Function to initiate a flash loan and execute swap via the contract
-async function initiateFlashLoan(asset, amount, routeData) {
-    // Determine token decimals for `amount` formatting
-    const tokenDecimals = STABLE_TOKENS.includes(asset) ? 6 : 18;
-   const formattedCapital = CAPITAL.toFixed(0);  // Format amount for flash loan
-
-    // Step 1: Approve token if needed
-    await approveTokenIfNeeded(asset, amount);
-
-    try {
-        // Step 2: Encode calldata to request flash loan and initiate swap
-        const txData = contract.methods.fn_RequestFlashLoan( USDT_ADDRESS, formattedCapital, routeData).encodeABI();
-
-        // Step 3: Estimate gas and fetch optimal gas price
-        const gasEstimate = await web3.eth.estimateGas({
-            from: process.env.WALLET_ADDRESS,
-            to: CONTRACT_ADDRESS,
-            data: txData
-        });
-
-        const gasPrice = await getOptimalGasPrice(new BigNumber(50).multipliedBy(1e9));  // Limit gas price to 50 Gwei
-
-        // Check if the gas price is acceptable
-        if (!gasPrice) {
-            console.log("Gas price too high; skipping execution.");
-            return;
-        }
-
-        // Step 4: Create transaction
-        const tx = {
-            from: process.env.WALLET_ADDRESS,
-            to: CONTRACT_ADDRESS,
-            data: txData,
-            gas: gasEstimate,
-            gasPrice: gasPrice.toFixed()
-        };
-
-        // Step 5: Sign and send transaction
-        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
-        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
-        console.log("Flash loan and trade executed, transaction receipt:", receipt);
-
-    } catch (error) {
-        console.error("Error executing flash loan:", error);
-    }
-}
-
 // Fetch current gas price with a maximum threshold
-async function getOptimalGasPrice(maxGasPriceInWei) {
+async function fetchOptimalGasPrice(maxGasPriceInWei) {
     try {
         const response = await axios.get("https://gasstation-mainnet.matic.network/v2");
         const gasPrice = new BigNumber(web3.utils.toWei(response.data.fast.maxFee.toString(), 'gwei'));
-
         return gasPrice.isLessThanOrEqualTo(maxGasPriceInWei) ? gasPrice : null;
     } catch (error) {
         console.error("Error fetching gas price:", error);
