@@ -284,12 +284,8 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
-                srcReceiver:  CONTRACT_ADDRESS,
-                dstReceiver:  CONTRACT_ADDRESS,
-                amount: formattedAmount,
-                minReturnAmount: minReturn,
-                flags: 0,
-                permit: route
+                 amount: formattedAmount,   
+                slippage: "1",                 
                 disableEstimate: false
             }
         });
