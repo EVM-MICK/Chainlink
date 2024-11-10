@@ -64,27 +64,27 @@ async function approveTokenIfNeeded(tokenAddress, amount) {
 }
 
 // Fetch swap data
-async function getSwapData(fromToken, toToken, amount, slippage, pools) {
-    try {
-        const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
-            fromTokenAddress: fromToken,
-            toTokenAddress: toToken,
-            amount: amount.toFixed(0),
-            fromAddress: process.env.WALLET_ADDRESS,
-            slippage,
-            allowPartialFill: false,
-            disableEstimate: false,
-        }).toString()}`;
+async function getSwapData(fromToken, toToken, amount, slippage) {
+    const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
+        fromTokenAddress: fromToken,
+        toTokenAddress: toToken,
+        amount: amount.toFixed(0),
+        fromAddress: process.env.WALLET_ADDRESS,
+        slippage,
+        allowPartialFill: false,
+        disableEstimate: false,
+        includeProtocols: true // Ensures response includes protocol details for each hop
+    }).toString()}`;
 
-        const response = await axios.get(url, { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` } });
-        return response.data.tx.data;  // `routeData` for swap execution
+    try {
+        const response = await axios.get(url, { headers: HEADERS });
+        const routeData = response.data.tx.data; // Ensure `routeData` contains DEX paths
+        return routeData;
     } catch (error) {
         console.error("Error fetching swap data:", error);
         throw error;
     }
 }
-
-
 
 
 // Primary function to run the arbitrage bot with automated monitoring
@@ -227,35 +227,26 @@ async function evaluateRouteProfit(route) {
     for (let i = 0; i < route.length - 1; i++) {
         const fromToken = route[i];
         const toToken = route[i + 1];
-        
-        // Attempt to get the swap quote for each hop in the route
+
         try {
-            amountIn = await getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS, CONTRACT_ADDRESS, amountIn, minReturnAmount, flags, route);
-            
+            const swapData = await getSwapData(fromToken, toToken, amountIn, 0.5);
+            amountIn = new BigNumber(swapData.toTokenAmount); // Update with next token amount
+
             if (amountIn.isZero()) {
-                console.log(`Route ${route} failed at hop ${fromToken} -> ${toToken}: received zero amount.`);
-                return new BigNumber(0); // Exit if any hop fails or returns zero
+                console.log(`Route ${route} failed: received zero amount.`);
+                return new BigNumber(0);
             }
 
-            console.log(`Hop ${fromToken} -> ${toToken}: amount after swap = ${amountIn.dividedBy(1e6).toFixed(2)} (USD equivalent)`);
-            
+            console.log(`Hop ${fromToken} -> ${toToken}: ${amountIn.dividedBy(1e6).toFixed(2)} (USD)`);
+
         } catch (error) {
-            console.error(`Error fetching quote for hop ${fromToken} -> ${toToken} in route ${route}:`, error);
-            return new BigNumber(0); // Exit if there’s an error in any hop
+            console.error(`Error evaluating hop ${fromToken} -> ${toToken}:`, error);
+            return new BigNumber(0);
         }
     }
 
-    // Calculate final profit
     const profit = amountIn.minus(CAPITAL);
-
-    // Check if profit meets the dynamic minimum threshold
-    if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD) && profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
-        console.log(`Final profit for route ${route}: $${profit.dividedBy(1e6).toFixed(2)}`);
-        return profit;
-    } else {
-        console.log(`Route ${route} profit below dynamic threshold: $${profit.dividedBy(1e6).toFixed(2)}`);
-        return new BigNumber(0); // Return zero if profit does not meet the dynamic threshold
-    }
+    return profit.isGreaterThanOrEqualTo(minimumProfitThreshold) ? profit : new BigNumber(0);
 }
 
 
@@ -293,18 +284,26 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
     }
 }
 
-// Function to execute the profitable route using flash loan and swap Execute the best profitable route found
+// Function to execute the profitable route using flash loan and swap Execute the best profitable route found 
 async function executeRoute(route, profit) {
     const initialToken = USDT_ADDRESS;
-    const routeData = await getSwapData(route[0], route[route.length - 1], CAPITAL, 0.5, route); 
+    const { txData, protocols } = await encodeSwapData(route, CAPITAL, 0.5); 
+
+    await approveTokenIfNeeded(initialToken, CAPITAL);
 
     try {
-        await approveTokenIfNeeded(initialToken, CAPITAL);
-        const txData = contract.methods.fn_RequestFlashLoan(initialToken, CAPITAL, routeData).encodeABI();
+        // Encode `routeData` and `protocols` into the `params` expected by the contract
+        const params = web3.eth.abi.encodeParameters(
+            ['bytes', 'bytes[]'], // Adjust types for route data and protocols
+            [txData, protocols]
+        );
+
+        const txDataToSend = contract.methods.fn_RequestFlashLoan(initialToken, CAPITAL, params).encodeABI();
+
         const gasEstimate = await web3.eth.estimateGas({
             from: process.env.WALLET_ADDRESS,
             to: CONTRACT_ADDRESS,
-            data: txData
+            data: txDataToSend
         });
         const gasPrice = await fetchOptimalGasPrice(new BigNumber(50).multipliedBy(1e9));
         if (!gasPrice) {
@@ -315,13 +314,14 @@ async function executeRoute(route, profit) {
         const tx = {
             from: process.env.WALLET_ADDRESS,
             to: CONTRACT_ADDRESS,
-            data: txData,
+            data: txDataToSend,
             gas: gasEstimate,
             gasPrice: gasPrice.toFixed()
         };
 
         const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
         const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        console.log("Transaction receipt:", receipt);
         profitMessage = console.log("Flash loan and trade executed, transaction receipt:", receipt);
         await sendTelegramMessage(profitMessage) 
     } catch (error) {
@@ -331,27 +331,40 @@ async function executeRoute(route, profit) {
 }
 
 
+
 // Helper function to encode calldata for a multi-hop route using 1inch API  Encode the swap data for route with adjustable slippage
 async function encodeSwapData(route, amount, slippagePercent) {
     const fromToken = route[0];
     const toToken = route[route.length - 1];
-    const formattedAmount = formatAmount(amount, STABLE_TOKENS.includes(fromToken) ? 6 : 18);
+    const formattedAmount = amount.toFixed(STABLE_TOKENS.includes(fromToken) ? 6 : 18);
 
     try {
-        const response = await axios.get(`${API_BASE_URL}/swap`, {
+        // Construct the API request with parameters that ensure protocol details are included
+        const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
             headers: HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
                 amount: formattedAmount,
-                fromAddress: WALLET_ADDRESS,
+                fromAddress: process.env.WALLET_ADDRESS,
                 slippage: slippagePercent,
                 disableEstimate: false,
-                allowPartialFill: false
+                allowPartialFill: false,
+                includeProtocols: true // Include protocol details in response
             }
         });
 
-        return response.data.tx.data;
+        const swapData = response.data;
+        const txData = swapData.tx.data;
+
+        // Get protocol information from the response if it exists
+        const protocols = swapData.protocols; // Array of protocols used for each hop
+        if (!protocols) {
+            throw new Error("Protocol information not provided in swap response.");
+        }
+
+        // Ensure txData and protocols are returned in the correct format
+        return { txData, protocols };
     } catch (error) {
         console.error("Error fetching swap data:", error);
         throw error;
