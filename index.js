@@ -196,7 +196,7 @@ function generateRoutes(tokens, maxHops) {
     }
 
     // Generate routes starting from each stable token
-    for (const token of stableTokens) {
+    for (const token of STABLE_TOKENS) {
         permute([token]);
     }
 
@@ -240,7 +240,7 @@ async function evaluateRouteProfit(route) {
         
         // Attempt to get the swap quote for each hop in the route
         try {
-            amountIn = await getSwapQuote(fromToken, toToken, amountIn);
+            amountIn = await getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS, CONTRACT_ADDRESS, amountIn, minReturnAmount, flags, route);
             
             if (amountIn.isZero()) {
                 console.log(`Route ${route} failed at hop ${fromToken} -> ${toToken}: received zero amount.`);
@@ -273,8 +273,8 @@ function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
 }
 
-// Get a swap quote for a single hop with retry logic
-async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
+// Get a swap quote for a multihop with retry logic
+async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
     const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
     const formattedAmount = formatAmount(amount, tokenDecimals);
 
@@ -284,7 +284,12 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
+                srcReceiver:  CONTRACT_ADDRESS,
+                dstReceiver:  CONTRACT_ADDRESS,
                 amount: formattedAmount,
+                minReturnAmount: minReturn,
+                flags: 0,
+                permit: route
                 disableEstimate: false
             }
         });
@@ -292,9 +297,9 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
     } catch (error) {
         if (retries > 0) {
             console.warn(`Retrying getSwapQuote for ${fromToken} to ${toToken}. Retries left: ${retries - 1}`);
-            return getSwapQuote(fromToken, toToken, amount, retries - 1);
+            return getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS,CONTRACT_ADDRESS, amountIn, minReturnAmount, flags, permit, retries - 1);
         } else {
-            const errorMessage = `Error fetching quote for ${fromToken} to ${toToken}: ${error}`;
+            const errorMessage = `Error fetching route quote for ${fromToken} to ${toToken}: ${error}`;
             console.error(errorMessage);
             await sendTelegramMessage(errorMessage);  // Notify error
             return new BigNumber(0);
@@ -306,7 +311,7 @@ async function getSwapQuote(fromToken, toToken, amount, retries = 3) {
 async function executeRoute(route, profit) {
     await retry(async (bail) => {
         try {
-            const initialToken = route[0];
+            const initialToken = USDT_ADDRESS;
             const routeData = await encodeSwapData(route, CAPITAL, 0.5);
 
             const profitMessage = `Executing route: ${route} with expected profit of $${profit.dividedBy(1e6).toFixed(2)}`;
