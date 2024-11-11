@@ -22,7 +22,7 @@ const HEADERS = { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, Accept
 const USDT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 // Stable, high-liquidity tokens to include in route evaluations
-const STABLE_TOKENS = ["USDT", "USDC", "DAI", "ETH", "MATIC"];
+const STABLE_TOKENS = ["USDT", "USDC", "DAI", "ETH", "MATIC",  "WBTC", "AAVE", "LINK"];
 const MAX_HOPS = 4;
 
 // Contract configuration
