@@ -4,7 +4,7 @@ const Web3 = require('web3');
 const BigNumber = require('bignumber.js');
 const { Telegraf } = require('telegraf');
 const retry = require('async-retry');
-const { AllowanceTransfer, PERMIT2_ADDRESS } = require('@uniswap/permit2-sdk ethers');
+const { AllowanceTransfer, PERMIT2_ADDRESS } = require('@uniswap/permit2-sdk');
 if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONTRACT_ADDRESS || !process.env.WALLET_ADDRESS) {
     console.error("Environment variables are missing. Please check .env configuration.");
     process.exit(1);
