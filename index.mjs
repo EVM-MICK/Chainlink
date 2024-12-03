@@ -4,8 +4,10 @@ import Web3 from 'web3';
 import BigNumber from 'bignumber.js';
 import pkg from 'telegraf';
 import retry from 'async-retry';
-import { createRequire } from 'module';
+import { createRequire } from 'module'; 
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
+import { ethers } from 'ethers';
+
 
 dotenv.config();
 
@@ -41,11 +43,6 @@ const cache = new Map();
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
 
-
-(async () => {
-   const nonce = await AllowanceTransfer.getNonce(web3, process.env.PERMIT2_ADDRESS, process.env.WALLET_ADDRESS, USDC_ADDRESS);
-    console.log('Nonce:', nonce);
-})();
 
 export function apiRequestUrl(methodName, queryParams) {
     return `${PATHFINDER_API_URL}${methodName}?${new URLSearchParams(queryParams).toString()}`;
