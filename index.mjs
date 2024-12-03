@@ -731,4 +731,6 @@ export async function sendTelegramMessage(message, isCritical = false) {
     }
 }
 
+// Start the arbitrage bot
+runArbitrageBot();
 
