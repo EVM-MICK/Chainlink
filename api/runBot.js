@@ -1,22 +1,17 @@
-import dotenv from 'dotenv';
-import axios from 'axios';
-import Web3 from 'web3';
-import BigNumber from 'bignumber.js';
-import { runArbitrageBot } from '../index.mjs'; // Adjust import based on file location.
-
-dotenv.config();
+import { runArbitrageBot } from '../index.mjs';
 
 export default async function handler(req, res) {
     if (req.method === 'POST') {
         try {
-            // Trigger the arbitrage bot asynchronously
-            runArbitrageBot();
-            res.status(200).json({ success: true, message: 'Arbitrage bot started in the background.' });
+            // Call the arbitrage bot
+            await runArbitrageBot();
+            res.status(200).json({ message: "Arbitrage bot started in the background." });
         } catch (error) {
-            console.error('Error starting arbitrage bot:', error.message);
-            res.status(500).json({ success: false, error: error.message });
+            console.error("Error starting arbitrage bot:", error);
+            res.status(500).json({ error: "Failed to start arbitrage bot." });
         }
     } else {
-        res.status(405).json({ error: 'Method not allowed. Use POST to start the bot.' });
+        res.setHeader('Allow', ['POST']);
+        res.status(405).end(`Method ${req.method} Not Allowed`);
     }
 }
