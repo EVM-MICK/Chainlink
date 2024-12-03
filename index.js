@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import axios from 'axios';
-import { request, gql } from 'graphql-request';
 import Web3 from 'web3';
 import BigNumber from 'bignumber.js';
 import { Telegraf } from 'telegraf';
