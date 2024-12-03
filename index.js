@@ -556,7 +556,7 @@ function formatAmount(amount, decimals) {
 async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
     const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
     const formattedAmount = formatAmount(CAPITAL, tokenDecimals);
-    let amountIn = CAPITAL;
+    
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
@@ -573,7 +573,7 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
     } catch (error) {
         if (retries > 0) {
             console.warn(`Retrying getSwapQuote for ${fromToken} to ${toToken}. Retries left: ${retries - 1}`);
-            return getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS,CONTRACT_ADDRESS, amountIn, minReturnAmount, flags, permit, retries - 1);
+            return getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS,CONTRACT_ADDRESS, formattedAmount, minReturnAmount, flags, permit, retries - 1);
         } else {
             const errorMessage = `Error fetching route quote for ${fromToken} to ${toToken}: ${error}`;
             console.error(errorMessage);
