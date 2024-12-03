@@ -331,14 +331,15 @@ class PriorityQueue {
 
 // Utility: Estimate route potential (placeholder logic)
 function estimateRoutePotential(route, capital) {
-    // Placeholder logic: Higher priority for routes starting with preferred tokens
     const preferredTokens = ["USDC", "USDT"];
     const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
 
-    // Adjust priority based on potential profit (dummy calculation for now)
-    const estimatedProfit = capital.multipliedBy(0.002); // Assume 0.2% profit
-    return basePriority + estimatedProfit.toNumber();
+    // Simulate potential profit based on a conservative slippage estimate
+    const estimatedProfit = capital.multipliedBy(0.0015); // Assume 0.15% profit
+    const slippageAdjustment = capital.multipliedBy(0.0002); // Assume 0.02% slippage
+    return basePriority + estimatedProfit.minus(slippageAdjustment).toNumber();
 }
+
 
 // Function to retrieve a list of stable, high-liquidity tokens from the 1inch API Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
@@ -623,7 +624,7 @@ async function executeRoute(route, amount) {
             ✅ *Flash Loan and Swap Executed Successfully!*
             - Transaction Hash: [${receipt.transactionHash}](https://arbiscan.io/tx/${receipt.transactionHash})
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${assets[0]})
+            - Amount: ${amounts.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(successMessage);
     } catch (error) {
@@ -633,9 +634,10 @@ async function executeRoute(route, amount) {
         const errorMessage = `
             ❌ *Error Executing Flash Loan and Swap!*
             - Error: ${error.message}
+             - CAPITAL: ${CAPITAL.dividedBy(1e6).toFixed(2)} USDC
             - Stack: ${error.stack}
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${assets[0]})
+            - Amount: ${amounts.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(errorMessage);
 
