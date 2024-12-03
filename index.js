@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import Web3 from 'web3';
 import BigNumber from 'bignumber.js';
-import { Telegraf } from 'telegraf';
+import pkg from 'telegraf';
 import retry from 'async-retry';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 
@@ -12,6 +12,7 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     console.error("Environment variables are missing. Please check .env configuration.");
     process.exit(1);
 }
+const { Telegraf } = pkg;
 const ABI = await import('./YourSmartContractABI.json', { assert: { type: 'json' } }).then(module => module.default);
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
