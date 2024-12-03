@@ -15,7 +15,7 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
 }
 
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
-
+const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 // Configurable parameters
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
@@ -37,7 +37,7 @@ const cache = new Map();
 
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
-const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
+
 
 (async () => {
     const nonce = await contract.methods.nonce(process.env.WALLET_ADDRESS, USDC_ADDRESS).call();
