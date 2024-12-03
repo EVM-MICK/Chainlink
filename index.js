@@ -5,7 +5,7 @@ import BigNumber from 'bignumber.js';
 import { Telegraf } from 'telegraf';
 import retry from 'async-retry';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
-import ABI from './YourSmartContractABI.json'; // Ensure the JSON file path is accurate.
+import ABI from './YourSmartContractABI.json' assert { type: "json" }; // Ensure the JSON file path is accurate.
 
 dotenv.config();
 
