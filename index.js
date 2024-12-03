@@ -1,6 +1,5 @@
 require('dotenv').config();
 const axios = require('axios');
-const { request, gql } = require('graphql-request');
 const Web3 = require('web3');
 const BigNumber = require('bignumber.js');
 const { Telegraf } = require('telegraf');
