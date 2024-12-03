@@ -4,6 +4,7 @@ import Web3 from 'web3';
 import BigNumber from 'bignumber.js';
 import pkg from 'telegraf';
 import retry from 'async-retry';
+import { createRequire } from 'module';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 
 dotenv.config();
@@ -13,7 +14,9 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     process.exit(1);
 }
 const { Telegraf } = pkg;
-const ABI = await import('./YourSmartContractABI.json', { assert: { type: 'json' } }).then(module => module.default);
+const require = createRequire(import.meta.url);
+const ABI = require('./YourSmartContractABI.json');
+// const ABI = await import('./YourSmartContractABI.json', { assert: { type: 'json' } }).then(module => module.default);
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 // Configurable parameters
