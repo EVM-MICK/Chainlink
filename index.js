@@ -16,7 +16,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 
 
 // Configurable parameters
-const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDT (6 decimals)
+const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units // 0.3% to 0.5% profit threshold ($300 - $500)
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
@@ -148,7 +148,7 @@ async function constructParams(route, amount, permitBatchSignature) {
         dstToken: toToken,
         srcReceiver: Executor_ADDRESS,
         dstReceiver: process.env.CONTRACT_ADDRESS,
-        amount: amount.toFixed(),
+        amount: CAPITAL.toFixed(),
         minReturnAmount: PROFIT_THRESHOLD.toFixed(), // Adjust dynamically based on profit threshold
         flags: 0x04, // Update flags if needed
     };
@@ -176,7 +176,7 @@ async function approveTokensWithPermit2(tokens) {
         // Generate PermitBatch signature for all tokens
         for (const token of tokens) {
             const currentAllowance = await checkAllowance(token.address);
-            if (currentAllowance.isGreaterThan(token.amount)) {
+            if (currentAllowance.isGreaterThan(token.CAPITAL)) {
                 console.log(`Sufficient allowance already granted for ${token.address}. Skipping approval.`);
                 continue; // Skip tokens that already have sufficient allowance
             }
@@ -214,7 +214,7 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
     const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
         fromTokenAddress: fromToken,
         toTokenAddress: toToken,
-        amount: amount.toFixed(0),
+        amount: CAPITAL.toFixed(0),
         fromAddress: process.env.WALLET_ADDRESS,
         slippage: slippage.toFixed(2),
         allowPartialFill: false,
@@ -266,8 +266,8 @@ async function findProfitableRoutes() {
 
     // Populate the queue with initial routes and priorities (e.g., based on liquidity or other criteria)
     for (const route of allRoutes) {
-        const priority = estimateRoutePotential(route); // Use an estimation function for initial priority
-        routeQueue.enqueue({ route, priority });
+        const potentialProfit = estimateRoutePotential(route, CAPITAL); // Estimate potential profit based on CAPITAL
+        routeQueue.enqueue({ route, priority: potentialProfit });
     }
 
     // Process routes from the queue
@@ -275,20 +275,20 @@ async function findProfitableRoutes() {
         const { route } = routeQueue.dequeue(); // Get the highest-priority route
 
         try {
-            const profit = await evaluateRouteProfit(route);
+            const profit = await evaluateRouteProfit(route); // Evaluate the actual profit for the route
 
+            // Check for critical profit threshold
             if (profit.isGreaterThanOrEqualTo(CRITICAL_PROFIT_THRESHOLD)) {
                 console.log(
                     `Critical profit route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
                 );
                 await sendTelegramMessage(
-                    `🚨 Critical Profit! Route: ${route.join(" ➡️ ")} with profit: $${profit
-                        .dividedBy(1e6)
-                        .toFixed(2)}`
+                    `🚨 Critical Profit! Route: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
                 );
                 return [{ route, profit }]; // Early exit with the critical route
             }
 
+            // Check for normal profit threshold
             if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD)) {
                 console.log(
                     `Profitable route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
@@ -331,11 +331,16 @@ class PriorityQueue {
 }
 
 // Utility: Estimate route potential (placeholder logic)
-function estimateRoutePotential(route) {
-    // Placeholder: Assign higher priority to routes starting with preferred tokens
+function estimateRoutePotential(route, capital) {
+    // Placeholder logic: Higher priority for routes starting with preferred tokens
     const preferredTokens = ["USDC", "USDT"];
-    return preferredTokens.includes(route[0]) ? 100 : 50;
+    const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
+
+    // Adjust priority based on potential profit (dummy calculation for now)
+    const estimatedProfit = capital.multipliedBy(0.002); // Assume 0.2% profit
+    return basePriority + estimatedProfit.toNumber();
 }
+
 // Function to retrieve a list of stable, high-liquidity tokens from the 1inch API Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
     try {
@@ -380,25 +385,32 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
         return []; // Return an empty array if liquidity data is unavailable
     }
 
-    const rankedTokens = Object.entries(liquidityData)
+    // Filter tokens that can support the capital amount
+    const filteredTokens = Object.entries(liquidityData)
+        .filter(([, liquidity]) => new BigNumber(liquidity).isGreaterThanOrEqualTo(CAPITAL)) // Ensure token liquidity >= CAPITAL
         .sort(([, liquidityA], [, liquidityB]) => liquidityB - liquidityA) // Sort by liquidity (descending)
         .map(([token]) => token); // Extract token addresses/symbols
 
+    if (filteredTokens.length === 0) {
+        console.error("No tokens have sufficient liquidity to support the capital amount. Skipping route generation.");
+        return []; // Return an empty array if no tokens meet the liquidity requirement
+    }
+
     // Step 3: Select the top N tokens by liquidity
-    const highLiquidityTokens = rankedTokens.slice(0, topN);
+    const highLiquidityTokens = filteredTokens.slice(0, topN);
 
     // Step 4: Ensure the preferred start token is included
     const startTokens = highLiquidityTokens.includes(preferredStartToken)
         ? [preferredStartToken, ...highLiquidityTokens.filter(token => token !== preferredStartToken)]
         : [preferredStartToken, ...highLiquidityTokens]; // Include preferredStartToken even if it's not in highLiquidityTokens
 
-    console.log("Ranked Tokens by Liquidity:", rankedTokens);
+    console.log("Filtered Tokens by Liquidity:", filteredTokens);
     console.log("Starting Tokens for Routes:", startTokens);
 
     // Step 5: Generate routes using filtered tokens
     function permute(path, remainingHops) {
         if (remainingHops === 0) return;
-        for (const token of stableTokens) {
+        for (const token of filteredTokens) {
             if (!path.includes(token)) {
                 const newPath = [...path, token];
                 routez.add(newPath.join(",")); // Store as a string for uniqueness
@@ -477,7 +489,7 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
 async function calculateDynamicMinimumProfit() {
     const gasPrice = await fetchGasPrice();
-    const estimatedGas = new BigNumber(200000); // Example estimated gas; adjust based on actual route complexity
+    const estimatedGas = await estimateGas(route, CAPITAL); // Example estimated gas; adjust based on actual route complexity
     const gasCost = gasPrice.multipliedBy(estimatedGas);
 
     // Flash loan fee (0.05% of CAPITAL)
@@ -543,7 +555,8 @@ function formatAmount(amount, decimals) {
 // Get a swap quote for a multihop with retry logic
 async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
     const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
-    const formattedAmount = formatAmount(amount, tokenDecimals);
+    const formattedAmount = formatAmount(CAPITAL, tokenDecimals);
+    const amountIn = CAPITAL;
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
@@ -572,10 +585,12 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
 
 // Function to execute the profitable route using flash loan and swap Execute the best profitable route found 
 async function executeRoute(route, amount) {
-    const tokens = route.map((token) => ({ address: token, amount: amount.toFixed() }));
+    const assets = [process.env.USDC_ADDRESS]; // Always start with USDC as the first asset
+    const amounts = [CAPITAL.toFixed()]; // Flash loan amount in USDC
 
     try {
         // Step 1: Approve tokens using Permit2
+        const tokens = route.map((token) => ({ address: token, amount: CAPITAL.toFixed() }));
         await approveTokensWithPermit2(tokens);
         console.log("Tokens approved successfully");
 
@@ -583,24 +598,19 @@ async function executeRoute(route, amount) {
         const { signature } = await generatePermitBatchSignatures(tokens, process.env.CONTRACT_ADDRESS);
 
         // Step 3: Construct calldata with route and signature
-        const params = await constructParams(route, amount, signature);
+        const params = await constructParams(route, amounts, signature);
 
         // Step 4: Encode calldata and send transaction to the smart contract
-        const txData = contract.methods.fn_RequestFlashLoan(
-            USDC_ADDRESS, // Replace with initial token
-            amount.toFixed(),
-            params
-        ).encodeABI();
+        const txData = contract.methods.fn_RequestFlashLoan(assets, amounts, params).encodeABI();
 
-        const gasEstimate = await estimateGas(route, amount);
-
+        const gasEstimate = await estimateGas(route, CAPITAL);
         const gasPrice = await fetchGasPrice();
 
         const tx = {
             from: process.env.WALLET_ADDRESS,
             to: process.env.CONTRACT_ADDRESS,
             data: txData,
-            gas: gasEstimate,
+            gas: gasEstimate.toFixed(),
             gasPrice: gasPrice.toFixed(),
         };
 
@@ -614,7 +624,7 @@ async function executeRoute(route, amount) {
             ✅ *Flash Loan and Swap Executed Successfully!*
             - Transaction Hash: [${receipt.transactionHash}](https://arbiscan.io/tx/${receipt.transactionHash})
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${USDC_ADDRESS})
+            - Amount: ${amount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(successMessage);
     } catch (error) {
@@ -626,14 +636,13 @@ async function executeRoute(route, amount) {
             - Error: ${error.message}
             - Stack: ${error.stack}
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${USDC_ADDRESS})
+            - Amount: ${amount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(errorMessage);
 
         throw error;
     }
 }
-
 
 // Helper function to encode calldata for a multi-hop route using 1inch API  Encode the swap data for route with adjustable slippage
 async function encodeSwapData(route, amount, slippagePercent) {
@@ -689,7 +698,7 @@ async function estimateGas(route, amount) {
         const gasEstimate = await web3.eth.estimateGas({
             from: process.env.WALLET_ADDRESS,
             to: process.env.CONTRACT_ADDRESS,
-            data: await constructParams(route, amount, null), // Ensure params are encoded correctly
+            data: await constructParams(route, CAPITAL, null), // Ensure params are encoded correctly
         });
         return new BigNumber(gasEstimate);
     } catch (error) {
