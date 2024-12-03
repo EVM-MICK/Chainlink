@@ -233,7 +233,7 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 }
 
 // Primary function to run the arbitrage bot with automated monitoring
-async function runArbitrageBot() {
+export async function runArbitrageBot() {
     console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
     setInterval(async () => {
         try {
