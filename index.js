@@ -556,7 +556,7 @@ function formatAmount(amount, decimals) {
 async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
     const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
     const formattedAmount = formatAmount(CAPITAL, tokenDecimals);
-    const amountIn = CAPITAL;
+    let amountIn = CAPITAL;
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
