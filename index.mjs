@@ -43,8 +43,8 @@ const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contrac
 
 
 (async () => {
-    const nonce = await contract.methods.nonce(process.env.WALLET_ADDRESS, USDC_ADDRESS).call();
-    console.log(`Nonce fetched: ${nonce}`);
+   const nonce = await AllowanceTransfer.getNonce(web3, process.env.PERMIT2_ADDRESS, process.env.WALLET_ADDRESS, USDC_ADDRESS);
+    console.log('Nonce:', nonce);
 })();
 
 export function apiRequestUrl(methodName, queryParams) {
