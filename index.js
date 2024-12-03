@@ -732,8 +732,4 @@ export async function sendTelegramMessage(message, isCritical = false) {
     }
 }
 
-// Start the arbitrage bot
-export function runArbitrageBot() {
-    console.log("Starting arbitrage bot...");
-    // Your bot logic should be placed here
-}
+
