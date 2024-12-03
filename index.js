@@ -1,66 +1,72 @@
-require('dotenv').config();
-const axios = require('axios');
-const Web3 = require('web3');
-const BigNumber = require('bignumber.js');
-const { Telegraf } = require('telegraf');
-const retry = require('async-retry');
-const { AllowanceTransfer, PERMIT2_ADDRESS } = require('@uniswap/permit2-sdk');
+import dotenv from 'dotenv';
+import axios from 'axios';
+import { request, gql } from 'graphql-request';
+import Web3 from 'web3';
+import BigNumber from 'bignumber.js';
+import { Telegraf } from 'telegraf';
+import retry from 'async-retry';
+import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
+import ABI from './YourSmartContractABI.json'; // Ensure the JSON file path is accurate.
+
+dotenv.config();
+
 if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONTRACT_ADDRESS || !process.env.WALLET_ADDRESS) {
     console.error("Environment variables are missing. Please check .env configuration.");
     process.exit(1);
 }
 
-const ABI = require('./YourSmartContractABI.json'); // ABI of the Solidity contract
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
-
 
 // Configurable parameters
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
-const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units // 0.3% to 0.5% profit threshold ($300 - $500)
+const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
-const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/" + chainId;
+const PATHFINDER_API_URL = `https://api.1inch.dev/swap/v6.0/${chainId}`;
 const HEADERS = { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, accept: "application/json" } };
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-//const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
+// const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
 const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
+
 // Stable, high-liquidity tokens to include in route evaluations
 const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
 const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(500).multipliedBy(1e6); // Example: $500 in smallest units
 const MAX_HOPS = 4;
 const cache = new Map();
+
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
 const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
 
-
 (async () => {
-    const nonce = await permit2Contract.methods.nonce(walletAddress, tokenAddress).call();
+    const nonce = await contract.methods.nonce(process.env.WALLET_ADDRESS, USDC_ADDRESS).call();
+    console.log(`Nonce fetched: ${nonce}`);
 })();
 
-function apiRequestUrl(methodName, queryParams) {
-    return `${API_BASE_URL}${methodName}?${new URLSearchParams(queryParams).toString()}`;
+export function apiRequestUrl(methodName, queryParams) {
+    return `${PATHFINDER_API_URL}${methodName}?${new URLSearchParams(queryParams).toString()}`;
 }
 
 // Convert expiration to deadline in seconds
-function toDeadline(expirationMs) {
+export function toDeadline(expirationMs) {
     return Math.floor(Date.now() / 1000) + Math.floor(expirationMs / 1000);
 }
+
 // Helper function: Fetch the current nonce for a token
-async function fetchNonce(walletAddress, tokenAddress) {
-    return await permit2Contract.methods.nonce(walletAddress, tokenAddress).call();
+export async function fetchNonce(walletAddress, tokenAddress) {
+    return await contract.methods.nonce(walletAddress, tokenAddress).call();
 }
 
-function log(message, level = "info") {
+export function log(message, level = "info") {
     if (process.env.DEBUG === 'true' || level === "error") {
         const timestamp = new Date().toISOString();
         console[level === "error" ? "error" : "log"](`[${timestamp}] [${level.toUpperCase()}] ${message}`);
     }
 }
 
-async function generatePermit2Signature(token, spender, amount) {
+export async function generatePermit2Signature(token, spender, amount) {
     const nonce = await getNonce(token);
     const expiration = Math.floor(Date.now() / 1000) + 86400; // 1-day validity
     const sigDeadline = Math.floor(Date.now() / 1000) + 3600; // 1-hour deadline
@@ -68,7 +74,7 @@ async function generatePermit2Signature(token, spender, amount) {
     const permitSingle = {
         details: {
             token,
-            amount: ethers.BigNumber.from(amount),
+            amount: BigNumber.from(amount),
             expiration,
             nonce,
         },
@@ -78,17 +84,16 @@ async function generatePermit2Signature(token, spender, amount) {
 
     const { domain, types, values } = AllowanceTransfer.getPermitData(
         permitSingle,
-        PERMIT2_ADDRESS,
+        process.env.PERMIT2_ADDRESS,
         CHAIN_ID
     );
 
-    const signature = await wallet._signTypedData(domain, types, values);
+    const signature = await web3.eth.accounts.signTypedData(domain, types, values);
     return { signature, permitSingle };
 }
 
-
 // Generate a PermitBatch signature
-async function generatePermitBatchSignatures(tokens, spender) {
+export async function generatePermitBatchSignatures(tokens, spender) {
     const permitDetails = await Promise.all(
         tokens.map(async (token) => ({
             token: token.address,
@@ -106,7 +111,7 @@ async function generatePermitBatchSignatures(tokens, spender) {
 
     const { domain, types, values } = AllowanceTransfer.getPermitBatchData(
         permitBatch,
-        PERMIT2_ADDRESS,
+        process.env.PERMIT2_ADDRESS,
         CHAIN_ID
     );
 
@@ -115,13 +120,13 @@ async function generatePermitBatchSignatures(tokens, spender) {
 }
 
 // Helper to fetch Permit2 nonce dynamically
-async function getNonce(tokenAddress) {
-    const nonce = await AllowanceTransfer.getNonce(web3, PERMIT2_ADDRESS, process.env.WALLET_ADDRESS, tokenAddress);
+export async function getNonce(tokenAddress) {
+    const nonce = await AllowanceTransfer.getNonce(web3, process.env.PERMIT2_ADDRESS, process.env.WALLET_ADDRESS, tokenAddress);
     console.log(`Fetched nonce for ${tokenAddress}: ${nonce}`);
     return nonce;
 }
 
-async function cachedGetLiquidityData(tokens) {
+export async function cachedGetLiquidityData(tokens) {
     const cacheKey = `liquidity:${tokens.join(",")}`;
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
@@ -130,14 +135,12 @@ async function cachedGetLiquidityData(tokens) {
         }
     }
 
-    const data = await getLiquidityData(tokens);
+    const data = await getLiquidityData(tokens); // Assuming `getLiquidityData` is implemented elsewhere.
     cache.set(cacheKey, { data, timestamp: Date.now() });
     return data;
 }
 
-
 // Construct `params` with SwapDescription and Permit2 signature
-
 async function constructParams(route, amount, permitBatchSignature) {
     const fromToken = route[0];
     const toToken = route[route.length - 1];
@@ -146,7 +149,7 @@ async function constructParams(route, amount, permitBatchSignature) {
         srcToken: fromToken,
         dstToken: toToken,
         srcReceiver: Executor_ADDRESS,
-        dstReceiver: process.env.CONTRACT_ADDRESS,
+        dstReceiver: CONTRACT_ADDRESS,
         amount: CAPITAL.toFixed(),
         minReturnAmount: PROFIT_THRESHOLD.toFixed(), // Adjust dynamically based on profit threshold
         flags: 0x04, // Update flags if needed
@@ -156,7 +159,7 @@ async function constructParams(route, amount, permitBatchSignature) {
         // Encode the parameters
         const params = web3.eth.abi.encodeParameters(
             ['tuple(address srcToken, address dstToken, address srcReceiver, address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags)', 'bytes', 'bytes'],
-            [Object.values(swapDescription), permitBatchSignature, routeData ]
+            [Object.values(swapDescription), permitBatchSignature, null]
         );
 
         console.log("Constructed Params:", params);
@@ -169,26 +172,21 @@ async function constructParams(route, amount, permitBatchSignature) {
 
 // Approve tokens dynamically using Permit2
 async function approveTokensWithPermit2(tokens) {
-    const spender = process.env.CONTRACT_ADDRESS; // The contract address acting as the spender
+    const spender = CONTRACT_ADDRESS;
 
     try {
-        // Generate PermitBatch signature for all tokens
         for (const token of tokens) {
             const currentAllowance = await checkAllowance(token.address);
-            if (currentAllowance.isGreaterThan(token.CAPITAL)) {
+            if (currentAllowance.isGreaterThan(CAPITAL)) {
                 console.log(`Sufficient allowance already granted for ${token.address}. Skipping approval.`);
-                continue; // Skip tokens that already have sufficient allowance
+                continue;
             }
         }
+
         const { signature, permitBatch } = await generatePermitBatchSignatures(tokens, spender);
-        
 
         console.log("Generated PermitBatch Signature:", signature);
 
-        // Optional: Log the PermitBatch details for debugging
-        console.log("PermitBatch Details:", permitBatch);
-
-        // Send the signature and PermitBatch to the contract for verification
         const tx = await contract.methods
             .permitThroughPermit2(permitBatch, signature)
             .send({ from: process.env.WALLET_ADDRESS });
@@ -202,14 +200,16 @@ async function approveTokensWithPermit2(tokens) {
 
 // Function to check token allowance
 async function checkAllowance(tokenAddress) {
-    const url = apiRequestUrl("/approve/allowance", { tokenAddress, walletAddress: process.env.WALLET_ADDRESS });
+    const url = `${PATHFINDER_API_URL}/approve/allowance?${new URLSearchParams({
+        tokenAddress,
+        walletAddress: process.env.WALLET_ADDRESS,
+    }).toString()}`;
     const response = await axios.get(url, { headers: HEADERS });
     return new BigNumber(response.data.allowance);
 }
 
 // Fetch swap data
 async function getSwapData(fromToken, toToken, amount, slippage) {
-    const tokenLiquidity = 150000000000; // Example liquidity value
     const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
         fromTokenAddress: fromToken,
         toTokenAddress: toToken,
@@ -233,7 +233,6 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
     }
 }
 
-
 // Primary function to run the arbitrage bot with automated monitoring
 async function runArbitrageBot() {
     console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
@@ -241,42 +240,36 @@ async function runArbitrageBot() {
         try {
             const profitableRoutes = await findProfitableRoutes();
             if (profitableRoutes.length > 0) {
-                // Execute the first profitable route found
                 const bestRoute = profitableRoutes[0];
                 await executeRoute(bestRoute.route, bestRoute.profit);
             }
         } catch (error) {
             console.error("Error in monitoring loop:", error);
         }
-    }, 1800000);  // Check for opportunities every 30 minutes to set it to every 1 second use  1000
+    }, 1800000);
 }
 
 // Step 1: Find profitable routes within high-liquidity stable pairs
-// Function to find profitable routes
 async function findProfitableRoutes() {
     const tokens = await getStableTokenList();
-    const preferredStartToken = "USDC"; // The preferred token to start with
-    const topN = 3; // Consider top 3 most liquid tokens
+    const preferredStartToken = "USDC";
+    const topN = 3;
 
-    // Generate routes and initialize priority queue
     const allRoutes = await generateRoutes(tokens, MAX_HOPS, preferredStartToken, topN);
     const profitableRoutes = [];
-    const routeQueue = new PriorityQueue((a, b) => b.priority - a.priority); // Higher priority first
+    const routeQueue = new PriorityQueue((a, b) => b.priority - a.priority);
 
-    // Populate the queue with initial routes and priorities (e.g., based on liquidity or other criteria)
     for (const route of allRoutes) {
-        const potentialProfit = estimateRoutePotential(route, CAPITAL); // Estimate potential profit based on CAPITAL
+        const potentialProfit = estimateRoutePotential(route, CAPITAL);
         routeQueue.enqueue({ route, priority: potentialProfit });
     }
 
-    // Process routes from the queue
     while (!routeQueue.isEmpty()) {
-        const { route } = routeQueue.dequeue(); // Get the highest-priority route
+        const { route } = routeQueue.dequeue();
 
         try {
-            const profit = await evaluateRouteProfit(route); // Evaluate the actual profit for the route
+            const profit = await evaluateRouteProfit(route);
 
-            // Check for critical profit threshold
             if (profit.isGreaterThanOrEqualTo(CRITICAL_PROFIT_THRESHOLD)) {
                 console.log(
                     `Critical profit route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
@@ -284,10 +277,9 @@ async function findProfitableRoutes() {
                 await sendTelegramMessage(
                     `🚨 Critical Profit! Route: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
                 );
-                return [{ route, profit }]; // Early exit with the critical route
+                return [{ route, profit }];
             }
 
-            // Check for normal profit threshold
             if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD)) {
                 console.log(
                     `Profitable route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
@@ -302,10 +294,8 @@ async function findProfitableRoutes() {
         }
     }
 
-    // Sort profitable routes by profit in descending order
     profitableRoutes.sort((a, b) => b.profit.minus(a.profit).toNumber());
-
-    return profitableRoutes; // Return all profitable routes, sorted by profit
+    return profitableRoutes;
 }
 
 // Utility: Priority queue implementation
@@ -331,17 +321,17 @@ class PriorityQueue {
 
 // Utility: Estimate route potential (placeholder logic)
 function estimateRoutePotential(route, capital) {
+    // Placeholder logic: Higher priority for routes starting with preferred tokens
     const preferredTokens = ["USDC", "USDT"];
     const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
 
-    // Simulate potential profit based on a conservative slippage estimate
-    const estimatedProfit = capital.multipliedBy(0.0015); // Assume 0.15% profit
-    const slippageAdjustment = capital.multipliedBy(0.0002); // Assume 0.02% slippage
-    return basePriority + estimatedProfit.minus(slippageAdjustment).toNumber();
+    // Adjust priority based on potential profit (dummy calculation for now)
+    const estimatedProfit = capital.multipliedBy(0.002); // Assume 0.2% profit
+    return basePriority + estimatedProfit.toNumber();
 }
 
-
-// Function to retrieve a list of stable, high-liquidity tokens from the 1inch API Get stable, high-liquidity tokens to focus on profitable paths
+// Function to retrieve a list of stable, high-liquidity tokens from the 1inch API
+// Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
@@ -358,13 +348,11 @@ async function getStableTokenList() {
             console.error("Unexpected response structure:", response.data);
             return [];
         }
-
     } catch (error) {
         console.error("Error fetching stable tokens from 1inch API:", error);
         return [];
     }
 }
-
 
 // Generate all possible routes within max hops limit
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
@@ -432,7 +420,7 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
 async function getLiquidityData(tokens) {
     const liquidityData = {};
     try {
-        const response = await axios.get(`https://api.1inch.io/v5.0/${chainId}/tokens`);
+        const response = await axios.get(`https://api.1inch.io/v5.0/${CHAIN_ID}/tokens`);
         const tokenData = response.data.tokens;
 
         tokens.forEach(token => {
@@ -457,7 +445,6 @@ async function safeExecute(fn, ...args) {
         return null; // Or a default value specific to the function
     }
 }
-
 
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice({ useOptimal = false } = {}) {
@@ -485,9 +472,8 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
     }
 }
 
-
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
-async function calculateDynamicMinimumProfit() {
+export async function calculateDynamicMinimumProfit() {
     const gasPrice = await fetchGasPrice();
     const estimatedGas = await estimateGas(route, CAPITAL); // Example estimated gas; adjust based on actual route complexity
     const gasCost = gasPrice.multipliedBy(estimatedGas);
@@ -500,7 +486,7 @@ async function calculateDynamicMinimumProfit() {
 }
 
 // Evaluate the profitability of a given route with dynamic profit adjustment
-async function evaluateRouteProfit(route) {
+export async function evaluateRouteProfit(route) {
     try {
         // Dynamic slippage based on token liquidity (dummy value here, replace with actual logic)
         const tokenLiquidity = 150000000000; // Example liquidity value
@@ -547,16 +533,15 @@ async function evaluateRouteProfit(route) {
     }
 }
 
-
-function formatAmount(amount, decimals) {
+export function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
 }
 
 // Get a swap quote for a multihop with retry logic
-async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
+export async function getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
     const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
     const formattedAmount = formatAmount(CAPITAL, tokenDecimals);
-    
+    const amount = CAPITAL;
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
@@ -564,27 +549,27 @@ async function getSwapQuote(fromToken, toToken,srcReceiver, dstReceiver, amountI
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
-                 amount: formattedAmount,   
-                slippage: "1",                 
-                disableEstimate: false
-            }
+                amount: formattedAmount,
+                slippage: "1",
+                disableEstimate: false,
+            },
         });
         return new BigNumber(response.data.toTokenAmount);
     } catch (error) {
         if (retries > 0) {
             console.warn(`Retrying getSwapQuote for ${fromToken} to ${toToken}. Retries left: ${retries - 1}`);
-            return getSwapQuote(fromToken, toToken,CONTRACT_ADDRESS,CONTRACT_ADDRESS, formattedAmount, minReturnAmount, flags, permit, retries - 1);
+            return getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver, amount, minReturnAmount, flags, route, retries - 1);
         } else {
             const errorMessage = `Error fetching route quote for ${fromToken} to ${toToken}: ${error}`;
             console.error(errorMessage);
-            await sendTelegramMessage(errorMessage);  // Notify error
+            await sendTelegramMessage(errorMessage); // Notify error
             return new BigNumber(0);
         }
     }
 }
 
-// Function to execute the profitable route using flash loan and swap Execute the best profitable route found 
-async function executeRoute(route, amount) {
+// Function to execute the profitable route using flash loan and swap
+export async function executeRoute(route, amount) {
     const assets = [process.env.USDC_ADDRESS]; // Always start with USDC as the first asset
     const amounts = [CAPITAL.toFixed()]; // Flash loan amount in USDC
 
@@ -624,7 +609,7 @@ async function executeRoute(route, amount) {
             ✅ *Flash Loan and Swap Executed Successfully!*
             - Transaction Hash: [${receipt.transactionHash}](https://arbiscan.io/tx/${receipt.transactionHash})
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amounts.toFixed()} (${assets[0]})
+            - Amount: ${amount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(successMessage);
     } catch (error) {
@@ -634,10 +619,9 @@ async function executeRoute(route, amount) {
         const errorMessage = `
             ❌ *Error Executing Flash Loan and Swap!*
             - Error: ${error.message}
-             - CAPITAL: ${CAPITAL.dividedBy(1e6).toFixed(2)} USDC
             - Stack: ${error.stack}
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amounts.toFixed()} (${assets[0]})
+            - Amount: ${amount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(errorMessage);
 
@@ -645,8 +629,8 @@ async function executeRoute(route, amount) {
     }
 }
 
-// Helper function to encode calldata for a multi-hop route using 1inch API  Encode the swap data for route with adjustable slippage
-async function encodeSwapData(route, amount, slippagePercent) {
+// Helper function to encode calldata for a multi-hop route using 1inch API
+export async function encodeSwapData(route, amount, slippagePercent) {
     const fromToken = route[0];
     const toToken = route[route.length - 1];
     const formattedAmount = amount.toFixed(STABLE_TOKENS.includes(fromToken) ? 6 : 18);
@@ -663,8 +647,8 @@ async function encodeSwapData(route, amount, slippagePercent) {
                 slippage: slippagePercent,
                 disableEstimate: false,
                 allowPartialFill: false,
-                includeProtocols: true // Include protocol details in response
-            }
+                includeProtocols: true, // Include protocol details in response
+            },
         });
 
         const swapData = response.data;
@@ -684,7 +668,7 @@ async function encodeSwapData(route, amount, slippagePercent) {
     }
 }
 
-async function fetchTokenDecimals(tokenAddress) {
+export async function fetchTokenDecimals(tokenAddress) {
     try {
         const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
         return await contract.methods.decimals().call();
@@ -694,7 +678,7 @@ async function fetchTokenDecimals(tokenAddress) {
     }
 }
 
-async function estimateGas(route, amount) {
+export async function estimateGas(route, amount) {
     try {
         const gasEstimate = await web3.eth.estimateGas({
             from: process.env.WALLET_ADDRESS,
@@ -709,7 +693,7 @@ async function estimateGas(route, amount) {
 }
 
 // Fetch current gas price with a maximum threshold
-async function fetchOptimalGasPrice() {
+export async function fetchOptimalGasPrice() {
     try {
         // Fetch gas price from Arbitrum Gas Station or similar API
         const response = await axios.get("https://gasstation-mainnet.arbitrum.io/v2");
@@ -729,17 +713,18 @@ async function fetchOptimalGasPrice() {
         return null; // Fallback or indicate failure
     }
 }
-
-
 // Function to send Telegram notifications
-async function sendTelegramMessage(message, isCritical = false) {
+export async function sendTelegramMessage(message, isCritical = false) {
     if (!isCritical && process.env.DEBUG !== 'true') return;
     try {
-        const response = await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            chat_id: process.env.TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: "Markdown",
-        });
+        const response = await axios.post(
+            `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+            {
+                chat_id: process.env.TELEGRAM_CHAT_ID,
+                text: message,
+                parse_mode: "Markdown",
+            }
+        );
         console.log("Telegram notification sent:", message);
         return response.data;
     } catch (error) {
@@ -747,6 +732,8 @@ async function sendTelegramMessage(message, isCritical = false) {
     }
 }
 
-
 // Start the arbitrage bot
-runArbitrageBot();
+export function runArbitrageBot() {
+    console.log("Starting arbitrage bot...");
+    // Your bot logic should be placed here
+}
