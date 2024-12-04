@@ -360,16 +360,17 @@ async function getStableTokenList() {
 // Generate all possible routes within max hops limit
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", topN = 3) {
-    const routez = new Set(); // Use a Set to ensure uniqueness
-
-    // Step 1: Filter tokens to include only those in STABLE_TOKENS
+    const routes = new Set(); // Use a Set to ensure uniqueness
+    const priceData = await fetchTokenPricesAcrossProtocols(tokens); // Fetch price data
+    
+    // Filter tokens for profitability and liquidity
     const stableTokens = tokens.filter(token => STABLE_TOKENS.includes(token));
     if (stableTokens.length === 0) {
         console.error("No tokens matched the STABLE_TOKENS list. Skipping route generation.");
         return []; // Return an empty array if no valid tokens
     }
 
-    // Step 2: Fetch and rank tokens by liquidity
+    // Fetch and rank tokens by liquidity
     const liquidityData = await safeExecute(getLiquidityData, stableTokens);
     if (!liquidityData) {
         console.error("Failed to fetch liquidity data. Skipping route generation.");
@@ -380,44 +381,91 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
     const filteredTokens = Object.entries(liquidityData)
         .filter(([, liquidity]) => new BigNumber(liquidity).isGreaterThanOrEqualTo(CAPITAL)) // Ensure token liquidity >= CAPITAL
         .sort(([, liquidityA], [, liquidityB]) => liquidityB - liquidityA) // Sort by liquidity (descending)
-        .map(([token]) => token); // Extract token addresses/symbols
+        .map(([token]) => token);
 
     if (filteredTokens.length === 0) {
         console.error("No tokens have sufficient liquidity to support the capital amount. Skipping route generation.");
         return []; // Return an empty array if no tokens meet the liquidity requirement
     }
 
-    // Step 3: Select the top N tokens by liquidity
+    // Include the preferred start token in the filtered tokens
     const highLiquidityTokens = filteredTokens.slice(0, topN);
-
-    // Step 4: Ensure the preferred start token is included
     const startTokens = highLiquidityTokens.includes(preferredStartToken)
         ? [preferredStartToken, ...highLiquidityTokens.filter(token => token !== preferredStartToken)]
-        : [preferredStartToken, ...highLiquidityTokens]; // Include preferredStartToken even if it's not in highLiquidityTokens
+        : [preferredStartToken, ...highLiquidityTokens];
 
     console.log("Filtered Tokens by Liquidity:", filteredTokens);
     console.log("Starting Tokens for Routes:", startTokens);
 
-    // Step 5: Generate routes using filtered tokens
-    function permute(path, remainingHops) {
+    // Generate routes with profitability check
+    function permuteWithProfitability(path, remainingHops) {
         if (remainingHops === 0) return;
         for (const token of filteredTokens) {
             if (!path.includes(token)) {
                 const newPath = [...path, token];
-                routez.add(newPath.join(",")); // Store as a string for uniqueness
-                permute(newPath, remainingHops - 1);
+                if (isProfitablePath(newPath, priceData)) {
+                    routes.add(newPath.join(",")); // Store as a string for uniqueness
+                }
+                permuteWithProfitability(newPath, remainingHops - 1);
             }
         }
     }
 
-    // Step 6: Generate routes starting from each token in the prioritized start tokens
+    // Start generating routes
     for (const startToken of startTokens) {
-        permute([startToken], MAX_HOPS - 1); // Start with MAX_HOPS - 1 because the first token is already included
+        permuteWithProfitability([startToken], MAX_HOPS - 1);
     }
 
-    // Convert back to an array of arrays after generating all routes
-    return Array.from(routez).map(route => route.split(","));
+    // Convert routes back to arrays and return
+    return Array.from(routes).map(route => route.split(","));
 }
+
+// Helper: Fetch prices across protocols
+async function fetchTokenPricesAcrossProtocols(tokens) {
+    const prices = {};
+    try {
+        for (const token of tokens) {
+            const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
+                headers: HEADERS,
+                params: { fromTokenAddress: token, amount: CAPITAL.toFixed(0) }
+            });
+            const protocols = response.data.protocols || [];
+            prices[token] = protocols.map(protocol => ({
+                name: protocol.name,
+                price: protocol.price // Adjust based on API response structure
+            }));
+        }
+    } catch (error) {
+        console.error("Error fetching token prices across protocols:", error.message);
+    }
+    return prices;
+}
+
+// Helper: Check if a path is profitable
+function isProfitablePath(path, priceData) {
+    let potentialProfit = new BigNumber(0);
+    for (let i = 0; i < path.length - 1; i++) {
+        const fromToken = path[i];
+        const toToken = path[i + 1];
+        const fromPrice = getBestPrice(priceData[fromToken]);
+        const toPrice = getBestPrice(priceData[toToken]);
+        if (!fromPrice || !toPrice) return false; // If data is missing, skip this path
+        const priceDifference = toPrice.minus(fromPrice);
+        potentialProfit = potentialProfit.plus(priceDifference);
+    }
+    return potentialProfit.isGreaterThan(PROFIT_THRESHOLD);
+}
+
+// Helper: Get the best price from protocol data
+function getBestPrice(protocolPrices) {
+    return protocolPrices
+        ? protocolPrices.reduce((best, current) => {
+              const currentPrice = new BigNumber(current.price);
+              return currentPrice.isGreaterThan(best) ? currentPrice : best;
+          }, new BigNumber(0))
+        : null;
+}
+
 
 // Helper Function: Fetch Liquidity Data (1inch API Example)
 async function getLiquidityData(tokens) {
