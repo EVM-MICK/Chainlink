@@ -9,10 +9,6 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 dotenv.config();
 
-if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONTRACT_ADDRESS || !process.env.WALLET_ADDRESS) {
-    console.error("Environment variables are missing. Please check .env configuration.");
-    process.exit(1);
-}
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
 const ABI = require('./YourSmartContractABI.json');
@@ -25,7 +21,13 @@ const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
 const PATHFINDER_API_URL = `https://api.1inch.dev/swap/v6.0/${chainId}`;
-const HEADERS = { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, accept: "application/json" } };
+const HEADERS = {
+    headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+        Accept: "application/json",
+    },
+};
+
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
@@ -41,6 +43,10 @@ const cache = new Map();
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
 
+if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONTRACT_ADDRESS || !process.env.WALLET_ADDRESS) {
+    console.error("Environment variables are missing. Please check .env configuration.");
+    process.exit(1);
+}
 
 export function apiRequestUrl(methodName, queryParams) {
     return `${PATHFINDER_API_URL}${methodName}?${new URLSearchParams(queryParams).toString()}`;
