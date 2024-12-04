@@ -18,9 +18,9 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 // Configurable parameters
 const apiQueue = new PQueue({
-    concurrency: 5, // Maximum concurrent API calls
-    interval: 1000, // Time window in milliseconds
-    intervalCap: 10, // Maximum requests within the time window
+    concurrency: 2, // Maximum 2 concurrent calls
+    interval: 60000, // 1 minute
+    intervalCap: 138, // Max 138 requests per minute
 });
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
@@ -274,8 +274,18 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 // Primary function to run the arbitrage bot with automated monitoring
 export async function runArbitrageBot() {
     console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
+    
     setInterval(async () => {
         try {
+            // Step 1: Fetch gas price (every cycle)
+            const gasPrice = await fetchGasPrice();
+
+            // Step 2: Get liquidity data (every 10 cycles)
+            if (Date.now() % (10 * 5 * 60 * 1000) === 0) { // Every 50 minutes
+                await cachedGetLiquidityData(STABLE_TOKENS);
+            }
+
+            // Step 3: Find profitable routes (top N routes)
             const profitableRoutes = await findProfitableRoutes();
             if (profitableRoutes.length > 0) {
                 const bestRoute = profitableRoutes[0];
@@ -284,8 +294,9 @@ export async function runArbitrageBot() {
         } catch (error) {
             console.error("Error in monitoring loop:", error);
         }
-    }, 1800000);
+    }, 5 * 60 * 1000); // Run every 5 minutes
 }
+
 
 // Step 1: Find profitable routes within high-liquidity stable pairs
 async function findProfitableRoutes() {
