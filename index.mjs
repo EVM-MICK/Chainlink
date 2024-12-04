@@ -7,6 +7,7 @@ import retry from 'async-retry';
 import { createRequire } from 'module'; 
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 import { ethers } from 'ethers';
+import PQueue from 'p-queue';
 dotenv.config();
 
 const { Telegraf } = pkg;
@@ -16,6 +17,11 @@ const ABI = require('./YourSmartContractABI.json');
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 // Configurable parameters
+const apiQueue = new PQueue({
+    concurrency: 5, // Maximum concurrent API calls
+    interval: 1000, // Time window in milliseconds
+    intervalCap: 10, // Maximum requests within the time window
+});
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
@@ -143,6 +149,27 @@ export async function cachedGetLiquidityData(tokens) {
     return data;
 }
 
+
+// Generic API call wrapper
+async function safeApiCall(apiCallFunction, ...args) {
+    return apiQueue.add(async () => {
+        for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+                return await apiCallFunction(...args);
+            } catch (error) {
+                if (error.response && error.response.status === 429) { // Too Many Requests
+                    const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+                    console.warn(`Rate limit hit, retrying in ${waitTime}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                } else {
+                    throw error; // Non-throttling error
+                }
+            }
+        }
+        throw new Error("Max retries reached for API call");
+    });
+}
+
 // Construct `params` with SwapDescription and Permit2 signature
 async function constructParams(route, amount, permitBatchSignature) {
     const fromToken = route[0];
@@ -213,28 +240,36 @@ async function checkAllowance(tokenAddress) {
 
 // Fetch swap data
 async function getSwapData(fromToken, toToken, amount, slippage) {
-    const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
-        fromTokenAddress: fromToken,
-        toTokenAddress: toToken,
-        amount: CAPITAL.toFixed(0),
-        fromAddress: process.env.WALLET_ADDRESS,
-        slippage: slippage.toFixed(2),
-        allowPartialFill: false,
-        disableEstimate: false,
-    }).toString()}`;
+    return safeApiCall(async () => {
+        const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
+            fromTokenAddress: fromToken,
+            toTokenAddress: toToken,
+            amount: CAPITAL.toFixed(0),
+            fromAddress: process.env.WALLET_ADDRESS,
+            slippage: slippage.toFixed(2),
+            allowPartialFill: false,
+            disableEstimate: false,
+        }).toString()}`;
 
-    try {
-        const response = await axios.get(url, { headers: HEADERS });
-        const routeData = response.data.tx.data;
-        if (!routeData) throw new Error("1inch API returned incomplete route data");
+        try {
+            // Make the API call to fetch swap data
+            const response = await axios.get(url, { headers: HEADERS });
+            const routeData = response.data.tx.data;
 
-        console.log("Valid route data fetched:", routeData);
-        return routeData;
-    } catch (error) {
-        console.error("Error fetching swap data from 1inch API:", error.message);
-        throw error;
-    }
+            // Validate the response to ensure it contains the required data
+            if (!routeData) {
+                throw new Error("1inch API returned incomplete route data");
+            }
+
+            console.log("Valid route data fetched:", routeData);
+            return routeData; // Return the valid route data
+        } catch (error) {
+            console.error("Error fetching swap data from 1inch API:", error.message);
+            throw error; // Ensure error is properly propagated for retries
+        }
+    });
 }
+
 
 // Primary function to run the arbitrage bot with automated monitoring
 export async function runArbitrageBot() {
@@ -442,19 +477,55 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
 }
 
 // Helper: Check if a path is profitable
-function isProfitablePath(path, priceData) {
+async function isProfitablePath(path, priceData) {
+    const gasPrice = await fetchGasPrice(); // Fetch current gas price in Wei
+    const estimatedGas = await estimateGas(path, CAPITAL); // Estimated gas for this route
+    const gasCost = gasPrice.multipliedBy(estimatedGas); // Total gas cost
+
+    const slippage = calculateSlippage(path, priceData); // Dynamic slippage based on liquidity
+    const adjustedProfitThreshold = PROFIT_THRESHOLD.plus(gasCost).plus(slippage);
+
     let potentialProfit = new BigNumber(0);
+
     for (let i = 0; i < path.length - 1; i++) {
         const fromToken = path[i];
         const toToken = path[i + 1];
         const fromPrice = getBestPrice(priceData[fromToken]);
         const toPrice = getBestPrice(priceData[toToken]);
-        if (!fromPrice || !toPrice) return false; // If data is missing, skip this path
+        if (!fromPrice || !toPrice) return false;
+
         const priceDifference = toPrice.minus(fromPrice);
         potentialProfit = potentialProfit.plus(priceDifference);
     }
-    return potentialProfit.isGreaterThan(PROFIT_THRESHOLD);
+
+    return potentialProfit.isGreaterThan(adjustedProfitThreshold);
 }
+
+function calculateSlippage(path, priceData) {
+    const slippageFactors = path.map(token => {
+        const liquidity = getLiquidityForToken(token, priceData);
+        return liquidity < CAPITAL.toFixed() ? 0.01 : 0.005; // Higher slippage for low-liquidity tokens
+    });
+
+    return slippageFactors.reduce((total, factor) => total.plus(factor), new BigNumber(0));
+}
+
+function getLiquidityForToken(token, priceData) {
+    return priceData[token] ? new BigNumber(priceData[token].liquidity || 0) : new BigNumber(0);
+}
+
+async function calculateDynamicProfitThreshold() {
+    const gasPrice = await fetchGasPrice();
+    const estimatedGas = new BigNumber(800000); // Replace with dynamic estimate
+    const gasCost = gasPrice.multipliedBy(estimatedGas);
+
+    // Include flash loan fee and slippage
+    const flashLoanFee = CAPITAL.multipliedBy(0.0005); // 0.05% fee
+    const dynamicThreshold = MINIMUM_PROFIT_THRESHOLD.plus(gasCost).plus(flashLoanFee);
+
+    return dynamicThreshold;
+}
+
 
 // Helper: Get the best price from protocol data
 function getBestPrice(protocolPrices) {
@@ -469,23 +540,30 @@ function getBestPrice(protocolPrices) {
 
 // Helper Function: Fetch Liquidity Data (1inch API Example)
 async function getLiquidityData(tokens) {
-    const liquidityData = {};
-    try {
-        const response = await axios.get(`https://api.1inch.io/v5.0/${CHAIN_ID}/tokens`);
-        const tokenData = response.data.tokens;
+    return safeApiCall(async () => {
+        const liquidityData = {};
 
-        tokens.forEach(token => {
-            const tokenInfo = tokenData[token.toLowerCase()];
-            liquidityData[token] = tokenInfo ? tokenInfo.liquidity || 0 : 0;
-        });
-    } catch (error) {
-        console.error("Error fetching liquidity data from 1inch:", error.message);
-        console.warn("Falling back to predefined liquidity ranking.");
-        tokens.forEach(token => {
-            liquidityData[token] = STABLE_TOKENS.includes(token) ? 1 : 0; // Assign low liquidity to non-stable tokens
-        });
-    }
-    return liquidityData;
+        try {
+            // API call to fetch liquidity data
+            const response = await axios.get(`https://api.1inch.io/v5.0/${CHAIN_ID}/tokens`);
+            const tokenData = response.data.tokens;
+
+            // Process each token to extract liquidity data
+            tokens.forEach(token => {
+                const tokenInfo = tokenData[token.toLowerCase()];
+                liquidityData[token] = tokenInfo ? tokenInfo.liquidity || 0 : 0;
+            });
+        } catch (error) {
+            // Handle errors and fallback logic
+            console.error("Error fetching liquidity data from 1inch:", error.message);
+            console.warn("Falling back to predefined liquidity ranking.");
+            tokens.forEach(token => {
+                liquidityData[token] = STABLE_TOKENS.includes(token) ? 1 : 0; // Fallback to predefined values
+            });
+        }
+
+        return liquidityData;
+    });
 }
 
 async function safeExecute(fn, ...args) {
@@ -499,28 +577,38 @@ async function safeExecute(fn, ...args) {
 
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice({ useOptimal = false } = {}) {
-    try {
-        const response = await axios.get("https://gasstation-mainnet.arbitrum.io/v2");
-        const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
+    return safeApiCall(async () => {
+        const url = "https://gasstation-mainnet.arbitrum.io/v2";
 
-        // Convert gas price from Gwei to Wei
-        const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), 'gwei'));
+        try {
+            // Make the API call to fetch gas price data
+            const response = await axios.get(url);
 
-        if (useOptimal) {
-            const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
-            const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
+            // Extract gas price in Gwei from the response
+            const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
 
-            if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
-                console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
-                return null;
+            // Convert gas price from Gwei to Wei
+            const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), 'gwei'));
+
+            // Apply optimal gas price filtering if enabled
+            if (useOptimal) {
+                const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
+                const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
+
+                if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
+                    console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
+                    return null;
+                }
             }
-        }
 
-        return gasPriceInWei;
-    } catch (error) {
-        console.error("Error fetching gas price:", error);
-        return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
-    }
+            // Return the gas price in Wei
+            return gasPriceInWei;
+        } catch (error) {
+            console.error("Error fetching gas price:", error);
+            // Return fallback value for gas price in case of an error
+            return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
+        }
+    });
 }
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
