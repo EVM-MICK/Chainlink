@@ -18,10 +18,11 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 // Configurable parameters
 const apiQueue = new PQueue({
-    concurrency: 2, // Maximum 2 concurrent calls
-    interval: 60000, // 1 minute
-    intervalCap: 138, // Max 138 requests per minute
+    concurrency: 1, // Allow 1 request at a time
+    interval: 1000, // 1 second interval
+    intervalCap: 1, // 1 request per second
 });
+
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
@@ -45,6 +46,8 @@ const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(500).multipliedBy(1e6); // Example: $500 in smallest units
 const MAX_HOPS = 4;
 const cache = new Map();
+let cachedGasPrice = null; // Cached gas price value
+let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
@@ -135,8 +138,41 @@ export async function getNonce(tokenAddress) {
     return nonce;
 }
 
+async function fetchCachedGasPrice() {
+    const now = Date.now();
+
+    // Use cached gas price if it is less than 5 minutes old
+    if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
+        return cachedGasPrice;
+    }
+
+    const url = "https://gasstation-mainnet.arbitrum.io/v2";
+
+    try {
+        // Fetch gas price data from the API
+        const response = await axios.get(url);
+        const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
+
+        // Convert gas price from Gwei to Wei
+        cachedGasPrice = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), 'gwei'));
+        lastGasPriceFetch = now; // Update the timestamp of the last fetch
+        return cachedGasPrice;
+    } catch (error) {
+        console.error("Error fetching gas price:", error);
+
+        // Fallback to the cached value or a default if no cache exists
+        if (cachedGasPrice) {
+            console.warn("Using cached gas price due to error in fetching new data.");
+            return cachedGasPrice;
+        }
+        return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
+    }
+}
+
 export async function cachedGetLiquidityData(tokens) {
     const cacheKey = `liquidity:${tokens.join(",")}`;
+
+    // Check if liquidity data is cached and fresh
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (Date.now() - timestamp < 60000) { // Cache for 60 seconds
@@ -144,11 +180,17 @@ export async function cachedGetLiquidityData(tokens) {
         }
     }
 
-    const data = await getLiquidityData(tokens); // Assuming `getLiquidityData` is implemented elsewhere.
+    // Fetch gas price before fetching liquidity data
+    const gasPrice = await fetchCachedGasPrice();
+    console.log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`);
+
+    // Fetch liquidity data (assuming `getLiquidityData` is implemented)
+    const data = await getLiquidityData(tokens);
+    
+    // Cache the fetched liquidity data along with a timestamp
     cache.set(cacheKey, { data, timestamp: Date.now() });
     return data;
 }
-
 
 // Generic API call wrapper
 async function safeApiCall(apiCallFunction, ...args) {
@@ -157,7 +199,7 @@ async function safeApiCall(apiCallFunction, ...args) {
             try {
                 return await apiCallFunction(...args);
             } catch (error) {
-                if (error.response && error.response.status === 429) { // Too Many Requests
+                if (error.response && error.response.status === 429) { // Too many requests
                     const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
                     console.warn(`Rate limit hit, retrying in ${waitTime}ms...`);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -270,22 +312,21 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
     });
 }
 
-
 // Primary function to run the arbitrage bot with automated monitoring
 export async function runArbitrageBot() {
     console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
-    
+
     setInterval(async () => {
         try {
-            // Step 1: Fetch gas price (every cycle)
+            // Step 1: Fetch gas price (cache this every 5 minutes)
             const gasPrice = await fetchGasPrice();
 
-            // Step 2: Get liquidity data (every 10 cycles)
-            if (Date.now() % (10 * 5 * 60 * 1000) === 0) { // Every 50 minutes
+            // Step 2: Get liquidity data (refresh every 15 minutes)
+            if (Date.now() % (15 * 60 * 1000) === 0) {
                 await cachedGetLiquidityData(STABLE_TOKENS);
             }
 
-            // Step 3: Find profitable routes (top N routes)
+            // Step 3: Find profitable routes (limit to top 3-5 tokens)
             const profitableRoutes = await findProfitableRoutes();
             if (profitableRoutes.length > 0) {
                 const bestRoute = profitableRoutes[0];
@@ -296,7 +337,6 @@ export async function runArbitrageBot() {
         }
     }, 5 * 60 * 1000); // Run every 5 minutes
 }
-
 
 // Step 1: Find profitable routes within high-liquidity stable pairs
 async function findProfitableRoutes() {
@@ -382,26 +422,56 @@ function estimateRoutePotential(route, capital) {
 // Function to retrieve a list of stable, high-liquidity tokens from the 1inch API
 // Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
+    const cacheKey = "stableTokens";
+    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
+    const now = Date.now();
+
+    // Return cached data if it exists and is fresh
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached stable token list.");
+            return data;
+        }
+    }
+
     try {
+        // Fetch token data from the 1inch Pathfinder API
         const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
 
-        // Check if the response structure matches the expected format
         if (response.data && response.data.tokens) {
             const tokens = Object.keys(response.data.tokens)
-                .filter(tokenAddress => STABLE_TOKENS.includes(response.data.tokens[tokenAddress].symbol))
-                .map(tokenAddress => tokenAddress); // Return only token addresses
+                .filter(tokenAddress => {
+                    const tokenSymbol = response.data.tokens[tokenAddress].symbol;
+                    return STABLE_TOKENS.includes(tokenSymbol);
+                })
+                .map(tokenAddress => ({
+                    address: tokenAddress,
+                    symbol: response.data.tokens[tokenAddress].symbol,
+                    liquidity: response.data.tokens[tokenAddress].liquidity || 0,
+                }));
 
-            console.log("Retrieved stable tokens:", tokens);
-            return tokens;
+            // Sort tokens by liquidity in descending order
+            const sortedTokens = tokens.sort((a, b) => b.liquidity - a.liquidity);
+
+            // Cache the sorted token addresses
+            const tokenAddresses = sortedTokens.map(token => token.address);
+            cache.set(cacheKey, { data: tokenAddresses, timestamp: now });
+
+            console.log("Retrieved and cached stable tokens:", tokenAddresses);
+            return tokenAddresses;
         } else {
             console.error("Unexpected response structure:", response.data);
             return [];
         }
     } catch (error) {
         console.error("Error fetching stable tokens from 1inch API:", error);
+
+        // Fallback to an empty list in case of errors
         return [];
     }
 }
+
 
 // Generate all possible routes within max hops limit
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
@@ -589,6 +659,13 @@ async function safeExecute(fn, ...args) {
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice({ useOptimal = false } = {}) {
     return safeApiCall(async () => {
+        const now = Date.now();
+
+        // Use cached gas price if it is less than 5 minutes old
+        if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
+            return cachedGasPrice;
+        }
+
         const url = "https://gasstation-mainnet.arbitrum.io/v2";
 
         try {
@@ -612,15 +689,25 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
                 }
             }
 
+            // Cache the fetched gas price and update the last fetch timestamp
+            cachedGasPrice = gasPriceInWei;
+            lastGasPriceFetch = now;
+
             // Return the gas price in Wei
             return gasPriceInWei;
         } catch (error) {
             console.error("Error fetching gas price:", error);
-            // Return fallback value for gas price in case of an error
+
+            // Return cached value if available, or fallback to default if none exists
+            if (cachedGasPrice) {
+                console.warn("Using cached gas price due to error in fetching new data.");
+                return cachedGasPrice;
+            }
             return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
         }
     });
 }
+
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
 export async function calculateDynamicMinimumProfit() {
