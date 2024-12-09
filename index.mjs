@@ -16,6 +16,12 @@ const ABI = require('./YourSmartContractABI.json');
 // const ABI = await import('./YourSmartContractABI.json', { assert: { type: 'json' } }).then(module => module.default);
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
+const HEADERS = {
+    headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+        Accept: "application/json",
+    },
+};
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
@@ -28,13 +34,6 @@ const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
 const PATHFINDER_API_URL = 'https://api.1inch.dev/swap/v6.0/42161/tokens';
-const HEADERS = {
-    headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-        Accept: "application/json",
-    },
-};
-
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
