@@ -18,7 +18,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 const HEADERS = {
     headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+        Authorization: "Bearer 20Dv2u7u1pctJXxEaOeZGJjeCc2HUopQ",
         Accept: "application/json",
     },
 };
@@ -33,7 +33,7 @@ const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 dec
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
-const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
+const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161/tokens";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
