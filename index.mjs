@@ -18,8 +18,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 const HEADERS = {
     headers: {
-        Authorization: "Bearer 20Dv2u7u1pctJXxEaOeZGJjeCc2HUopQ",
-        Accept: "application/json",
+         "Authorization": "Bearer 20Dv2u7u1pctJXxEaOeZGJjeCc2HUopQ"
     },
 };
 // Configurable parameters
@@ -33,7 +32,7 @@ const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 dec
 const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
 const chainId = 42161;
-const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161/tokens";
+const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
@@ -56,9 +55,6 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     process.exit(1);
 }
 
-export function apiRequestUrl(methodName, queryParams) {
-    return `${PATHFINDER_API_URL}${methodName}?${new URLSearchParams(queryParams).toString()}`;
-}
 
 // Convert expiration to deadline in seconds
 export function toDeadline(expirationMs) {
@@ -243,73 +239,101 @@ async function constructParams(route, amount, permitBatchSignature) {
 
 // Approve tokens dynamically using Permit2
 async function approveTokensWithPermit2(tokens) {
-    const spender = CONTRACT_ADDRESS;
-
     try {
         for (const token of tokens) {
-            const currentAllowance = await checkAllowance(token.address);
-            if (currentAllowance.isGreaterThan(CAPITAL)) {
-                console.log(`Sufficient allowance already granted for ${token.address}. Skipping approval.`);
+            const allowance = await checkAllowance(token.address);
+            if (allowance.isGreaterThanOrEqualTo(token.amount)) {
+                console.log(`Sufficient allowance for ${token.address}. Skipping approval.`);
                 continue;
             }
+
+            const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
+                headers: HEADERS,
+                params: {
+                    tokenAddress: token.address,
+                    amount: token.amount.toFixed(),
+                },
+            });
+
+            const approvalTx = approvalResponse.data;
+            const receipt = await web3.eth.sendTransaction({
+                from: process.env.WALLET_ADDRESS,
+                to: approvalTx.to,
+                data: approvalTx.data,
+            });
+
+            console.log(`Approved ${token.address}. Transaction Hash: ${receipt.transactionHash}`);
         }
-
-        const { signature, permitBatch } = await generatePermitBatchSignatures(tokens, spender);
-
-        console.log("Generated PermitBatch Signature:", signature);
-
-        const tx = await contract.methods
-            .permitThroughPermit2(permitBatch, signature)
-            .send({ from: process.env.WALLET_ADDRESS });
-
-        console.log("PermitBatch approved successfully. Transaction Hash:", tx.transactionHash);
     } catch (error) {
-        console.error("Error in approving tokens with Permit2:", error);
+        console.error("Error approving tokens:", error.message);
         throw error;
     }
 }
 
 // Function to check token allowance
 async function checkAllowance(tokenAddress) {
-    const url = `${PATHFINDER_API_URL}/approve/allowance?${new URLSearchParams({
-        tokenAddress,
-        walletAddress: process.env.WALLET_ADDRESS,
-    }).toString()}`;
-    const response = await axios.get(url, { headers: HEADERS });
-    return new BigNumber(response.data.allowance);
+    const url = `${PATHFINDER_API_URL}/approve/allowance`;
+
+    try {
+        const response = await axios.get(url, {
+            headers: HEADERS,
+            params: {
+                tokenAddress,
+                walletAddress: process.env.WALLET_ADDRESS,
+            },
+        });
+
+        const allowance = new BigNumber(response.data.allowance || "0");
+        console.log(`Allowance for ${tokenAddress}: ${allowance}`);
+        return allowance;
+    } catch (error) {
+        console.error(`Error checking allowance for ${tokenAddress}:`, error.message);
+        return new BigNumber(0);
+    }
 }
+
 
 // Fetch swap data
 async function getSwapData(fromToken, toToken, amount, slippage) {
     return safeApiCall(async () => {
-        const url = `${PATHFINDER_API_URL}/swap?${new URLSearchParams({
+        const url = `${PATHFINDER_API_URL}/swap`; // Adjusted to match API endpoint requirements
+        const params = {
             fromTokenAddress: fromToken,
             toTokenAddress: toToken,
-            amount: CAPITAL.toFixed(0),
-            fromAddress: process.env.WALLET_ADDRESS,
-            slippage: slippage.toFixed(2),
-            allowPartialFill: false,
-            disableEstimate: false,
-        }).toString()}`;
+            amount: amount.toFixed(0), // Use the passed amount
+            fromAddress: process.env.WALLET_ADDRESS, // Wallet performing the swap
+            slippage: slippage.toFixed(2), // Set slippage tolerance
+            allowPartialFill: false, // Ensure full swaps
+            disableEstimate: false, // Enable price estimation
+            includeProtocols: true, // Include detailed protocol data
+        };
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url, { headers: HEADERS });
-            const routeData = response.data.tx.data;
+            const response = await axios.get(url, { headers: HEADERS, params });
 
-            // Validate the response to ensure it contains the required data
-            if (!routeData) {
-                throw new Error("1inch API returned incomplete route data");
+            // Extract transaction data from the response
+            const swapData = response.data;
+            if (!swapData.tx || !swapData.tx.data) {
+                throw new Error("1inch API returned incomplete swap data");
             }
 
-            console.log("Valid route data fetched:", routeData);
-            return routeData; // Return the valid route data
+            console.log("Valid swap data fetched:", swapData.tx.data);
+
+            // Return transaction data and protocols used for this swap
+            return {
+                txData: swapData.tx.data, // Transaction data for the swap
+                protocols: swapData.protocols || [], // List of protocols used (optional)
+            };
         } catch (error) {
             console.error("Error fetching swap data from 1inch API:", error.message);
-            throw error; // Ensure error is properly propagated for retries
+
+            // Throw the error to be handled in higher-level functions
+            throw error;
         }
     });
 }
+
 
 // Primary function to run the arbitrage bot with automated monitoring
 export async function runArbitrageBot() {
@@ -418,8 +442,7 @@ function estimateRoutePotential(route, capital) {
     return basePriority + estimatedProfit.toNumber();
 }
 
-// Function to retrieve a list of stable, high-liquidity tokens from the 1inch API
-// Get stable, high-liquidity tokens to focus on profitable paths
+// Function to retrieve a list of stable, high-liquidity tokens from the 1inch API and  Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
     const cacheKey = "stableTokens";
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
@@ -435,38 +458,37 @@ async function getStableTokenList() {
     }
 
     try {
-        // Fetch token data from the 1inch Pathfinder API
-        const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+        // Fetch liquidity sources
+        const liquidityResponse = await axios.get(`${PATHFINDER_API_URL}/liquidity-sources`, { headers: HEADERS });
+        const liquiditySources = liquidityResponse.data.protocols || [];
+        console.log("Available Liquidity Sources:", liquiditySources);
 
-        if (response.data && response.data.tokens) {
-            const tokens = Object.keys(response.data.tokens)
+        // Fetch token data
+        const tokenResponse = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+        if (tokenResponse.data && tokenResponse.data.tokens) {
+            const tokens = Object.keys(tokenResponse.data.tokens)
                 .filter(tokenAddress => {
-                    const tokenSymbol = response.data.tokens[tokenAddress].symbol;
+                    const tokenSymbol = tokenResponse.data.tokens[tokenAddress].symbol;
                     return STABLE_TOKENS.includes(tokenSymbol);
                 })
                 .map(tokenAddress => ({
                     address: tokenAddress,
-                    symbol: response.data.tokens[tokenAddress].symbol,
-                    liquidity: response.data.tokens[tokenAddress].liquidity || 0,
+                    symbol: tokenResponse.data.tokens[tokenAddress].symbol,
+                    liquidity: tokenResponse.data.tokens[tokenAddress].liquidity || 0,
                 }));
 
-            // Sort tokens by liquidity in descending order
+            // Sort tokens by liquidity and cache the result
             const sortedTokens = tokens.sort((a, b) => b.liquidity - a.liquidity);
-
-            // Cache the sorted token addresses
             const tokenAddresses = sortedTokens.map(token => token.address);
             cache.set(cacheKey, { data: tokenAddresses, timestamp: now });
 
             console.log("Retrieved and cached stable tokens:", tokenAddresses);
             return tokenAddresses;
-        } else {
-            console.error("Unexpected response structure:", response.data);
-            return [];
         }
+        console.error("Unexpected token response:", tokenResponse.data);
+        return [];
     } catch (error) {
-        console.error("Error fetching stable tokens from 1inch API:", error);
-
-        // Fallback to an empty list in case of errors
+        console.error("Error fetching stable token list:", error.message);
         return [];
     }
 }
@@ -476,10 +498,10 @@ async function getStableTokenList() {
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", topN = 3) {
     const routes = new Set(); // Use a Set to ensure uniqueness
-    const priceData = await fetchTokenPricesAcrossProtocols(tokens); // Fetch price data
-    
+    const priceData = await fetchTokenPricesAcrossProtocols(tokens); // Fetch token prices across protocols
+
     // Filter tokens for profitability and liquidity
-    const stableTokens = tokens.filter(token => STABLE_TOKENS.includes(token));
+    const stableTokens = tokens.filter((token) => STABLE_TOKENS.includes(token));
     if (stableTokens.length === 0) {
         console.error("No tokens matched the STABLE_TOKENS list. Skipping route generation.");
         return []; // Return an empty array if no valid tokens
@@ -492,7 +514,7 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
         return []; // Return an empty array if liquidity data is unavailable
     }
 
-    // Filter tokens that can support the capital amount
+    // Filter tokens with sufficient liquidity to support the capital amount
     const filteredTokens = Object.entries(liquidityData)
         .filter(([, liquidity]) => new BigNumber(liquidity).isGreaterThanOrEqualTo(CAPITAL)) // Ensure token liquidity >= CAPITAL
         .sort(([, liquidityA], [, liquidityB]) => liquidityB - liquidityA) // Sort by liquidity (descending)
@@ -503,18 +525,19 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
         return []; // Return an empty array if no tokens meet the liquidity requirement
     }
 
-    // Include the preferred start token in the filtered tokens
+    // Prioritize high-liquidity tokens and include the preferred start token
     const highLiquidityTokens = filteredTokens.slice(0, topN);
     const startTokens = highLiquidityTokens.includes(preferredStartToken)
-        ? [preferredStartToken, ...highLiquidityTokens.filter(token => token !== preferredStartToken)]
+        ? [preferredStartToken, ...highLiquidityTokens.filter((token) => token !== preferredStartToken)]
         : [preferredStartToken, ...highLiquidityTokens];
 
     console.log("Filtered Tokens by Liquidity:", filteredTokens);
     console.log("Starting Tokens for Routes:", startTokens);
 
-    // Generate routes with profitability check
+    // Function to recursively generate paths and check profitability
     function permuteWithProfitability(path, remainingHops) {
         if (remainingHops === 0) return;
+
         for (const token of filteredTokens) {
             if (!path.includes(token)) {
                 const newPath = [...path, token];
@@ -526,14 +549,23 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
         }
     }
 
-    // Start generating routes
+    // Generate paths starting from each high-liquidity token
     for (const startToken of startTokens) {
         permuteWithProfitability([startToken], MAX_HOPS - 1);
     }
 
-    // Convert routes back to arrays and return
-    return Array.from(routes).map(route => route.split(","));
+    // Convert routes back to arrays and sort by potential profitability
+    const allRoutes = Array.from(routes).map((route) => route.split(","));
+    const rankedRoutes = allRoutes.sort((a, b) => {
+        const profitA = estimateRoutePotential(a, priceData);
+        const profitB = estimateRoutePotential(b, priceData);
+        return profitB - profitA; // Sort descending by estimated profitability
+    });
+
+    console.log("Generated Routes:", rankedRoutes);
+    return rankedRoutes;
 }
+
 
 // Helper: Fetch prices across protocols
 async function fetchTokenPricesAcrossProtocols(tokens) {
@@ -542,19 +574,26 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
         for (const token of tokens) {
             const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
                 headers: HEADERS,
-                params: { fromTokenAddress: token, amount: CAPITAL.toFixed(0) }
+                params: {
+                    fromTokenAddress: token,
+                    amount: CAPITAL.toFixed(0),
+                },
             });
+
             const protocols = response.data.protocols || [];
-            prices[token] = protocols.map(protocol => ({
+            prices[token] = protocols.map((protocol) => ({
                 name: protocol.name,
-                price: protocol.price // Adjust based on API response structure
+                price: protocol.price, // Price for this protocol
             }));
         }
+        return prices;
     } catch (error) {
         console.error("Error fetching token prices across protocols:", error.message);
+        return {}; // Return an empty object if the API call fails
     }
-    return prices;
 }
+
+
 
 // Helper: Check if a path is profitable
 async function isProfitablePath(path, priceData) {
@@ -570,8 +609,15 @@ async function isProfitablePath(path, priceData) {
     for (let i = 0; i < path.length - 1; i++) {
         const fromToken = path[i];
         const toToken = path[i + 1];
-        const fromPrice = getBestPrice(priceData[fromToken]);
-        const toPrice = getBestPrice(priceData[toToken]);
+        const fromPrices = priceData[fromToken];
+        const toPrices = priceData[toToken];
+
+        if (!fromPrices || !toPrices) return false; // Abort if data is missing
+
+        // Use the best price from each protocol
+        const fromPrice = getBestPrice(fromPrices);
+        const toPrice = getBestPrice(toPrices);
+
         if (!fromPrice || !toPrice) return false;
 
         const priceDifference = toPrice.minus(fromPrice);
@@ -580,6 +626,7 @@ async function isProfitablePath(path, priceData) {
 
     return potentialProfit.isGreaterThan(adjustedProfitThreshold);
 }
+
 
 function calculateSlippage(path, priceData) {
     const slippageFactors = path.map(token => {
@@ -730,7 +777,7 @@ export async function calculateDynamicMinimumProfit() {
 // Evaluate the profitability of a given route with dynamic profit adjustment
 export async function evaluateRouteProfit(route) {
     try {
-        // Dynamic slippage based on token liquidity (dummy value here, replace with actual logic)
+        // Dynamic slippage based on token liquidity
         const tokenLiquidity = 150000000000; // Example liquidity value
         const slippage = tokenLiquidity > 100000000000 ? 0.5 : 1.0;
 
@@ -744,23 +791,29 @@ export async function evaluateRouteProfit(route) {
         const gasPrice = await fetchGasPrice();
         const gasCost = gasPrice.multipliedBy(gasEstimate);
 
+        // Fetch real-time token prices
+        const priceData = await fetchTokenPricesAcrossProtocols(route);
+
         // Process each step in the route
         for (let i = 0; i < route.length - 1; i++) {
             const fromToken = route[i];
             const toToken = route[i + 1];
 
-            // Fetch token decimals to ensure accurate conversions
-            const decimals = await fetchTokenDecimals(fromToken);
+            const fromPrice = priceData[fromToken];
+            const toPrice = priceData[toToken];
 
-            try {
-                // Fetch swap data for the current hop
-                const swapData = await getSwapData(fromToken, toToken, amountIn, slippage);
-                amountIn = new BigNumber(swapData.toTokenAmount).shiftedBy(-decimals);
+            if (!fromPrice || !toPrice) {
+                console.error(`Missing price data for ${fromToken} or ${toToken}`);
+                return new BigNumber(0); // Abort evaluation if any hop is invalid
+            }
 
-                if (amountIn.isZero()) throw new Error("Received zero amount during hop");
-            } catch (error) {
-                console.error(`Error in route evaluation (${fromToken} -> ${toToken}): ${error.message}`);
-                return new BigNumber(0); // Abort evaluation if any hop fails
+            // Adjust amount for slippage
+            const adjustedAmount = amountIn.multipliedBy(1 - slippage / 100);
+            amountIn = adjustedAmount.multipliedBy(toPrice).dividedBy(fromPrice);
+
+            if (amountIn.isZero()) {
+                console.error(`Received zero amount during hop from ${fromToken} to ${toToken}`);
+                return new BigNumber(0); // Abort evaluation if a zero amount occurs
             }
         }
 
@@ -774,6 +827,7 @@ export async function evaluateRouteProfit(route) {
         return new BigNumber(0); // Return zero profit on unexpected error
     }
 }
+
 
 export function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
