@@ -657,56 +657,62 @@ async function safeExecute(fn, ...args) {
 
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice({ useOptimal = false } = {}) {
-    return safeApiCall(async () => {
-        const now = Date.now();
+    const API_KEY = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
+    const url = "https://api.blocknative.com/gasprices/blockprices";
 
-        // Use cached gas price if it is less than 5 minutes old
-        if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
+    const now = Date.now();
+
+    // Use cached gas price if it is less than 5 minutes old
+    if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
+        return cachedGasPrice;
+    }
+
+    try {
+        // Make the API call to fetch gas price data
+        const response = await axios.get(url, {
+            headers: { Authorization: `Bearer ${API_KEY}` },
+            params: {
+                chainId: 42161, // Arbitrum Mainnet Chain ID
+            },
+        });
+
+        // Extract gas price (in Gwei) for the 'Fast' level
+        const gasPriceInGwei = response.data.blockPrices[0].estimatedPrices.find(
+            (price) => price.confidence === 90 // 90% confidence for fast transactions
+        ).price;
+
+        // Convert gas price from Gwei to Wei
+        const gasPriceInWei = new BigNumber(gasPriceInGwei).multipliedBy(1e9); // Gwei to Wei conversion
+
+        // Apply optimal gas price filtering if enabled
+        if (useOptimal) {
+            const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
+            const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
+
+            if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
+                console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
+                return null;
+            }
+        }
+
+        // Cache the fetched gas price and update the last fetch timestamp
+        cachedGasPrice = gasPriceInWei;
+        lastGasPriceFetch = now;
+
+        // Return the gas price in Wei
+        return gasPriceInWei;
+    } catch (error) {
+        console.error("Error fetching gas price:", error.message);
+
+        // Return cached value if available, or fallback to a default if none exists
+        if (cachedGasPrice) {
+            console.warn("Using cached gas price due to error in fetching new data.");
             return cachedGasPrice;
         }
 
-        const url = "https://gasstation-mainnet.arbitrum.io/v2";
-
-        try {
-            // Make the API call to fetch gas price data
-            const response = await axios.get(url);
-
-            // Extract gas price in Gwei from the response
-            const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
-
-            // Convert gas price from Gwei to Wei
-            const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), 'gwei'));
-
-            // Apply optimal gas price filtering if enabled
-            if (useOptimal) {
-                const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
-                const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
-
-                if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
-                    console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
-                    return null;
-                }
-            }
-
-            // Cache the fetched gas price and update the last fetch timestamp
-            cachedGasPrice = gasPriceInWei;
-            lastGasPriceFetch = now;
-
-            // Return the gas price in Wei
-            return gasPriceInWei;
-        } catch (error) {
-            console.error("Error fetching gas price:", error);
-
-            // Return cached value if available, or fallback to default if none exists
-            if (cachedGasPrice) {
-                console.warn("Using cached gas price due to error in fetching new data.");
-                return cachedGasPrice;
-            }
-            return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
-        }
-    });
+        return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
+    }
 }
-
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
 export async function calculateDynamicMinimumProfit() {
