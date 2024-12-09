@@ -134,6 +134,8 @@ export async function getNonce(tokenAddress) {
 }
 
 async function fetchCachedGasPrice() {
+ const API_KEY1 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
+    const url1 = "https://api.blocknative.com/gasprices/blockprices";
     const now = Date.now();
 
     // Use cached gas price if it is less than 5 minutes old
@@ -141,11 +143,14 @@ async function fetchCachedGasPrice() {
         return cachedGasPrice;
     }
 
-    const url = "https://gasstation-mainnet.arbitrum.io/v2";
-
     try {
         // Fetch gas price data from the API
-        const response = await axios.get(url);
+        const response = await axios.get(url1, {
+            headers: { Authorization: `Bearer ${API_KEY1}` },
+            params: {
+                chainId: 42161, // Arbitrum Mainnet Chain ID
+            },
+        });
         const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
 
         // Convert gas price from Gwei to Wei
@@ -672,7 +677,8 @@ async function getLiquidityData(tokens) {
 
         try {
             // API call to fetch liquidity data
-            const response = await axios.get(`https://api.1inch.io/v5.0/${CHAIN_ID}/tokens`);
+            const url2 = "https://api.1inch.dev/swap/v6.0/42161/tokens"; 
+            const response = await axios.get(url2 ,{ headers: HEADERS });
             const tokenData = response.data.tokens;
 
             // Process each token to extract liquidity data
@@ -990,9 +996,16 @@ export async function estimateGas(route, amount) {
 
 // Fetch current gas price with a maximum threshold
 export async function fetchOptimalGasPrice() {
+const API_KEY2 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
+    const url3 = "https://api.blocknative.com/gasprices/blockprices";
     try {
         // Fetch gas price from Arbitrum Gas Station or similar API
-        const response = await axios.get("https://gasstation-mainnet.arbitrum.io/v2");
+        const response = await axios.get(url3, {
+            headers: { Authorization: `Bearer ${API_KEY1}` },
+            params: {
+                chainId: 42161, // Arbitrum Mainnet Chain ID
+            },
+        });
         const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
         const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
 
