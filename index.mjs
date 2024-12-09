@@ -253,7 +253,7 @@ async function approveTokensWithPermit2(tokens) {
             }
 
             const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
-                headers: HEADERS,
+                HEADERS,
                 params: {
                     tokenAddress: token.address,
                     amount: token.amount.toFixed(),
@@ -277,11 +277,11 @@ async function approveTokensWithPermit2(tokens) {
 
 // Function to check token allowance
 async function checkAllowance(tokenAddress) {
-    const url = `${PATHFINDER_API_URL}/approve/allowance`;
+    const url5 = `${PATHFINDER_API_URL}/approve/allowance`;
 
     try {
-        const response = await axios.get(url, {
-            headers: HEADERS,
+        const response = await axios.get(url5, {
+            HEADERS,
             params: {
                 tokenAddress,
                 walletAddress: process.env.WALLET_ADDRESS,
@@ -301,7 +301,7 @@ async function checkAllowance(tokenAddress) {
 // Fetch swap data
 async function getSwapData(fromToken, toToken, amount, slippage) {
     return safeApiCall(async () => {
-        const url = `${PATHFINDER_API_URL}/swap`; // Adjusted to match API endpoint requirements
+        const url9 = `${PATHFINDER_API_URL}/swap`; // Adjusted to match API endpoint requirements
         const params = {
             fromTokenAddress: fromToken,
             toTokenAddress: toToken,
@@ -315,7 +315,7 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url, { headers: HEADERS, params });
+            const response = await axios.get(url9, { HEADERS, params });
 
             // Extract transaction data from the response
             const swapData = response.data;
@@ -464,12 +464,12 @@ async function getStableTokenList() {
 
     try {
         // Fetch liquidity sources
-        const liquidityResponse = await axios.get(`${PATHFINDER_API_URL}/liquidity-sources`, { headers: HEADERS });
+        const liquidityResponse = await axios.get(`${PATHFINDER_API_URL}/liquidity-sources`, HEADERS);
         const liquiditySources = liquidityResponse.data.protocols || [];
         console.log("Available Liquidity Sources:", liquiditySources);
 
         // Fetch token data
-        const tokenResponse = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+        const tokenResponse = await axios.get(`${PATHFINDER_API_URL}/tokens`, HEADERS);
         if (tokenResponse.data && tokenResponse.data.tokens) {
             const tokens = Object.keys(tokenResponse.data.tokens)
                 .filter(tokenAddress => {
@@ -578,7 +578,7 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
     try {
         for (const token of tokens) {
             const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-                headers: HEADERS,
+                HEADERS,
                 params: {
                     fromTokenAddress: token,
                     amount: CAPITAL.toFixed(0),
@@ -847,7 +847,7 @@ export async function getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver,
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-            headers: HEADERS,
+            HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
@@ -940,7 +940,7 @@ export async function encodeSwapData(route, amount, slippagePercent) {
     try {
         // Construct the API request with parameters that ensure protocol details are included
         const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            headers: HEADERS,
+            HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
