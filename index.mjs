@@ -462,42 +462,82 @@ async function getStableTokenList() {
         }
     }
 
+    const liquidityUrl = `${PATHFINDER_API_URL}/liquidity-sources`;
+    const tokensUrl = `${PATHFINDER_API_URL}/tokens`;
+
     try {
-        // Fetch liquidity sources
-        const liquidityResponse = await axios.get(`${PATHFINDER_API_URL}/liquidity-sources`, HEADERS);
+        // Fetch liquidity sources with retry logic
+        const liquidityResponse = await retry(
+            async () => {
+                const res = await apiQueue.add(() => axios.get(liquidityUrl, HEADERS));
+                if (res.status === 429) {
+                    throw new Error("Rate limit hit while fetching liquidity sources. Retrying...");
+                }
+                return res;
+            },
+            {
+                retries: 5, // Retry up to 5 times
+                minTimeout: 1000, // Start with 1 second delay
+                factor: 2, // Exponential backoff
+            }
+        );
         const liquiditySources = liquidityResponse.data.protocols || [];
         console.log("Available Liquidity Sources:", liquiditySources);
 
-        // Fetch token data
-        const tokenResponse = await axios.get(`${PATHFINDER_API_URL}/tokens`, HEADERS);
+        // Fetch token data with retry logic
+        const tokenResponse = await retry(
+            async () => {
+                const res = await apiQueue.add(() => axios.get(tokensUrl, HEADERS));
+                if (res.status === 429) {
+                    throw new Error("Rate limit hit while fetching token data. Retrying...");
+                }
+                return res;
+            },
+            {
+                retries: 5, // Retry up to 5 times
+                minTimeout: 1000, // Start with 1 second delay
+                factor: 2, // Exponential backoff
+            }
+        );
+
+        // Process token data
         if (tokenResponse.data && tokenResponse.data.tokens) {
             const tokens = Object.keys(tokenResponse.data.tokens)
-                .filter(tokenAddress => {
+                .filter((tokenAddress) => {
                     const tokenSymbol = tokenResponse.data.tokens[tokenAddress].symbol;
                     return STABLE_TOKENS.includes(tokenSymbol);
                 })
-                .map(tokenAddress => ({
+                .map((tokenAddress) => ({
                     address: tokenAddress,
                     symbol: tokenResponse.data.tokens[tokenAddress].symbol,
                     liquidity: tokenResponse.data.tokens[tokenAddress].liquidity || 0,
                 }));
 
-            // Sort tokens by liquidity and cache the result
+            // Sort tokens by liquidity in descending order
             const sortedTokens = tokens.sort((a, b) => b.liquidity - a.liquidity);
-            const tokenAddresses = sortedTokens.map(token => token.address);
+            const tokenAddresses = sortedTokens.map((token) => token.address);
+
+            // Cache the sorted token addresses
             cache.set(cacheKey, { data: tokenAddresses, timestamp: now });
 
             console.log("Retrieved and cached stable tokens:", tokenAddresses);
             return tokenAddresses;
         }
+
         console.error("Unexpected token response:", tokenResponse.data);
         return [];
     } catch (error) {
         console.error("Error fetching stable token list:", error.message);
+
+        // Fallback to cached data if available
+        if (cache.has(cacheKey)) {
+            console.warn("Using stale cached stable token list due to errors.");
+            return cache.get(cacheKey).data;
+        }
+
         return [];
     }
 }
-
 
 // Generate all possible routes within max hops limit
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
