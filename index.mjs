@@ -714,8 +714,6 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
 }
 
 
-
-
 // Helper: Check if a path is profitable
 async function isProfitablePath(path, priceData) {
     const gasPrice = await fetchGasPrice(); // Fetch current gas price in Wei
