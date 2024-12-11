@@ -30,7 +30,7 @@ const apiQueue = new PQueue({
 
 // Define the CAPITAL as $100,000 USDC with 6 decimals (to match USDC decimal places)
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
-const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.003);  // Equivalent to 0.3% profit
+const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.005);  // Equivalent to 0.5% profit
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum profit threshold $500 (6 decimals)
 // Optional: Setting a higher threshold for "critical" profits
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
