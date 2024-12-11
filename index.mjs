@@ -9,7 +9,6 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 dotenv.config();
-
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
 const ABI = require('./YourSmartContractABI.json');
