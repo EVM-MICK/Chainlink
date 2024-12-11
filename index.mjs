@@ -24,20 +24,16 @@ const HEADERS = {
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
-    interval: 1100, // 1 second interval
+    interval: 1200, // 1.2 second interval
     intervalCap: 1, // 1 request per second
 });
 
 // Define the CAPITAL as $100,000 USDC with 6 decimals (to match USDC decimal places)
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
-// Define the profit threshold based on your target return on investment (ROI)
-// For example, 0.3% profit of the CAPITAL amount, with appropriate scaling to smallest units
 const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.003);  // Equivalent to 0.3% profit
-// Minimum profit threshold could be set based on a fixed amount, such as $200
-// You can scale this threshold to your preferred unit (e.g., in smallest token units for USDC)
-const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).shiftedBy(6);  // Minimum profit threshold $200 (6 decimals)
+const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum profit threshold $500 (6 decimals)
 // Optional: Setting a higher threshold for "critical" profits
-const CRITICAL_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Critical profit threshold $500 (6 decimals)
+const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
 const chainId = 42161;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
@@ -48,10 +44,11 @@ const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
 // Stable, high-liquidity tokens to include in route evaluations
 const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
 const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
-const MAX_HOPS = 4;
-const cache = new Map();
+const MAX_HOPS = 3;
 let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
+const cacheDuration = 5 * 60 * 1000; // 5 minutes
+const cache = new Map();
 
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
@@ -61,13 +58,10 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     process.exit(1);
 }
 
-
-// Convert expiration to deadline in seconds
 export function toDeadline(expirationMs) {
     return Math.floor(Date.now() / 1000) + Math.floor(expirationMs / 1000);
 }
 
-// Helper function: Fetch the current nonce for a token
 export async function fetchNonce(walletAddress, tokenAddress) {
     return await contract.methods.nonce(walletAddress, tokenAddress).call();
 }
@@ -378,12 +372,17 @@ async function findProfitableRoutes() {
     const preferredStartToken = "USDC";
     const topN = 3;
 
+    // Fetch cached token price data
+    const cachedPriceData = await fetchTokenPricesAcrossProtocols(tokens);
+
+    // Generate routes using the updated `generateRoutes` function
     const allRoutes = await generateRoutes(tokens, MAX_HOPS, preferredStartToken, topN);
     const profitableRoutes = [];
     const routeQueue = new PriorityQueue((a, b) => b.priority - a.priority);
 
+    // Enqueue routes based on dynamic potential profit
     for (const route of allRoutes) {
-        const potentialProfit = estimateRoutePotential(route, CAPITAL);
+        const potentialProfit = estimateRoutePotential(route, CAPITAL, cachedPriceData); // Pass cached price data
         routeQueue.enqueue({ route, priority: potentialProfit });
     }
 
@@ -391,6 +390,7 @@ async function findProfitableRoutes() {
         const { route } = routeQueue.dequeue();
 
         try {
+            // Evaluate route profitability
             const profit = await evaluateRouteProfit(route);
 
             if (profit.isGreaterThanOrEqualTo(CRITICAL_PROFIT_THRESHOLD)) {
@@ -417,9 +417,11 @@ async function findProfitableRoutes() {
         }
     }
 
+    // Sort profitable routes by actual profit
     profitableRoutes.sort((a, b) => b.profit.minus(a.profit).toNumber());
     return profitableRoutes;
 }
+
 
 // Utility: Priority queue implementation
 class PriorityQueue {
@@ -443,15 +445,36 @@ class PriorityQueue {
 }
 
 // Utility: Estimate route potential (placeholder logic)
-function estimateRoutePotential(route, capital) {
-    // Placeholder logic: Higher priority for routes starting with preferred tokens
+function estimateRoutePotential(route, capital, cachedPriceData) {
+    // Set base priority for routes starting with preferred tokens
     const preferredTokens = ["USDC", "USDT"];
     const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
 
-    // Adjust priority based on potential profit (dummy calculation for now)
-    const estimatedProfit = capital.multipliedBy(0.002); // Assume 0.2% profit
+    // Calculate estimated profit based on cached price data
+    let estimatedProfit = new BigNumber(0);
+
+    for (let i = 0; i < route.length - 1; i++) {
+        const fromToken = route[i];
+        const toToken = route[i + 1];
+
+        const fromPrice = cachedPriceData[fromToken];
+        const toPrice = cachedPriceData[toToken];
+
+        // Ensure both prices exist in the cached data
+        if (!fromPrice || !toPrice) {
+            console.warn(`Missing price data for ${fromToken} or ${toToken}. Skipping route.`);
+            return basePriority; // Fallback to base priority if data is incomplete
+        }
+
+        // Calculate profit margin for this step in the route
+        const stepProfit = toPrice.minus(fromPrice).multipliedBy(capital).dividedBy(fromPrice);
+        estimatedProfit = estimatedProfit.plus(stepProfit);
+    }
+
+    // Adjust priority based on total estimated profit
     return basePriority + estimatedProfit.toNumber();
 }
+
 
 // Function to retrieve a list of stable, high-liquidity tokens from the 1inch API and  Get stable, high-liquidity tokens to focus on profitable paths
 async function getStableTokenList() {
@@ -467,29 +490,8 @@ async function getStableTokenList() {
             return data;
         }
     }
-
-    const liquidityUrl = `${PATHFINDER_API_URL}/liquidity-sources`;
     const tokensUrl = `${PATHFINDER_API_URL}/tokens`;
-
     try {
-        // Fetch liquidity sources with retry logic
-        const liquidityResponse = await retry(
-            async () => {
-                const res = await apiQueue.add(() => axios.get(liquidityUrl, HEADERS));
-                if (res.status === 429) {
-                    throw new Error("Rate limit hit while fetching liquidity sources. Retrying...");
-                }
-                return res;
-            },
-            {
-                retries: 5, // Retry up to 5 times
-                minTimeout: 1000, // Start with 1 second delay
-                factor: 2, // Exponential backoff
-            }
-        );
-        const liquiditySources = liquidityResponse.data.protocols || [];
-        console.log("Available Liquidity Sources:", liquiditySources);
-
         // Fetch token data with retry logic
         const tokenResponse = await retry(
             async () => {
@@ -501,7 +503,7 @@ async function getStableTokenList() {
             },
             {
                 retries: 5, // Retry up to 5 times
-                minTimeout: 1000, // Start with 1 second delay
+                minTimeout: 1200, // Start with 1 second delay
                 factor: 2, // Exponential backoff
             }
         );
@@ -519,6 +521,7 @@ async function getStableTokenList() {
                     address: tokenAddress,
                     symbol: tokenResponse.data.tokens[tokenAddress].symbol,
                     liquidity: tokenResponse.data.tokens[tokenAddress].liquidity || 0,
+                    decimals: tokenResponse.data.tokens[tokenAddress].decimals || 18, // Ensure decimals are included
                 }));
 
             if (tokens.length === 0) {
@@ -526,8 +529,20 @@ async function getStableTokenList() {
                 return [];
             }
 
+            // Fetch additional data like prices and liquidity for stable tokens
+            const enrichedTokens = await Promise.all(
+                tokens.map(async (token) => {
+                    const priceData = await fetchTokenPrice(token.address); // Use cached price fetch
+                    return {
+                        ...token,
+                        price: priceData?.price || 0,
+                        liquidity: priceData?.liquidity || token.liquidity,
+                    };
+                })
+            );
+
             // Sort tokens by liquidity in descending order
-            const sortedTokens = tokens.sort((a, b) => b.liquidity - a.liquidity);
+            const sortedTokens = enrichedTokens.sort((a, b) => b.liquidity - a.liquidity);
             const tokenAddresses = sortedTokens.map((token) => token.address);
 
             // Cache the sorted token addresses
@@ -552,10 +567,43 @@ async function getStableTokenList() {
     }
 }
 
+// Helper function to fetch token price and liquidity
+async function fetchTokenPrice(tokenAddress) {
+    const cacheKey = `tokenPrice:${tokenAddress}`;
+    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
+
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (Date.now() - timestamp < cacheDuration) {
+            return data; // Return cached data if fresh
+        }
+    }
+
+    try {
+        const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
+            headers: HEADERS,
+            params: {
+                fromTokenAddress: tokenAddress,
+                amount: CAPITAL.toFixed(0),
+            },
+        });
+
+        const price = response.data.protocols?.[0]?.price || 0; // Default to 0 if no price data
+        const liquidity = response.data.protocols?.[0]?.liquidity || 0; // Default to 0 if no liquidity data
+
+        const data = { price, liquidity };
+        cache.set(cacheKey, { data, timestamp: Date.now() });
+        return data;
+    } catch (error) {
+        console.error(`Error fetching price for token ${tokenAddress}:`, error.message);
+        return null; // Fallback to null in case of failure
+    }
+}
+
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", topN = 3) {
     const routes = new Set(); // Use a Set to ensure uniqueness
-    const priceData = await fetchTokenPricesAcrossProtocols(tokens); // Fetch token prices across protocols
+    const cachedPriceData = await fetchTokenPricesAcrossProtocols(tokens); // Fetch cached token prices
 
     // Filter tokens for profitability and liquidity
     const stableTokens = tokens.filter((token) => STABLE_TOKENS.includes(token));
@@ -565,7 +613,7 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
     }
 
     // Fetch and rank tokens by liquidity
-    const liquidityData = await safeExecute(getLiquidityData, stableTokens);
+    const liquidityData = await getLiquidityData(stableTokens); // Use cached liquidity data
     if (!liquidityData || Object.keys(liquidityData).length === 0) {
         console.error("No valid liquidity data. Skipping route generation.");
         return []; // Return an empty array if liquidity data is unavailable
@@ -592,30 +640,31 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
     console.log("Starting Tokens for Routes:", startTokens);
 
     // Function to recursively generate paths and check profitability
-    function permuteWithProfitability(path, remainingHops) {
+    async function permuteWithProfitability(path, remainingHops) {
         if (remainingHops === 0) return;
 
         for (const token of filteredTokens) {
             if (!path.includes(token)) {
                 const newPath = [...path, token];
-                if (isProfitablePath(newPath, priceData)) {
+                const isProfitable = await isProfitablePath(newPath, cachedPriceData); // Use cached price data
+                if (isProfitable) {
                     routes.add(newPath.join(",")); // Store as a string for uniqueness
                 }
-                permuteWithProfitability(newPath, remainingHops - 1);
+                await permuteWithProfitability(newPath, remainingHops - 1);
             }
         }
     }
 
     // Generate paths starting from each high-liquidity token
     for (const startToken of startTokens) {
-        permuteWithProfitability([startToken], MAX_HOPS - 1);
+        await permuteWithProfitability([startToken], MAX_HOPS - 1);
     }
 
     // Convert routes back to arrays and sort by potential profitability
     const allRoutes = Array.from(routes).map((route) => route.split(","));
     const rankedRoutes = allRoutes.sort((a, b) => {
-        const profitA = estimateRoutePotential(a, priceData);
-        const profitB = estimateRoutePotential(b, priceData);
+        const profitA = estimateRoutePotential(a, CAPITAL, cachedPriceData); // Use updated estimateRoutePotential
+        const profitB = estimateRoutePotential(b, CAPITAL, cachedPriceData); // Use updated estimateRoutePotential
         return profitB - profitA; // Sort descending by estimated profitability
     });
 
@@ -623,44 +672,47 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
     return rankedRoutes;
 }
 
-
 // Helper: Fetch prices across protocols
 async function fetchTokenPricesAcrossProtocols(tokens) {
     const prices = {};
 
-    try {
-        for (const token of tokens) {
-            // Fetch price data for each token
-            const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-                headers: HEADERS,
-                params: {
-                    fromTokenAddress: token,
-                    amount: CAPITAL.toFixed(0), // Token amount for price fetching
-                },
-            });
+    for (const token of tokens) {
+        const cacheKey = `tokenPrice:${token}`;
 
-            console.log(`Price Data for ${token}:`, response.data);
+        // Use the `cachedGet` function to fetch from cache or call API if data is stale
+        const priceData = await cachedGet(cacheKey, async () => {
+            try {
+                const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
+                    headers: HEADERS,
+                    params: {
+                        fromTokenAddress: token,
+                        amount: CAPITAL.toFixed(0), // Use capital for consistent price fetching
+                    },
+                });
 
-            // Extract protocols and prices
-            const protocols = response.data.protocols || [];
-            prices[token] = protocols.map((protocol) => ({
-                name: protocol.name,
-                price: new BigNumber(protocol.price), // Ensure price is a BigNumber for accurate calculations
-            }));
-        }
+                if (!response.data || !response.data.protocols) {
+                    console.warn(`No price data found for token ${token}.`);
+                    return [];
+                }
 
-        console.log("Fetched token prices across protocols:", prices);
-        return prices;
-    } catch (error) {
-        console.error(
-            "Error fetching token prices across protocols:",
-            error.response?.data || error.message
-        );
+                return response.data.protocols;
+            } catch (error) {
+                console.error(`Error fetching price data for token ${token}:`, error.message);
+                return [];
+            }
+        }, "tokenPrices"); // Specify cache group or namespace if needed
 
-        // Return an empty prices object in case of failure
-        return {};
+        // Map protocols to extract relevant price information
+        prices[token] = priceData.map((protocol) => ({
+            name: protocol.name,
+            price: new BigNumber(protocol.price), // Ensure the price is a BigNumber for calculations
+        }));
     }
+
+    console.log("Fetched token prices across protocols:", prices);
+    return prices;
 }
+
 
 
 
@@ -674,25 +726,36 @@ async function isProfitablePath(path, priceData) {
     const adjustedProfitThreshold = PROFIT_THRESHOLD.plus(gasCost).plus(slippage);
 
     let potentialProfit = new BigNumber(0);
+    let amountIn = CAPITAL; // Start with initial capital
 
+    // Evaluate each hop in the path
     for (let i = 0; i < path.length - 1; i++) {
         const fromToken = path[i];
         const toToken = path[i + 1];
-        const fromPrices = priceData[fromToken];
-        const toPrices = priceData[toToken];
 
-        if (!fromPrices || !toPrices) return false; // Abort if data is missing
+        try {
+            // Fetch real-time swap quote for the current token pair
+            const swapQuote = await getSwapQuote(fromToken, toToken, null, null, amountIn, null, null, path);
+            const amountOut = new BigNumber(swapQuote.toTokenAmount);
 
-        // Use the best price from each protocol
-        const fromPrice = getBestPrice(fromPrices);
-        const toPrice = getBestPrice(toPrices);
+            if (amountOut.isZero()) {
+                console.error(`Swap failed for pair: ${fromToken} -> ${toToken}`);
+                return false; // Abort if a swap cannot be performed
+            }
 
-        if (!fromPrice || !toPrice) return false;
+            // Calculate potential profit for this hop
+            const priceDifference = amountOut.minus(amountIn);
+            potentialProfit = potentialProfit.plus(priceDifference);
 
-        const priceDifference = toPrice.minus(fromPrice);
-        potentialProfit = potentialProfit.plus(priceDifference);
+            // Update input amount for the next hop
+            amountIn = amountOut;
+        } catch (error) {
+            console.error(`Error fetching swap quote for pair: ${fromToken} -> ${toToken}`, error.message);
+            return false; // Abort if fetching the swap quote fails
+        }
     }
 
+    // Return true if potential profit exceeds the adjusted profit threshold
     return potentialProfit.isGreaterThan(adjustedProfitThreshold);
 }
 
@@ -733,35 +796,24 @@ function getBestPrice(protocolPrices) {
         : null;
 }
 
-
 // Helper Function: Fetch Liquidity Data (1inch API Example)
 async function getLiquidityData(tokens) {
-    return safeApiCall(async () => {
+    const cacheKey = "liquidityData";
+    return cachedGet(cacheKey, async () => {
         const liquidityData = {};
-
         try {
-            // API call to fetch liquidity data
-            const url2 = "https://api.1inch.dev/swap/v6.0/42161/tokens"; 
-            const response = await axios.get(url2 ,{ headers: HEADERS });
-            const tokenData = response.data.tokens;
-
-            // Process each token to extract liquidity data
+            const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
             tokens.forEach(token => {
-                const tokenInfo = tokenData[token.toLowerCase()];
+                const tokenInfo = response.data.tokens[token.toLowerCase()];
                 liquidityData[token] = tokenInfo ? tokenInfo.liquidity || 0 : 0;
             });
         } catch (error) {
-            // Handle errors and fallback logic
-            console.error("Error fetching liquidity data from 1inch:", error.message);
-            console.warn("Falling back to predefined liquidity ranking.");
-            tokens.forEach(token => {
-                liquidityData[token] = STABLE_TOKENS.includes(token) ? 1 : 0; // Fallback to predefined values
-            });
+            console.error("Error fetching liquidity data:", error.message);
         }
-
         return liquidityData;
-    });
+    }, "liquidityData");
 }
+
 
 async function safeExecute(fn, ...args) {
     try {
@@ -835,7 +887,7 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
 export async function calculateDynamicMinimumProfit() {
     const gasPrice = await fetchGasPrice();
-    const estimatedGas = await estimateGas(route, CAPITAL); // Example estimated gas; adjust based on actual route complexity
+    const estimatedGas = await estimateGas(800000); // Example estimated gas; adjust based on actual route complexity
     const gasCost = gasPrice.multipliedBy(estimatedGas);
 
     // Flash loan fee (0.05% of CAPITAL)
@@ -923,35 +975,23 @@ export function formatAmount(amount, decimals) {
 }
 
 // Get a swap quote for a multihop with retry logic
-export async function getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver, amountIn, minReturnAmount, flags, route, retries = 3) {
-    const tokenDecimals = STABLE_TOKENS.includes(fromToken) || STABLE_TOKENS.includes(toToken) ? 6 : 18;
-    const formattedAmount = formatAmount(CAPITAL, tokenDecimals);
-    const amount = CAPITAL;
-
-    try {
-        const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
+async function getSwapQuote(fromToken, toToken, amount, slippage) {
+    const cacheKey = `swapQuote:${fromToken}-${toToken}-${amount}`;
+    return cachedGet(cacheKey, async () => {
+        const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
             headers: HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
-                amount: formattedAmount,
-                slippage: "1",
-                disableEstimate: false,
+                amount: amount.toFixed(0),
+                slippage: slippage.toFixed(2),
+                allowPartialFill: false,
             },
         });
-        return new BigNumber(response.data.toTokenAmount);
-    } catch (error) {
-        if (retries > 0) {
-            console.warn(`Retrying getSwapQuote for ${fromToken} to ${toToken}. Retries left: ${retries - 1}`);
-            return getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver, amount, minReturnAmount, flags, route, retries - 1);
-        } else {
-            const errorMessage = `Error fetching route quote for ${fromToken} to ${toToken}: ${error}`;
-            console.error(errorMessage);
-            await sendTelegramMessage(errorMessage); // Notify error
-            return new BigNumber(0);
-        }
-    }
+        return response.data.tx.data;
+    }, "swapQuotes");
 }
+
 
 // Function to execute the profitable route using flash loan and swap
 export async function executeRoute(route, amount) {
@@ -1105,24 +1145,58 @@ const API_KEY2 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
         return null; // Fallback or indicate failure
     }
 }
+
+function getCacheDuration(type) {
+    switch (type) {
+        case "tokenPrices":
+            return 5 * 60 * 1000; // Cache token prices for 5 minutes
+        case "liquidityData":
+            return 10 * 60 * 1000; // Cache liquidity data for 10 minutes
+        case "swapQuotes":
+            return 1 * 60 * 1000; // Cache swap quotes for 1 minute
+        default:
+            return 5 * 60 * 1000; // Default cache duration
+    }
+}
+
+async function cachedGet(key, fetchFunction, type) {
+    const now = Date.now();
+    const cacheDuration = getCacheDuration(type);
+
+    // Check cache validity
+    if (cache.has(key)) {
+        const { data, timestamp } = cache.get(key);
+        if (now - timestamp < cacheDuration) {
+            console.log(`Returning cached data for key: ${key}`);
+            return data;
+        }
+    }
+
+    // Fetch fresh data if cache is stale or missing
+    const data = await fetchFunction();
+    cache.set(key, { data, timestamp: now });
+    console.log(`Fetched and cached data for key: ${key}`);
+    return data;
+}
+
+
 // Function to send Telegram notifications
 export async function sendTelegramMessage(message, isCritical = false) {
-    if (!isCritical && process.env.DEBUG !== 'true') return;
+    const chatId = isCritical
+        ? process.env.TELEGRAM_CRITICAL_CHAT_ID
+        : process.env.TELEGRAM_CHAT_ID;
+
     try {
-        const response = await axios.post(
+        await axios.post(
             `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-            {
-                chat_id: process.env.TELEGRAM_CHAT_ID,
-                text: message,
-                parse_mode: "Markdown",
-            }
+            { chat_id: chatId, text: message, parse_mode: "Markdown" }
         );
         console.log("Telegram notification sent:", message);
-        return response.data;
     } catch (error) {
         console.error("Failed to send Telegram message:", error.message);
     }
 }
+
 
 // Start the arbitrage bot
 runArbitrageBot();
