@@ -253,7 +253,7 @@ async function approveTokensWithPermit2(tokens) {
             }
 
             const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
-                HEADERS,
+                headers: HEADERS,
                 params: {
                     tokenAddress: token.address,
                     amount: token.amount.toFixed(),
@@ -281,7 +281,7 @@ async function checkAllowance(tokenAddress) {
 
     try {
         const response = await axios.get(url5, {
-            HEADERS,
+            headers: HEADERS,
             params: {
                 tokenAddress,
                 walletAddress: process.env.WALLET_ADDRESS,
@@ -618,7 +618,7 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
     try {
         for (const token of tokens) {
             const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-                HEADERS,
+                headers: HEADERS,
                 params: {
                     fromTokenAddress: token,
                     amount: CAPITAL.toFixed(0),
@@ -887,7 +887,7 @@ export async function getSwapQuote(fromToken, toToken, srcReceiver, dstReceiver,
 
     try {
         const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-            HEADERS,
+            headers: HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
@@ -980,7 +980,7 @@ export async function encodeSwapData(route, amount, slippagePercent) {
     try {
         // Construct the API request with parameters that ensure protocol details are included
         const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            HEADERS,
+            headers: HEADERS,
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
