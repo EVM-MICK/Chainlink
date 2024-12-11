@@ -848,9 +848,12 @@ export async function calculateDynamicMinimumProfit() {
 // Evaluate the profitability of a given route with dynamic profit adjustment
 export async function evaluateRouteProfit(route) {
     try {
-        // Dynamic slippage based on token liquidity
-        const tokenLiquidity = 150000000000; // Example liquidity value
-        const slippage = tokenLiquidity > 100000000000 ? 0.5 : 1.0;
+        // Fetch real-time token prices across protocols
+        const priceData = await fetchTokenPricesAcrossProtocols(route);
+        if (!priceData || Object.keys(priceData).length === 0) {
+            console.error("Failed to fetch price data for route evaluation.");
+            return new BigNumber(0);
+        }
 
         // Calculate dynamic minimum profit threshold
         const minimumProfitThreshold = await calculateDynamicMinimumProfit();
@@ -858,27 +861,35 @@ export async function evaluateRouteProfit(route) {
         // Initial input amount (CAPITAL in USDT, assumed 6 decimals)
         let amountIn = CAPITAL;
 
+        // Estimate gas cost
         const gasEstimate = await estimateGas(route, amountIn);
         const gasPrice = await fetchGasPrice();
         const gasCost = gasPrice.multipliedBy(gasEstimate);
-
-        // Fetch real-time token prices
-        const priceData = await fetchTokenPricesAcrossProtocols(route);
 
         // Process each step in the route
         for (let i = 0; i < route.length - 1; i++) {
             const fromToken = route[i];
             const toToken = route[i + 1];
 
-            const fromPrice = priceData[fromToken];
-            const toPrice = priceData[toToken];
+            const fromTokenPrices = priceData[fromToken];
+            const toTokenPrices = priceData[toToken];
 
-            if (!fromPrice || !toPrice) {
+            if (!fromTokenPrices || !toTokenPrices) {
                 console.error(`Missing price data for ${fromToken} or ${toToken}`);
                 return new BigNumber(0); // Abort evaluation if any hop is invalid
             }
 
-            // Adjust amount for slippage
+            // Use the best price for each protocol
+            const fromPrice = getBestPrice(fromTokenPrices);
+            const toPrice = getBestPrice(toTokenPrices);
+
+            if (!fromPrice || !toPrice) {
+                console.error(`Invalid price data for ${fromToken} or ${toToken}`);
+                return new BigNumber(0); // Abort if price data is invalid
+            }
+
+            // Adjust amount based on slippage
+            const slippage = calculateSlippage([fromToken, toToken], priceData);
             const adjustedAmount = amountIn.multipliedBy(1 - slippage / 100);
             amountIn = adjustedAmount.multipliedBy(toPrice).dividedBy(fromPrice);
 
@@ -892,12 +903,19 @@ export async function evaluateRouteProfit(route) {
         const profit = amountIn.minus(CAPITAL).minus(gasCost);
 
         // Return profit only if it meets the minimum profit threshold
-        return profit.isGreaterThanOrEqualTo(minimumProfitThreshold) ? profit : new BigNumber(0);
+        if (profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
+            console.log(`Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} USDT`);
+            return profit;
+        } else {
+            console.log("Route did not meet the minimum profit threshold.");
+            return new BigNumber(0);
+        }
     } catch (error) {
         console.error("Unexpected error in evaluateRouteProfit:", error.message);
         return new BigNumber(0); // Return zero profit on unexpected error
     }
 }
+
 
 
 export function formatAmount(amount, decimals) {
