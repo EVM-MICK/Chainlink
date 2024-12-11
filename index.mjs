@@ -24,13 +24,20 @@ const HEADERS = {
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
-    interval: 1000, // 1 second interval
+    interval: 1100, // 1 second interval
     intervalCap: 1, // 1 request per second
 });
 
+// Define the CAPITAL as $100,000 USDC with 6 decimals (to match USDC decimal places)
 const CAPITAL = new BigNumber(100000).shiftedBy(6);   // $100,000 in USDC (6 decimals)
-const PROFIT_THRESHOLD = new BigNumber(0.3).multipliedBy(1e6);  // Equivalent to 0.3 * 1e6 in smallest units
-const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).multipliedBy(1e6);
+// Define the profit threshold based on your target return on investment (ROI)
+// For example, 0.3% profit of the CAPITAL amount, with appropriate scaling to smallest units
+const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.003);  // Equivalent to 0.3% profit
+// Minimum profit threshold could be set based on a fixed amount, such as $200
+// You can scale this threshold to your preferred unit (e.g., in smallest token units for USDC)
+const MINIMUM_PROFIT_THRESHOLD = new BigNumber(200).shiftedBy(6);  // Minimum profit threshold $200 (6 decimals)
+// Optional: Setting a higher threshold for "critical" profits
+const CRITICAL_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Critical profit threshold $500 (6 decimals)
 const chainId = 42161;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
@@ -41,7 +48,6 @@ const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
 // Stable, high-liquidity tokens to include in route evaluations
 const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
 const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
-const CRITICAL_PROFIT_THRESHOLD = new BigNumber(500).multipliedBy(1e6); // Example: $500 in smallest units
 const MAX_HOPS = 4;
 const cache = new Map();
 let cachedGasPrice = null; // Cached gas price value
@@ -502,6 +508,8 @@ async function getStableTokenList() {
 
         // Process token data
         if (tokenResponse.data && tokenResponse.data.tokens) {
+            console.log("Fetched Token Data:", tokenResponse.data.tokens);
+
             const tokens = Object.keys(tokenResponse.data.tokens)
                 .filter((tokenAddress) => {
                     const tokenSymbol = tokenResponse.data.tokens[tokenAddress].symbol;
@@ -512,6 +520,11 @@ async function getStableTokenList() {
                     symbol: tokenResponse.data.tokens[tokenAddress].symbol,
                     liquidity: tokenResponse.data.tokens[tokenAddress].liquidity || 0,
                 }));
+
+            if (tokens.length === 0) {
+                console.error("No tokens matched the STABLE_TOKENS list.");
+                return [];
+            }
 
             // Sort tokens by liquidity in descending order
             const sortedTokens = tokens.sort((a, b) => b.liquidity - a.liquidity);
@@ -524,7 +537,7 @@ async function getStableTokenList() {
             return tokenAddresses;
         }
 
-        console.error("Unexpected token response:", tokenResponse.data);
+        console.error("Unexpected token response format:", tokenResponse.data);
         return [];
     } catch (error) {
         console.error("Error fetching stable token list:", error.message);
@@ -539,7 +552,6 @@ async function getStableTokenList() {
     }
 }
 
-// Generate all possible routes within max hops limit
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", topN = 3) {
     const routes = new Set(); // Use a Set to ensure uniqueness
@@ -554,8 +566,8 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
 
     // Fetch and rank tokens by liquidity
     const liquidityData = await safeExecute(getLiquidityData, stableTokens);
-    if (!liquidityData) {
-        console.error("Failed to fetch liquidity data. Skipping route generation.");
+    if (!liquidityData || Object.keys(liquidityData).length === 0) {
+        console.error("No valid liquidity data. Skipping route generation.");
         return []; // Return an empty array if liquidity data is unavailable
     }
 
@@ -615,26 +627,38 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
 // Helper: Fetch prices across protocols
 async function fetchTokenPricesAcrossProtocols(tokens) {
     const prices = {};
+
     try {
         for (const token of tokens) {
+            // Fetch price data for each token
             const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
                 headers: HEADERS,
                 params: {
                     fromTokenAddress: token,
-                    amount: CAPITAL.toFixed(0),
+                    amount: CAPITAL.toFixed(0), // Token amount for price fetching
                 },
             });
 
+            console.log(`Price Data for ${token}:`, response.data);
+
+            // Extract protocols and prices
             const protocols = response.data.protocols || [];
             prices[token] = protocols.map((protocol) => ({
                 name: protocol.name,
-                price: protocol.price, // Price for this protocol
+                price: new BigNumber(protocol.price), // Ensure price is a BigNumber for accurate calculations
             }));
         }
+
+        console.log("Fetched token prices across protocols:", prices);
         return prices;
     } catch (error) {
-        console.error("Error fetching token prices across protocols:", error.message);
-        return {}; // Return an empty object if the API call fails
+        console.error(
+            "Error fetching token prices across protocols:",
+            error.response?.data || error.message
+        );
+
+        // Return an empty prices object in case of failure
+        return {};
     }
 }
 
@@ -750,18 +774,18 @@ async function safeExecute(fn, ...args) {
 
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice({ useOptimal = false } = {}) {
-    const API_KEY = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
+    const API_KEY = process.env.BLOCKNATIVE_API_KEY; // Use the API Key from environment variables
     const url = "https://api.blocknative.com/gasprices/blockprices";
-
     const now = Date.now();
 
-    // Use cached gas price if it is less than 5 minutes old
+    // Use cached gas price if it's fresh (less than 5 minutes old)
     if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
+        console.log("Using cached gas price:", cachedGasPrice.dividedBy(1e9).toFixed(2), "Gwei");
         return cachedGasPrice;
     }
 
     try {
-        // Make the API call to fetch gas price data
+        // Fetch gas price from the Blocknative API
         const response = await axios.get(url, {
             headers: { Authorization: `Bearer ${API_KEY}` },
             params: {
@@ -769,18 +793,18 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
             },
         });
 
-        // Extract gas price (in Gwei) for the 'Fast' level
+        // Extract gas price at 90% confidence level
         const gasPriceInGwei = response.data.blockPrices[0].estimatedPrices.find(
-            (price) => price.confidence === 90 // 90% confidence for fast transactions
+            (price) => price.confidence === 90
         ).price;
 
-        // Convert gas price from Gwei to Wei
-        const gasPriceInWei = new BigNumber(gasPriceInGwei).multipliedBy(1e9); // Gwei to Wei conversion
+        // Convert Gwei to Wei
+        const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), "gwei"));
 
-        // Apply optimal gas price filtering if enabled
+        // If `useOptimal` is enabled, ensure gas price is within optimal thresholds
         if (useOptimal) {
-            const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
-            const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
+            const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize congestion to 0-1 range
+            const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // Maximum gas price in Wei
 
             if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
                 console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
@@ -788,22 +812,23 @@ async function fetchGasPrice({ useOptimal = false } = {}) {
             }
         }
 
-        // Cache the fetched gas price and update the last fetch timestamp
+        // Cache the gas price and update the fetch timestamp
         cachedGasPrice = gasPriceInWei;
         lastGasPriceFetch = now;
 
-        // Return the gas price in Wei
+        console.log("Fetched gas price:", gasPriceInWei.dividedBy(1e9).toFixed(2), "Gwei");
         return gasPriceInWei;
     } catch (error) {
         console.error("Error fetching gas price:", error.message);
 
-        // Return cached value if available, or fallback to a default if none exists
+        // Use cached gas price if available, or fallback to default
         if (cachedGasPrice) {
-            console.warn("Using cached gas price due to error in fetching new data.");
+            console.warn("Using cached gas price due to error fetching new data.");
             return cachedGasPrice;
         }
 
-        return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
+        console.warn("Falling back to default gas price (50 Gwei).");
+        return new BigNumber(50).multipliedBy(1e9); // Default fallback: 50 Gwei in Wei
     }
 }
 
