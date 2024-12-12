@@ -679,9 +679,9 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
     for (const token of tokens) {
         const cacheKey = `tokenPrice:${token}`;
 
-        // Use the `cachedGet` function to fetch from cache or call API if data is stale
-        const priceData = await cachedGet(cacheKey, async () => {
-            try {
+        try {
+            // Use the `cachedGet` function to fetch from cache or call API if data is stale
+            const priceData = await cachedGet(cacheKey, async () => {
                 const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
                     headers: HEADERS,
                     params: {
@@ -691,28 +691,37 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
                 });
 
                 if (!response.data || !response.data.protocols) {
-                    console.warn(`No price data found for token ${token}.`);
+                    console.warn(`No protocols data found for token ${token}.`);
                     return [];
                 }
 
                 return response.data.protocols;
-            } catch (error) {
-                console.error(`Error fetching price data for token ${token}:`, error.message);
-                return [];
-            }
-        }, "tokenPrices"); // Specify cache group or namespace if needed
+            }, "tokenPrices"); // Specify cache group or namespace if needed
 
-        // Map protocols to extract relevant price information
-        prices[token] = priceData.map((protocol) => ({
-            name: protocol.name,
-            price: new BigNumber(protocol.price), // Ensure the price is a BigNumber for calculations
-        }));
+            if (!priceData || priceData.length === 0) {
+                console.warn(`No valid price data returned for token ${token}.`);
+                prices[token] = [];
+                continue; // Skip to the next token
+            }
+
+            // Map protocols to extract relevant price information
+            prices[token] = priceData.map((protocol) => ({
+                name: protocol.name,
+                price: new BigNumber(protocol.price), // Ensure the price is a BigNumber for calculations
+            }));
+        } catch (error) {
+            console.error(`Error fetching price data for token ${token}:`, error.message);
+            if (error.response) {
+                console.error(`API response: ${JSON.stringify(error.response.data)}`);
+                console.error(`HTTP Status Code: ${error.response.status}`);
+            }
+            prices[token] = []; // Assign an empty array in case of an error
+        }
     }
 
     console.log("Fetched token prices across protocols:", prices);
     return prices;
 }
-
 
 // Helper: Check if a path is profitable
 async function isProfitablePath(path, priceData) {
