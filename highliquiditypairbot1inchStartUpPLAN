@@ -13,7 +13,7 @@ import { createRequire } from 'module';
 dotenv.config();
 
 if (!process.env.CONTRACT_ADDRESS || !process.env.PERMIT2_ADDRESS || !process.env.INFURA_URL || 
-    !process.env.TELEGRAM_BOT_TOKEN || !process.env.BLOCKNATIVE_API_KEY) {
+    !process.env.TELEGRAM_BOT_TOKEN || !process.env.BLOCKNATIVE_API_KEY || !process.env.ONEINCH_API_KEY) {
     throw new Error("Missing critical environment variables.");
 }
 
