@@ -423,7 +423,6 @@ async function findProfitableRoutes() {
     return profitableRoutes;
 }
 
-
 // Utility: Priority queue implementation
 class PriorityQueue {
     constructor(comparator) {
