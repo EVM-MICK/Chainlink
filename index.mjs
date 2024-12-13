@@ -979,8 +979,6 @@ export async function evaluateRouteProfit(route) {
     }
 }
 
-
-
 export function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
 }
