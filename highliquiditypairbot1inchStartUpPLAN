@@ -17,8 +17,6 @@ if (!process.env.CONTRACT_ADDRESS || !process.env.PERMIT2_ADDRESS || !process.en
     throw new Error("Missing critical environment variables.");
 }
 
-
-
 const web3 = new Web3(process.env.INFURA_URL); // Ensure this is Arbitrum-compatible
 const HEADERS = {
   headers: {
