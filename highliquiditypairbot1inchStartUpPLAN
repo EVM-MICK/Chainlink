@@ -296,12 +296,14 @@ async function fetchTokenPrices() {
 async function generatePermitBatchSignature(route) {
     // Example implementation: Fetch permit signatures for tokens in the route
     // Ensure `AllowanceTransfer` SDK or similar tools are imported
-    const tokens = route.map((token) => ({
-        token,
-        amount: CAPITAL.toFixed(),
-        expiration: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
-        nonce: await fetchNonce(process.env.WALLET_ADDRESS, token),
-    }));
+    const tokens = await Promise.all(
+        route.map(async (token) => ({
+            token,
+            amount: CAPITAL.toFixed(),
+            expiration: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
+            nonce: await fetchNonce(process.env.WALLET_ADDRESS, token),
+        }))
+    );
 
     const permitBatch = {
         details: tokens,
