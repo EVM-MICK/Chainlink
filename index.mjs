@@ -675,53 +675,68 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
 // Helper: Fetch prices across protocols
 async function fetchTokenPricesAcrossProtocols(tokens) {
     const prices = {};
+    const batchSize = 5; // Number of tokens to query per batch
+    const delayBetweenBatches = 1200; // 1.2 seconds to respect the 1 RPS limit
+    const tokenBatches = [];
 
-    for (const token of tokens) {
-        const cacheKey = `tokenPrice:${token}`;
+    // Split tokens into batches
+    for (let i = 0; i < tokens.length; i += batchSize) {
+        tokenBatches.push(tokens.slice(i, i + batchSize));
+    }
 
-        try {
-            // Use the `cachedGet` function to fetch from cache or call API if data is stale
-            const priceData = await cachedGet(cacheKey, async () => {
-                const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-                    headers: HEADERS,
-                    params: {
-                        fromTokenAddress: token,
-                        amount: CAPITAL.toFixed(0), // Use capital for consistent price fetching
-                    },
-                });
+    // Helper to fetch prices for a batch of tokens
+    const fetchBatchPrices = async (batch) => {
+        const batchPrices = {};
 
-                if (!response.data || !response.data.protocols) {
-                    console.warn(`No protocols data found for token ${token}.`);
-                    return [];
+        await Promise.all(
+            batch.map(async (token) => {
+                const cacheKey = `tokenPrice:${token}`;
+                try {
+                    // Use the cached data or fetch fresh data
+                    const priceData = await cachedGet(cacheKey, async () => {
+                        const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
+                            headers: HEADERS,
+                            params: {
+                                fromTokenAddress: token,
+                                amount: CAPITAL.toFixed(0),
+                            },
+                        });
+
+                        const protocols = response.data.protocols || [];
+                        const bestPrice = getBestPrice(protocols);
+
+                        return {
+                            protocols,
+                            price: bestPrice,
+                        };
+                    }, "tokenPrices");
+
+                    if (priceData) {
+                        batchPrices[token] = priceData;
+                    }
+                } catch (error) {
+                    console.error(`Error fetching price data for token ${token}:`, error.message);
+                    batchPrices[token] = null; // Assign null in case of failure
                 }
+            })
+        );
 
-                return response.data.protocols;
-            }, "tokenPrices"); // Specify cache group or namespace if needed
+        return batchPrices;
+    };
 
-            if (!priceData || priceData.length === 0) {
-                console.warn(`No valid price data returned for token ${token}.`);
-                prices[token] = [];
-                continue; // Skip to the next token
-            }
+    // Fetch prices batch by batch
+    for (const batch of tokenBatches) {
+        const batchPrices = await fetchBatchPrices(batch);
+        Object.assign(prices, batchPrices);
 
-            // Map protocols to extract relevant price information
-            prices[token] = priceData.map((protocol) => ({
-                name: protocol.name,
-                price: new BigNumber(protocol.price), // Ensure the price is a BigNumber for calculations
-            }));
-        } catch (error) {
-            console.error(`Error fetching price data for token ${token}:`, error.message);
-            if (error.response) {
-                console.error(`API response: ${JSON.stringify(error.response.data)}`);
-                console.error(`HTTP Status Code: ${error.response.status}`);
-            }
-            prices[token] = []; // Assign an empty array in case of an error
-        }
+        // Wait before processing the next batch
+        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
     }
 
     console.log("Fetched token prices across protocols:", prices);
     return prices;
 }
+
 
 // Helper: Check if a path is profitable
 async function isProfitablePath(path, priceData) {
