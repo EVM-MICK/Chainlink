@@ -35,6 +35,7 @@ const MIN_PROFIT_THRESHOLD = new BigNumber(20).shiftedBy(6); // $20 minimum prof
 const MAX_HOPS = 3;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161"; // Arbitrum network
 const STABLE_TOKENS = ["USDC", "USDT", "DAI", "WETH", "WBTC"];
+const chainId = 42161;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
 const ABI = require('./YourContractABI.json');
 const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
@@ -218,7 +219,7 @@ async function fetchTokenPrices() {
   try {
     // Use fetchWithRetry for batch price requests
     const response = await fetchWithRetry(
-      `${PATHFINDER_API_URL}/quote`,
+      `${PATHFINDER_API_URL}/${chainId}/${batch.join(",")}`,
       {
         headers: HEADERS,
         params: {
