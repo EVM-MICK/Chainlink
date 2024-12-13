@@ -1,0 +1,755 @@
+import dotenv from 'dotenv';
+import axios from 'axios';
+import Web3 from 'web3';
+import BigNumber from 'bignumber.js';
+import PQueue from 'p-queue';
+import retry from 'async-retry';
+import PriorityQueue from 'priorityqueuejs'; // Import a priority queue library
+import { AllowanceTransfer } from '@uniswap/permit2'; // Import Permit2 SDK
+
+dotenv.config();
+
+if (!process.env.CONTRACT_ADDRESS || !process.env.PERMIT2_ADDRESS || !process.env.INFURA_URL || 
+    !process.env.TELEGRAM_BOT_TOKEN || !process.env.BLOCKNATIVE_API_KEY) {
+    throw new Error("Missing critical environment variables.");
+}
+
+
+
+const web3 = new Web3(process.env.INFURA_URL); // Ensure this is Arbitrum-compatible
+const HEADERS = {
+  headers: {
+    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+  },
+};
+
+const interval = Math.max(1000, Math.ceil(1000 / (10 - currentRequestCount)));
+const dynamicInterval = Math.ceil(1000 / (10 - requestCount));
+apiQueue.interval = Math.max(dynamicInterval, 100); // At least 100ms between requests
+
+// Constants
+const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC (6 decimals)
+const MIN_PROFIT_THRESHOLD = new BigNumber(20).shiftedBy(6); // $20 minimum profit
+const MAX_HOPS = 3;
+const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161"; // Arbitrum network
+const STABLE_TOKENS = ["USDC", "USDT", "DAI", "WETH"];
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const ABI = require('./YourContractABI.json');
+const contract = new web3.eth.Contract(ABI, CONTRACT_ADDRESS);
+const flashLoanRate = 0.0009; // Default to 0.09%
+const flashLoanFee = (amount) => amount.multipliedBy(flashLoanRate);
+
+const dynamicThreshold =  (amount, gasCost) => {
+  const fee = flashLoanFee(amount);
+  return MIN_PROFIT_THRESHOLD.plus(gasCost).plus(fee);
+};
+
+const potentialProfit = toPrice.minus(fromPrice);
+const threshold = dynamicThreshold(amount, gasCost);
+if (potentialProfit.isGreaterThan(threshold)) {
+    routes.push(newPath);
+}
+
+
+const metrics = {
+    successfulTrades: 0,
+    skippedRoutes: 0,
+    totalProfit: new BigNumber(0),
+};
+
+
+async function safeExecute(fn, onError) {
+    try {
+        return await fn();
+    } catch (error) {
+        console.error("Error:", error.message);
+        if (onError) await onError(error);
+    }
+}
+
+function logMetrics() {
+    console.log(`Metrics:
+    - Successful Trades: ${metrics.successfulTrades}
+    - Skipped Routes: ${metrics.skippedRoutes}
+    - Total Profit: $${metrics.totalProfit.dividedBy(1e6).toFixed(2)}`);
+}
+setInterval(logMetrics, 60000);
+
+setInterval(async () => {
+    const message = `📊 *Execution Summary*:
+    - Successful Trades: ${metrics.successfulTrades}
+    - Skipped Routes: ${metrics.skippedRoutes}
+    - Total Profit: $${metrics.totalProfit.dividedBy(1e6).toFixed(2)}`;
+    await sendTelegramMessage(message);
+}, 3600000); // Every hour
+
+let requestCount = 0;
+setInterval(() => {
+    console.log(`Requests in the last second: ${requestCount}`);
+    requestCount = 0; // Reset counter
+}, 1000);
+
+
+async function fetchWithRetry(url, options) {
+    return retry(
+        async (bail, attempt) => {
+            try {
+                const response = await axios.get(url, options);
+
+                if (response.status !== 200) {
+                    throw new Error(`API call failed with status ${response.status}`);
+                }
+
+                console.log(`Fetch successful on attempt ${attempt}: ${url}`);
+                return response.data;
+            } catch (error) {
+                // If it's a non-retryable error, bail out
+                if (error.response && [400, 403, 404].includes(error.response.status)) {
+                    console.error(`Non-retryable error for ${url}:`, error.message);
+                    bail(error); // Prevent retry
+                    return; // Return to satisfy function signature
+                }
+
+                console.warn(`Retrying ${url} due to error:`, error.message);
+                throw error; // Retry for other errors
+            }
+        },
+        {
+            retries: 5, // Number of retries
+            minTimeout: 1000, // Minimum wait time (1 second)
+            maxTimeout: 8000, // Maximum wait time (8 seconds)
+            factor: 2, // Exponential backoff factor
+            onRetry: (error, attempt) => {
+                console.warn(`Retry attempt ${attempt} for ${url}. Error: ${error.message}`);
+            },
+        }
+    );
+}
+
+
+// API Call Queue
+const apiQueue = new PQueue({
+    concurrency: 10, // Max 10 requests in parallel
+    interval: 1000,  // 1-second interval
+    intervalCap: 10, // Maximum 10 requests per second
+});
+
+
+// Caching
+const cache = new Map();
+
+function getCachedData(key) {
+  const data = cache.get(key);
+  if (data && Date.now() - data.timestamp < 60000) return data.value; // Cache for 60 seconds
+  return null;
+}
+
+function fetchWithCache(key, fetchFn) {
+    const cached = getCachedData(key);
+    if (cached) return Promise.resolve(cached);
+
+    return fetchFn().then((data) => {
+        setCachedData(key, data);
+        return data;
+    });
+}
+
+function setCachedData(key, value) {
+  cache.set(key, { value, timestamp: Date.now() });
+}
+
+// Telegram Notifications
+async function sendTelegramMessage(message) {
+    const timestamp = new Date().toISOString();
+    try {
+        await axios.post(
+            `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+            {
+                chat_id: process.env.TELEGRAM_CHAT_ID,
+                text: `[${timestamp}] ${message}`,
+                parse_mode: "Markdown",
+            }
+        );
+        console.log("Telegram notification sent.");
+    } catch (error) {
+        console.error("Failed to send Telegram message:", error.message);
+    }
+}
+
+
+// Fetch Gas Price
+async function fetchGasPrice() {
+  try {
+    // Fetch gas price from Blocknative API
+    const response = await axios.get(
+      "https://api.blocknative.com/gasprices/blockprices",
+      {
+        headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
+        params: { chainId: 42161 },
+      }
+    );
+
+    // Return the recommended gas price in Wei
+    return new BigNumber(response.data.blockPrices[0].estimatedPrices[0].price).shiftedBy(9); // Gwei to Wei
+  } catch (error) {
+    console.error("Failed to fetch gas price from Blocknative API:", error.message);
+
+    try {
+      // Fallback to the median gas price from the last N blocks
+      const gasFallback = await web3.eth.getGasPrice(); // Get current gas price from the network
+      console.log(`Using network fallback gas price: ${gasFallback} Wei`);
+      return new BigNumber(gasFallback);
+    } catch (fallbackError) {
+      console.error("Failed to fetch gas price from network:", fallbackError.message);
+
+      // Fallback to a default gas price if all else fails
+      const defaultGasPrice = new BigNumber(50).shiftedBy(9); // 50 Gwei
+      console.log(`Using default fallback gas price: ${defaultGasPrice.toString()} Wei`);
+      return defaultGasPrice;
+    }
+  }
+}
+
+
+// Fetch Token Prices
+async function fetchTokenPrices() {
+  try {
+    // Use fetchWithRetry for batch price requests
+    const response = await fetchWithRetry(
+      `${PATHFINDER_API_URL}/quote`,
+      {
+        headers: HEADERS,
+        params: {
+          fromTokenAddresses: STABLE_TOKENS.join(','), // Batch token addresses
+          amount: CAPITAL.toFixed(0), // Fixed capital amount
+        },
+      }
+    );
+
+    // Validate response structure
+    if (!response || !response.prices || Object.keys(response.prices).length === 0) {
+      throw new Error("Invalid response or no price data received.");
+    }
+
+    // Map response prices to STABLE_TOKENS
+    const prices = STABLE_TOKENS.reduce((acc, token) => {
+      const tokenData = response.prices[token];
+      if (tokenData && tokenData.toTokenAmount) {
+        acc[token] = new BigNumber(tokenData.toTokenAmount);
+      } else {
+        console.warn(`Missing price data for token: ${token}`);
+      }
+      return acc;
+    }, {});
+
+    // Check for missing tokens and log
+    const missingTokens = STABLE_TOKENS.filter(token => !prices[token]);
+    if (missingTokens.length > 0) {
+      console.warn(`Prices missing for tokens: ${missingTokens.join(", ")}`);
+    }
+
+    // Log success
+    console.log(`Fetched prices for ${Object.keys(prices).length} tokens.`);
+
+    // Return fetched prices or log an error if none
+    if (Object.keys(prices).length === 0) {
+      console.error("Failed to fetch prices for all tokens. Skipping this iteration.");
+      return {};
+    }
+
+    return prices;
+  } catch (error) {
+    console.error("Failed to fetch batch token prices:", error.message);
+
+    // Optional: Implement fallback logic for individual token price fetching
+    console.warn("Attempting individual token price fetching as fallback...");
+    const prices = {};
+    for (const token of STABLE_TOKENS) {
+      try {
+        const individualResponse = await fetchWithRetry(
+          `${PATHFINDER_API_URL}/quote`,
+          {
+            headers: HEADERS,
+            params: {
+              fromTokenAddress: token,
+              amount: CAPITAL.toFixed(0),
+            },
+          }
+        );
+
+        if (individualResponse && individualResponse.toTokenAmount) {
+          prices[token] = new BigNumber(individualResponse.toTokenAmount);
+          console.log(`Fetched individual price for token: ${token}`);
+        } else {
+          console.warn(`Missing individual price data for token: ${token}`);
+        }
+      } catch (indError) {
+        console.error(`Failed to fetch price for token: ${token}`, indError.message);
+      }
+    }
+
+    return prices;
+  }
+}
+
+
+async function generatePermitBatchSignature(route) {
+    // Example implementation: Fetch permit signatures for tokens in the route
+    // Ensure `AllowanceTransfer` SDK or similar tools are imported
+    const tokens = route.map((token) => ({
+        token,
+        amount: CAPITAL.toFixed(),
+        expiration: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
+        nonce: await fetchNonce(process.env.WALLET_ADDRESS, token),
+    }));
+
+    const permitBatch = {
+        details: tokens,
+        spender: CONTRACT_ADDRESS,
+        sigDeadline: Math.floor(Date.now() / 1000) + 3600, // 1-hour signature validity
+    };
+
+    const { domain, types, values } = AllowanceTransfer.getPermitBatchData(
+        permitBatch,
+        process.env.PERMIT2_ADDRESS,
+        chainId
+    );
+
+    return web3.eth.accounts.signTypedData(domain, types, values);
+}
+
+
+// Generate Multi-Hop Routes
+
+async function generateRoutes(tokens = STABLE_TOKENS, maxHops = 3, startToken = "USDC") {
+    const routes = [];
+    const tokenPairs = new Set();
+    const tokenPrices = await fetchTokenPrices(); // Fetch live token prices
+    const historicalData = await fetchHistoricalData(STABLE_TOKENS); // Fetch historical data
+    const historicalGasPrices = await fetchHistoricalGasPrices(); // Fetch historical gas price trends
+    const averageGasPrice = calculateAverageGasPrice(historicalGasPrices); // Calculate average gas price from trends
+    const startTokenAddress = tokens.find((token) => token === startToken);
+
+    if (!startTokenAddress) {
+        console.error(`Start token ${startToken} not found in token list.`);
+        return [];
+    }
+
+    if (!tokenPrices[startToken]) {
+        console.error("Token price missing for start token.");
+        return [];
+    }
+
+    // Adjust gas cost using historical average gas price
+    const gasCostPerTrade = averageGasPrice.multipliedBy(800000); // Adjusted gas estimation based on historical trends
+
+    // Initialize priority queue
+    const priorityQueue = new PriorityQueue((a, b) => b.potentialProfit.minus(a.potentialProfit).toNumber()); // Max-heap based on potential profit
+
+    // Seed the queue with the start token
+    priorityQueue.enq({ path: [startTokenAddress], remainingHops: maxHops, potentialProfit: new BigNumber(0) });
+
+    while (!priorityQueue.isEmpty()) {
+        const { path: currentPath, remainingHops } = priorityQueue.deq();
+
+        if (remainingHops === 0) continue;
+
+        const lastToken = currentPath[currentPath.length - 1];
+
+        for (const nextToken of tokens) {
+            if (nextToken === lastToken || currentPath.includes(nextToken)) continue;
+
+            const newPath = [...currentPath, nextToken];
+            const pairKey = `${lastToken}-${nextToken}`;
+
+            if (!tokenPairs.has(pairKey)) {
+                // Fetch liquidity and prices dynamically
+                const liquidity = await checkLiquidity([lastToken, nextToken]);
+                const fromPrice = tokenPrices[lastToken] || new BigNumber(0);
+                const toPrice = tokenPrices[nextToken] || new BigNumber(0);
+                const historicalTrend = calculateHistoricalTrend(historicalData, lastToken, nextToken);
+                const potentialProfit = toPrice.minus(fromPrice).multipliedBy(historicalTrend);
+
+                // Calculate the dynamic threshold based on current trade parameters
+                const threshold = dynamicThreshold(CAPITAL, gasCostPerTrade);
+
+                if (liquidity.isGreaterThanOrEqualTo(CAPITAL) && potentialProfit.isGreaterThan(threshold)) {
+                    routes.push(newPath);
+
+                    console.log(`Added route: ${lastToken} ➡️ ${nextToken}. Potential Profit: $${potentialProfit.dividedBy(1e6).toFixed(2)}`);
+                    await sendTelegramMessage(`✅ Route Added: ${lastToken} ➡️ ${nextToken}.
+Potential Profit: $${potentialProfit.dividedBy(1e6).toFixed(2)}.`);
+
+                    // Add the new path to the queue for further exploration
+                    if (remainingHops > 1) {
+                        priorityQueue.enq({
+                            path: newPath,
+                            remainingHops: remainingHops - 1,
+                            potentialProfit,
+                        });
+                    }
+                } else {
+                    console.log(`Skipped route ${lastToken} ➡️ ${nextToken}. Reason: Low liquidity or insufficient profit.`);
+                    await sendTelegramMessage(`⚠️ Skipped Route: ${lastToken} ➡️ ${nextToken}.
+Reason: Low liquidity or insufficient profit.
+Potential Profit: $${potentialProfit.dividedBy(1e6).toFixed(2)}.`);
+                }
+
+                tokenPairs.add(pairKey); // Cache the checked pair
+            }
+        }
+    }
+
+    if (routes.length === 0) {
+        console.warn("No profitable routes generated.");
+    }
+
+    return routes;
+}
+
+async function fetchHistoricalGasPrices() {
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get("https://api.blocknative.com/gasprices/blockprices", {
+                headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
+                params: { chainId: 42161 }, // Arbitrum network
+            })
+        );
+
+        // Validate response structure
+        if (!response || !response.data || !response.data.blockPrices) {
+            throw new Error("Invalid response structure or missing blockPrices data.");
+        }
+
+        // Extract historical gas prices and validate consistency
+        const historicalGasPrices = response.data.blockPrices.map((block) => {
+            if (!block.estimatedPrices || !block.estimatedPrices[0]?.price) {
+                console.warn("Missing estimated price data for a block. Skipping.");
+                return null;
+            }
+            return new BigNumber(block.estimatedPrices[0].price).shiftedBy(9); // Convert Gwei to Wei
+        }).filter(Boolean); // Remove null or invalid entries
+
+        // Ensure we have sufficient data
+        if (historicalGasPrices.length < 5) { // Arbitrary threshold for "sufficient" data
+            console.warn("Insufficient historical gas prices. Falling back to default trend.");
+            return [new BigNumber(50).shiftedBy(9)]; // Fallback to default 50 Gwei if data is sparse
+        }
+
+        return historicalGasPrices;
+    } catch (error) {
+        console.error("Failed to fetch historical gas prices:", error.message);
+        return [new BigNumber(50).shiftedBy(9)]; // Fallback to default 50 Gwei if API fails
+    }
+}
+
+function calculateWeightedAverageGasPrice(historicalGasPrices) {
+    if (historicalGasPrices.length === 0) {
+        return new BigNumber(50).shiftedBy(9); // Default to 50 Gwei
+    }
+
+    // Assign higher weights to more recent prices
+    const weights = historicalGasPrices.map((_, index) => index + 1); // Incremental weights
+    const weightedSum = historicalGasPrices.reduce((sum, price, index) => {
+        return sum.plus(price.multipliedBy(weights[index]));
+    }, new BigNumber(0));
+
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    return weightedSum.dividedBy(totalWeight); // Calculate the weighted average
+}
+
+
+
+// Utility function to fetch historical price data
+async function fetchHistoricalData(tokens) {
+    const historicalData = {};
+    for (const token of tokens) {
+        try {
+            const response = await apiQueue.add(() =>
+                axios.get(`https://api.somehistoricaldataprovider.com/prices`, {
+                    headers: HEADERS,
+                    params: { token, days: 30 },
+                })
+            );
+            historicalData[token] = response.data; // Assume API provides historical data array
+        } catch (error) {
+            console.error(`Failed to fetch historical data for ${token}:`, error.message);
+        }
+    }
+    return historicalData;
+}
+
+// Utility function to calculate historical trend
+function calculateHistoricalTrend(historicalData, fromToken, toToken) {
+    const fromTokenData = historicalData[fromToken] || [];
+    const toTokenData = historicalData[toToken] || [];
+    if (fromTokenData.length === 0 || toTokenData.length === 0) return 1; // Default to neutral trend
+
+    const fromAvg = fromTokenData.reduce((sum, val) => sum + val, 0) / fromTokenData.length;
+    const toAvg = toTokenData.reduce((sum, val) => sum + val, 0) / toTokenData.length;
+    return toAvg / fromAvg; // Calculate relative trend ratio
+}
+
+function calculateAverageGasPrice(historicalGasPrices) {
+    if (historicalGasPrices.length === 0) return new BigNumber(50).shiftedBy(9); // Default to 50 Gwei
+    return historicalGasPrices.reduce((sum, price) => sum.plus(price), new BigNumber(0)).dividedBy(historicalGasPrices.length);
+}
+
+
+
+const liquidityCache = {}; // Initialize at the module level to persist cache across calls
+
+async function checkLiquidity(pair) {
+    const key = pair.join('-');
+    if (liquidityCache[key]) return liquidityCache[key]; // Use cached liquidity if available
+
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get(`${PATHFINDER_API_URL}/liquidity`, {
+                headers: HEADERS,
+                params: {
+                    fromTokenAddress: pair[0],
+                    toTokenAddress: pair[1],
+                },
+            })
+        );
+
+        const liquidity = new BigNumber(response.data.liquidity || 0); // Use correct liquidity field
+        liquidityCache[key] = liquidity; // Cache the liquidity value
+        return liquidity;
+    } catch (error) {
+        console.error(`Failed to fetch liquidity for pair ${pair.join(" ➡️ ")}:`, error);
+        return new BigNumber(0); // Default to 0 if API fails
+    }
+}
+
+
+async function getGasCostPerTrade() {
+    const historicalGasPrices = await fetchHistoricalGasPrices();
+    const averageGasPrice = calculateWeightedAverageGasPrice(historicalGasPrices);
+    return averageGasPrice.multipliedBy(800000); // Adjusted gas estimation based on historical trends
+}
+
+
+
+// Construct Parameters
+async function constructParams(route, amount, slippage, permitBatchSignature) {
+    const swapDescription = {
+        srcToken: route[0],
+        dstToken: route[route.length - 1],
+        srcReceiver: CONTRACT_ADDRESS,
+        dstReceiver: CONTRACT_ADDRESS,
+        amount: amount.toFixed(),
+        minReturnAmount: amount.minus(slippage).toFixed(),
+        flags: 0x04, // Update based on your contract logic
+    };
+
+    // Construct params with the expected format
+    return web3.eth.abi.encodeParameters(
+        [
+            'tuple(address srcToken, address dstToken, address srcReceiver, address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags)',
+            'bytes', // Permit batch signature
+            'bytes', // Route data (if applicable, null for now)
+        ],
+        [Object.values(swapDescription), permitBatchSignature, null]
+    );
+}
+
+
+// Execute Route
+async function executeRoute(route, amount, fallbackRoutes = [], attempts = 0) {
+    const MAX_FALLBACK_ATTEMPTS = 3; // Limit the number of retries for fallback routes
+
+    try {
+        // Validate tokens in the route
+        const invalidTokens = route.filter((token) => !STABLE_TOKENS.includes(token));
+        if (invalidTokens.length > 0) {
+            console.error(`Invalid tokens in route: ${invalidTokens.join(", ")}. Skipping execution.`);
+            await sendTelegramMessage(`⚠️ Invalid Tokens in Route: ${invalidTokens.join(", ")}. Execution skipped.`);
+            throw new Error("Invalid tokens in route.");
+        }
+
+        // Check liquidity for the first token pair
+        const liquidity = await checkLiquidity([route[0], route[1]]);
+        if (liquidity.isLessThan(CAPITAL)) {
+            console.error(`Insufficient liquidity for pair ${route[0]} ➡️ ${route[1]}.`);
+            await sendTelegramMessage(`⚠️ Insufficient Liquidity: ${route[0]} ➡️ ${route[1]}. Execution skipped.`);
+            throw new Error("Insufficient liquidity.");
+        }
+
+        // Calculate slippage and price volatility adjustment
+        const slippage = calculateSlippage(CAPITAL, liquidity);
+        const priceVolatilityAdjustment = calculatePriceVolatilityAdjustment(route);
+
+        // Generate Permit Batch Signature
+        const permitBatchSignature = await generatePermitBatchSignature(route);
+
+        // Construct parameters for the transaction
+        const params = await constructParams(route, amount, slippage, permitBatchSignature);
+
+        // Encode transaction data
+        const txData = contract.methods.fn_RequestFlashLoan([route[0]], [amount.toFixed()], params).encodeABI();
+
+        // Estimate gas and fetch gas price
+        const gasEstimate = await web3.eth.estimateGas({
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData,
+        });
+        const gasPrice = await fetchGasPrice().catch(() => new BigNumber(50).shiftedBy(9)); // Default to 50 Gwei
+        const gasCost = new BigNumber(gasEstimate).multipliedBy(gasPrice);
+
+        // Validate profitability before execution
+        const projectedProfit = amount.minus(gasCost).minus(amount.multipliedBy(slippage)).minus(priceVolatilityAdjustment);
+        if (projectedProfit.isLessThan(MIN_PROFIT_THRESHOLD)) {
+            console.error(`Route execution aborted: Insufficient profit after gas costs and slippage. Projected Profit: $${projectedProfit.dividedBy(1e6).toFixed(2)}`);
+            await sendTelegramMessage(`⚠️ Route Execution Skipped: ${route.join(" ➡️ ")}. Reason: Insufficient profit after gas costs and slippage.`);
+            throw new Error("Insufficient profit after gas costs and slippage.");
+        }
+
+        // Prepare and send the transaction
+        const tx = {
+            from: process.env.WALLET_ADDRESS,
+            to: CONTRACT_ADDRESS,
+            data: txData,
+            gas: gasEstimate.toFixed(),
+            gasPrice: gasPrice.toFixed(),
+        };
+        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
+        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+
+        // Calculate actual profit
+        const actualProfit = amount.minus(gasCost).minus(amount.multipliedBy(slippage));
+
+        // Log success and notify
+        console.log(`Transaction successful: ${receipt.transactionHash}`);
+        console.log(`Metrics - Profit: $${actualProfit.dividedBy(1e6).toFixed(2)}, Slippage: ${slippage.toFixed(2)}%, Gas Cost: $${gasCost.dividedBy(1e9).toFixed(2)}`);
+        await sendTelegramMessage(`✅ Trade Executed: ${route.join(" ➡️ ")}.
+Profit: $${actualProfit.dividedBy(1e6).toFixed(2)}.
+Slippage: ${slippage.toFixed(2)}%,
+Gas Cost: $${gasCost.dividedBy(1e9).toFixed(2)}.`);
+    } catch (error) {
+        console.error(`Error executing route: ${error.message}`);
+        await sendTelegramMessage(`❌ Trade Failed: ${route.join(" ➡️ ")}. Error: ${error.message}`);
+
+        // Retry with fallback routes if available
+        if (fallbackRoutes.length > 0 && attempts < MAX_FALLBACK_ATTEMPTS) {
+            fallbackRoutes.sort((a, b) => b.potentialProfit.minus(a.potentialProfit).toNumber());
+            const nextRoute = fallbackRoutes.shift();
+            console.log(`Retrying with fallback route: ${nextRoute.path.join(" ➡️ ")}.`);
+            return await executeRoute(nextRoute.path, amount, fallbackRoutes, attempts + 1);
+        }
+
+        console.error("No fallback routes available or maximum attempts reached. Execution terminated.");
+        await sendTelegramMessage(`❌ All fallback routes exhausted. Execution terminated.`);
+    }
+}
+
+
+// Main Function
+async function startArbitrageBot() {
+    console.log("Starting arbitrage bot...");
+
+    const interval = 60000; // Default interval in milliseconds
+    const errorCooldown = 300000; // 5 minutes cooldown on critical errors
+
+    setInterval(async () => {
+        try {
+            console.log("Fetching token prices...");
+            const tokenPrices = await fetchTokenPrices(STABLE_TOKENS);
+
+            if (Object.keys(tokenPrices).length < STABLE_TOKENS.length) {
+                console.error("Incomplete token prices. Skipping this iteration.");
+                await sendTelegramMessage("⚠️ Incomplete token prices fetched. Skipping arbitrage loop.");
+                return;
+            }
+
+            console.log("Generating profitable routes...");
+            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "USDC", tokenPrices);
+
+            if (routes.length === 0) {
+                console.log("No profitable routes found.");
+                await sendTelegramMessage("⚠️ No profitable routes found in this iteration.");
+                return;
+            }
+
+            // Process routes with fallback mechanism
+            await processRoutesWithFallback(routes, CAPITAL);
+        } catch (error) {
+            console.error("Critical error in arbitrage loop:", error);
+            await sendTelegramMessage(`❌ Critical Arbitrage Bot Error: ${error.message}`);
+
+            // Cooldown to avoid frequent retries on critical failures
+            console.log(`Pausing bot for ${errorCooldown / 60000} minutes due to errors.`);
+            setTimeout(() => console.log("Resuming arbitrage bot..."), errorCooldown);
+        }
+    }, interval);
+}
+
+async function processRoutesWithFallback(routes, amount) {
+    if (routes.length === 0) {
+        console.error("No routes available for execution.");
+        await sendTelegramMessage("⚠️ No routes available for execution.");
+        return;
+    }
+
+    // Define maximum fallback attempts
+    const MAX_FALLBACK_ATTEMPTS = 3;
+
+    // Create a fallback queue with prioritized routes
+    const fallbackRoutes = routes.slice(1).map((route) => ({
+        path: route,
+        potentialProfit: calculatePotentialProfit(route), // Add logic for calculating potential profit
+    }));
+
+    // Sort fallback routes by potential profit (descending)
+    fallbackRoutes.sort((a, b) => b.potentialProfit.minus(a.potentialProfit).toNumber());
+
+    console.log(`Processing ${routes.length} routes with fallback enabled.`);
+
+    try {
+        // Execute the best route with fallback options
+        await executeRoute(routes[0], amount, fallbackRoutes);
+    } catch (primaryError) {
+        console.error("Failed to execute primary route. Attempting fallbacks if available.", primaryError.message);
+
+        // Retry fallback routes with limited attempts
+        let attempts = 0;
+        for (const fallbackRoute of fallbackRoutes) {
+            if (attempts >= MAX_FALLBACK_ATTEMPTS) {
+                console.error("Maximum fallback attempts reached. Halting retries.");
+                await sendTelegramMessage("❌ Maximum fallback attempts reached. Execution terminated.");
+                break;
+            }
+
+            try {
+                console.log(`Attempting fallback route: ${fallbackRoute.path.join(" ➡️ ")}.`);
+                await executeRoute(fallbackRoute.path, amount);
+                console.log(`Fallback route executed successfully: ${fallbackRoute.path.join(" ➡️ ")}.`);
+                return; // Exit function on successful execution
+            } catch (fallbackError) {
+                console.error(`Failed to execute fallback route: ${fallbackRoute.path.join(" ➡️ ")}.`, fallbackError.message);
+                attempts++;
+            }
+        }
+
+        console.error("All fallback routes exhausted. No successful execution.");
+        await sendTelegramMessage("❌ All fallback routes failed. No successful execution.");
+    }
+}
+
+
+console.log(`Profit Calculation:
+    - Amount: $${amount.dividedBy(1e6).toFixed(2)}
+    - Gas Cost: $${gasCost.dividedBy(1e9).toFixed(2)}
+    - Slippage: ${slippage.toFixed(2)}%
+    - Price Volatility Adjustment: $${priceVolatilityAdjustment.dividedBy(1e6).toFixed(2)}
+    - Projected Profit: $${projectedProfit.dividedBy(1e6).toFixed(2)}
+`);
+
+async function handleExecutionError(error, route) {
+    console.error(`Execution error for route: ${route.join(" ➡️ ")} - ${error.message}`);
+    await sendTelegramMessage(`❌ Error Executing Route: ${route.join(" ➡️ ")}. Reason: ${error.message}`);
+}
+
+startArbitrageBot();
