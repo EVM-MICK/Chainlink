@@ -12,11 +12,9 @@ import { createRequire } from 'module';
 dotenv.config();
 
 if (!process.env.CONTRACT_ADDRESS || !process.env.PERMIT2_ADDRESS || !process.env.INFURA_URL || 
-    !process.env.TELEGRAM_BOT_TOKEN || !process.env.BLOCKNATIVE_API_KEY) {
+    !process.env.TELEGRAM_BOT_TOKEN || !process.env.BLOCKNATIVE_API_KEY || !process.env.ONEINCH_API_KEY) {
     throw new Error("Missing critical environment variables.");
 }
-
-
 
 const web3 = new Web3(process.env.INFURA_URL); // Ensure this is Arbitrum-compatible
 const HEADERS = {
@@ -35,7 +33,7 @@ const CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in USDC (6 decimal
 const TOTAL_CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in USDC
 const NUM_PARTITIONS = 5; // Number of partitions for diversification
 const PARTITION_SIZE = TOTAL_CAPITAL.dividedBy(NUM_PARTITIONS); // Capital per trade
-
+const chainId = 42161;
 const MIN_PROFIT_THRESHOLD = new BigNumber(25).shiftedBy(6); // $25 minimum profit
 const MAX_HOPS = 3;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161"; // Arbitrum network
@@ -257,7 +255,7 @@ async function fetchTokenPrices() {
   try {
     // Use fetchWithRetry for batch price requests
     const response = await fetchWithRetry(
-      `${PATHFINDER_API_URL}/quote`,
+      `${PATHFINDER_API_URL}/${chainId}/${batch.join(",")}`,
       {
         headers: HEADERS,
         params: {
