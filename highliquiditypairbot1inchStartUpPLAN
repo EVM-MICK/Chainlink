@@ -499,8 +499,6 @@ function calculateAverageGasPrice(historicalGasPrices) {
     return historicalGasPrices.reduce((sum, price) => sum.plus(price), new BigNumber(0)).dividedBy(historicalGasPrices.length);
 }
 
-
-
 const liquidityCache = {}; // Initialize at the module level to persist cache across calls
 
 async function checkLiquidity(pair) {
@@ -534,6 +532,88 @@ async function getGasCostPerTrade() {
     return averageGasPrice.multipliedBy(800000); // Adjusted gas estimation based on historical trends
 }
 
+
+async function calculatePriceVolatilityAdjustment(route) {
+    try {
+        // Fetch historical data for tokens in the route
+        const historicalData = await fetchHistoricalData(route);
+
+        let totalVolatility = 0;
+
+        for (let i = 0; i < route.length - 1; i++) {
+            const tokenA = route[i];
+            const tokenB = route[i + 1];
+
+            const tokenAData = historicalData[tokenA] || [];
+            const tokenBData = historicalData[tokenB] || [];
+
+            if (tokenAData.length === 0 || tokenBData.length === 0) {
+                console.warn(`Missing historical data for pair: ${tokenA} -> ${tokenB}`);
+                continue;
+            }
+
+            // Calculate percentage changes for each token
+            const tokenAChanges = calculatePercentageChanges(tokenAData);
+            const tokenBChanges = calculatePercentageChanges(tokenBData);
+
+            // Combine percentage changes and calculate standard deviation
+            const combinedChanges = [...tokenAChanges, ...tokenBChanges];
+            const volatility = calculateStandardDeviation(combinedChanges);
+
+            console.log(`Volatility for ${tokenA} -> ${tokenB}: ${volatility}`);
+            totalVolatility += volatility;
+        }
+
+        // Adjust the penalty as a percentage of the trade amount
+        const adjustment = totalVolatility * 0.01; // 1% of volatility as penalty
+        console.log(`Total price volatility adjustment: $${adjustment.toFixed(2)}`);
+
+        return new BigNumber(adjustment).shiftedBy(6); // Convert to 6 decimals
+    } catch (error) {
+        console.error("Error calculating price volatility adjustment:", error.message);
+        return new BigNumber(0); // Default to no adjustment if error occurs
+    }
+}
+
+function calculatePercentageChanges(prices) {
+    const changes = [];
+    for (let i = 1; i < prices.length; i++) {
+        const change = ((prices[i] - prices[i - 1]) / prices[i - 1]) * 100;
+        changes.push(change);
+    }
+    return changes;
+}
+
+function calculateStandardDeviation(changes) {
+    const mean = changes.reduce((sum, value) => sum + value, 0) / changes.length;
+    const variance = changes.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / changes.length;
+    return Math.sqrt(variance);
+}
+
+function calculateSlippage(tradeAmount, liquidity) {
+    try {
+        // DEX fee, typically 0.3% (0.003)
+        const dexFee = 0.003;
+
+        // Handle cases where liquidity is too low to calculate slippage
+        if (liquidity.isLessThan(tradeAmount)) {
+            console.warn("Liquidity is less than the trade amount. Slippage may be high.");
+            return new BigNumber(1); // Maximum slippage (100%)
+        }
+
+        // Calculate slippage based on trade amount and liquidity
+        const liquidityImpact = tradeAmount.dividedBy(liquidity);
+
+        // Total slippage includes DEX fee and liquidity impact
+        const totalSlippage = dexFee + liquidityImpact.toNumber();
+
+        console.log(`Calculated slippage: ${totalSlippage * 100}%`);
+        return new BigNumber(totalSlippage);
+    } catch (error) {
+        console.error("Error calculating slippage:", error.message);
+        return new BigNumber(0.05); // Default to 5% slippage in case of error
+    }
+}
 
 
 // Construct Parameters
