@@ -36,6 +36,7 @@ const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum pr
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
 const chainId = 42161;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
+const ONE_INCH_PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
@@ -673,9 +674,9 @@ async function generateRoutes(tokens, MAX_HOPS, preferredStartToken = "USDC", to
 }
 
 // Helper: Fetch prices across protocols
-async function fetchTokenPricesAcrossProtocols(tokens) {
+export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     const prices = {};
-    const batchSize = 5; // Number of tokens to query per batch
+    const batchSize = 50; // Number of tokens to query per batch
     const delayBetweenBatches = 1200; // 1.2 seconds to respect the 1 RPS limit
     const tokenBatches = [];
 
@@ -687,39 +688,28 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
     // Helper to fetch prices for a batch of tokens
     const fetchBatchPrices = async (batch) => {
         const batchPrices = {};
+        const batchUrl = `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`;
 
-        await Promise.all(
-            batch.map(async (token) => {
-                const cacheKey = `tokenPrice:${token}`;
-                try {
-                    // Use the cached data or fetch fresh data
-                    const priceData = await cachedGet(cacheKey, async () => {
-                        const response = await axios.get(`${PATHFINDER_API_URL}/quote`, {
-                            headers: HEADERS,
-                            params: {
-                                fromTokenAddress: token,
-                                amount: CAPITAL.toFixed(0),
-                            },
-                        });
+        try {
+            // Use cached data or fetch fresh data
+            const cacheKey = `tokenPrices:${chainId}:${batch.join(",")}`;
+            const priceData = await cachedGet(cacheKey, async () => {
+                const response = await axios.get(batchUrl, HEADERS);
 
-                        const protocols = response.data.protocols || [];
-                        const bestPrice = getBestPrice(protocols);
-
-                        return {
-                            protocols,
-                            price: bestPrice,
-                        };
-                    }, "tokenPrices");
-
-                    if (priceData) {
-                        batchPrices[token] = priceData;
-                    }
-                } catch (error) {
-                    console.error(`Error fetching price data for token ${token}:`, error.message);
-                    batchPrices[token] = null; // Assign null in case of failure
+                if (response.status !== 200 || !response.data) {
+                    throw new Error("Invalid response from 1inch API");
                 }
-            })
-        );
+
+                return response.data; // The API response contains token prices
+            }, "tokenPrices");
+
+            // Map prices to the batch tokens
+            batch.forEach((token) => {
+                batchPrices[token] = priceData[token] || null; // Use null if no price is found
+            });
+        } catch (error) {
+            console.error(`Error fetching batch prices for tokens: ${batch.join(", ")}`, error.message);
+        }
 
         return batchPrices;
     };
@@ -736,7 +726,6 @@ async function fetchTokenPricesAcrossProtocols(tokens) {
     console.log("Fetched token prices across protocols:", prices);
     return prices;
 }
-
 
 // Helper: Check if a path is profitable
 async function isProfitablePath(path, priceData) {
