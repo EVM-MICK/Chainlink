@@ -29,8 +29,8 @@ const dynamicInterval = Math.ceil(1000 / (10 - requestCount));
 apiQueue.interval = Math.max(dynamicInterval, 100); // At least 100ms between requests
 
 // Constants
-const CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in USDC (6 decimals)
-const TOTAL_CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in USDC
+const CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in usdc (6 decimals)
+const TOTAL_CAPITAL = new BigNumber(50000).shiftedBy(6); // $50,000 in usdc
 const NUM_PARTITIONS = 5; // Number of partitions for diversification
 const PARTITION_SIZE = TOTAL_CAPITAL.dividedBy(NUM_PARTITIONS); // Capital per trade
 const chainId = 42161;
@@ -362,7 +362,7 @@ async function generatePermitBatchSignature(route) {
 
 // Generate Multi-Hop Routes
 
-async function generateRoutes(tokens = AVERAGE_LIQUIDITY_TOKENS, maxHops = 3, startToken = "USDC") {
+async function generateRoutes(tokens = AVERAGE_LIQUIDITY_TOKENS, maxHops = 3, startToken = "usdc") {
     const routes = [];
     const tokenPairs = new Set();
     const tokenPrices = await fetchTokenPrices(); // Fetch live token prices
@@ -790,7 +790,7 @@ async function startArbitrageBot() {
             }
 
             console.log("Generating profitable routes...");
-            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "USDC");
+            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "usdc");
 
             if (routes.length === 0) {
                 console.log("No profitable routes found.");
