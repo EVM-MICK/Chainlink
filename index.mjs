@@ -480,6 +480,7 @@ function expandStableTokens(unmatchedTokens) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<string[]>} - Array of matched stable token addresses.
  */
+
 async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
@@ -542,6 +543,7 @@ async function getStableTokenList(chainId = 42161) {
         return [];
     }
 }
+
 
 
 // Helper function to fetch token price and liquidity
