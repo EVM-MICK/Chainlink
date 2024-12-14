@@ -319,9 +319,9 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url9, {{
+            const response = await axios.get(url9,  headers: {
         Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    } params });
+    }, params });
 
             // Extract transaction data from the response
             const swapData = response.data;
