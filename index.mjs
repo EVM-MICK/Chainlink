@@ -253,7 +253,9 @@ async function approveTokensWithPermit2(tokens) {
             }
 
             const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
-                headers: HEADERS,
+                headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    },
                 params: {
                     tokenAddress: token.address,
                     amount: token.amount.toFixed(),
@@ -281,7 +283,9 @@ async function checkAllowance(tokenAddress) {
 
     try {
         const response = await axios.get(url5, {
-            headers: HEADERS,
+            headers:{
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    },
             params: {
                 tokenAddress,
                 walletAddress: process.env.WALLET_ADDRESS,
@@ -315,7 +319,9 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url9, { HEADERS, params });
+            const response = await axios.get(url9, {{
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    } params });
 
             // Extract transaction data from the response
             const swapData = response.data;
@@ -495,7 +501,9 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, HEADERS);
+        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`,{ headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    }});
         const tokenData = response.data.tokens;
 
         if (!tokenData) {
@@ -557,7 +565,9 @@ async function fetchTokenPrice(tokenAddresses, chainId = 42161) {
     const fetchBatchPrices = async (batch) => {
         try {
             const response = await axios.get(
-                `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`, HEADERS
+                `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`, {headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    }}
             );
 
             // Parse response and cache results
@@ -706,7 +716,9 @@ export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
             // Use cached data or fetch fresh data
             const cacheKey = `tokenPrices:${chainId}:${batch.join(",")}`;
             const priceData = await cachedGet(cacheKey, async () => {
-                const response = await axios.get(batchUrl, HEADERS);
+                const response = await axios.get(batchUrl, {headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    }});
 
                 if (response.status !== 200 || !response.data) {
                     throw new Error("Invalid response from 1inch API");
@@ -825,7 +837,9 @@ async function getLiquidityData(tokens) {
     return cachedGet(cacheKey, async () => {
         const liquidityData = {};
         try {
-            const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+            const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    } });
             tokens.forEach(token => {
                 const tokenInfo = response.data.tokens[token.toLowerCase()];
                 liquidityData[token] = tokenInfo ? tokenInfo.liquidity || 0 : 0;
@@ -1000,7 +1014,9 @@ async function getSwapQuote(fromToken, toToken, amount, slippage) {
     const cacheKey = `swapQuote:${fromToken}-${toToken}-${amount}`;
     return cachedGet(cacheKey, async () => {
         const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            headers: HEADERS,
+            headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    },
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
@@ -1084,7 +1100,9 @@ export async function encodeSwapData(route, amount, slippagePercent) {
     try {
         // Construct the API request with parameters that ensure protocol details are included
         const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            headers: HEADERS,
+            headers: {
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    },
             params: {
                 fromTokenAddress: fromToken,
                 toTokenAddress: toToken,
