@@ -551,19 +551,25 @@ async function getStableTokenList(chainId = 42161) {
 
 
 // Helper function to fetch token price and liquidity
-async function fetchTokenPrice(tokenAddresses, chainId = 42161) {
+async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
     const cacheKeyPrefix = `tokenPrice:${chainId}:`;
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const batchSize = 10; // Number of tokens per batch (adjustable for efficiency)
     const prices = {};
 
+    const ONE_INCH_PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
+
     // Helper function to fetch a batch of token prices
     const fetchBatchPrices = async (batch) => {
         try {
-            const response = await axios.get(
-                `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`, {headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    }}
+            const response = await axios.post(
+                `${ONE_INCH_PRICE_API_URL}/${chainId}`,
+                { tokens: batch, currency: "USD" },
+                {
+                    headers: {
+                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                    },
+                }
             );
 
             // Parse response and cache results
@@ -693,53 +699,61 @@ async function generateRoutes(chainId = 42161, maxHops = 3, preferredStartToken 
 
 // Helper: Fetch prices across protocols
 export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
-    const prices = {};
+    const url = `${ONE_INCH_PRICE_API_URL}/${chainId}`;
+    const cacheKeyPrefix = `tokenPrices:${chainId}`;
+    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const batchSize = 50; // Number of tokens to query per batch
-    const delayBetweenBatches = 1200; // 1.2 seconds to respect the 1 RPS limit
-    const tokenBatches = [];
+    const delayBetweenBatches = 1200; // 1.2 seconds delay to respect 1 RPS limit
+    const now = Date.now();
+    const prices = {};
 
     // Split tokens into batches
+    const tokenBatches = [];
     for (let i = 0; i < tokens.length; i += batchSize) {
         tokenBatches.push(tokens.slice(i, i + batchSize));
     }
 
-    // Helper to fetch prices for a batch of tokens
+    // Helper function to fetch prices for a batch of tokens
     const fetchBatchPrices = async (batch) => {
-        const batchPrices = {};
-        const batchUrl = `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`;
+        const batchKey = `${cacheKeyPrefix}:${batch.join(",")}`;
+        const cachedData = cache.get(batchKey);
 
-        try {
-            // Use cached data or fetch fresh data
-            const cacheKey = `tokenPrices:${chainId}:${batch.join(",")}`;
-            const priceData = await cachedGet(cacheKey, async () => {
-                const response = await axios.get(batchUrl, {headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    }});
-
-                if (response.status !== 200 || !response.data) {
-                    throw new Error("Invalid response from 1inch API");
-                }
-
-                return response.data; // The API response contains token prices
-            }, "tokenPrices");
-
-            // Map prices to the batch tokens
-            batch.forEach((token) => {
-                batchPrices[token] = priceData[token] || null; // Use null if no price is found
-            });
-        } catch (error) {
-            console.error(`Error fetching batch prices for tokens: ${batch.join(", ")}`, error.message);
+        // Check if the batch prices are already cached and fresh
+        if (cachedData && now - cachedData.timestamp < cacheDuration) {
+            console.log(`Returning cached prices for batch: ${batch.join(",")}`);
+            return cachedData.data;
         }
 
-        return batchPrices;
+        try {
+            const response = await axios.post(
+                url,
+                { tokens: batch, currency: "USD" },
+                { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` } }
+            );
+
+            if (response.status !== 200 || !response.data) {
+                throw new Error("Invalid response from 1inch API");
+            }
+
+            // Cache the batch prices
+            cache.set(batchKey, { data: response.data, timestamp: now });
+            return response.data;
+        } catch (error) {
+            console.error(`Error fetching prices for batch: ${batch.join(",")}`, error.message);
+            return {}; // Return an empty object on failure
+        }
     };
 
     // Fetch prices batch by batch
     for (const batch of tokenBatches) {
         const batchPrices = await fetchBatchPrices(batch);
-        Object.assign(prices, batchPrices);
 
-        // Wait before processing the next batch
+        // Merge batch prices into the final prices object
+        batch.forEach((token) => {
+            prices[token] = batchPrices[token] || { price: 0, liquidity: 0 }; // Default fallback
+        });
+
+        // Respect the rate limit by introducing a delay
         await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
     }
 
