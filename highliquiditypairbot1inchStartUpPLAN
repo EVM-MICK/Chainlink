@@ -30,11 +30,11 @@ const dynamicInterval = Math.ceil(1000 / (10 - requestCount));
 apiQueue.interval = Math.max(dynamicInterval, 100); // At least 100ms between requests
 
 // Constants
-const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC (6 decimals)
+const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in usdc (6 decimals)
 const MIN_PROFIT_THRESHOLD = new BigNumber(20).shiftedBy(6); // $20 minimum profit
 const MAX_HOPS = 3;
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161"; // Arbitrum network
-const STABLE_TOKENS = ["USDC", "USDT", "DAI", "WETH", "WBTC"];
+const STABLE_TOKENS = ["usdc", ""usdt","dai", "weth", "wbtc"];
 const chainId = 42161;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
 const ABI = require('./YourContractABI.json');
@@ -326,7 +326,7 @@ async function generatePermitBatchSignature(route) {
 
 // Generate Multi-Hop Routes
 
-async function generateRoutes(tokens = STABLE_TOKENS, maxHops = 3, startToken = "USDC") {
+async function generateRoutes(tokens = STABLE_TOKENS, maxHops = 3, startToken = "usdc") {
     const routes = [];
     const tokenPairs = new Set();
     const tokenPrices = await fetchTokenPrices(); // Fetch live token prices
@@ -750,7 +750,7 @@ async function startArbitrageBot() {
             }
 
             console.log("Generating profitable routes...");
-            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "USDC", tokenPrices);
+            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "usdc", tokenPrices);
 
             if (routes.length === 0) {
                 console.log("No profitable routes found.");
