@@ -17,7 +17,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 const HEADERS = {
     headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`
     },
 };
 
@@ -319,9 +319,7 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url9,  headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    }, params });
+            const response = await axios.get(url9, {headers: HEADERS}, params });
 
             // Extract transaction data from the response
             const swapData = response.data;
