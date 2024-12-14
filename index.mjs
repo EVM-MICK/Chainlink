@@ -369,59 +369,54 @@ export async function runArbitrageBot() {
 
 // Step 1: Find profitable routes within high-liquidity stable pairs
 async function findProfitableRoutes() {
-    const tokens = await getStableTokenList();
-    const preferredStartToken = "usdc";
-    const topN = 3;
+    try {
+        console.log("Finding profitable routes...");
 
-    // Fetch cached token price data
-    const cachedPriceData = await sAcrossProtocols(tokens);
+        // Step 1: Fetch stable tokens
+        const stableTokens = await getStableTokenList(chainId);
+        if (stableTokens.length === 0) {
+            console.error("No stable tokens available. Skipping profitable route search.");
+            return [];
+        }
 
-    // Generate routes using the updated `generateRoutes` function
-    const allRoutes = await generateRoutes(tokens, MAX_HOPS, preferredStartToken, topN);
-    const profitableRoutes = [];
-    const routeQueue = new PriorityQueue((a, b) => b.priority - a.priority);
+        // Step 2: Fetch token prices across protocols
+        const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, chainId);
+        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
+            console.error("Failed to fetch token prices. Skipping profitable route search.");
+            return [];
+        }
 
-    // Enqueue routes based on dynamic potential profit
-    for (const route of allRoutes) {
-        const potentialProfit = estimateRoutePotential(route, CAPITAL, cachedPriceData); // Pass cached price data
-        routeQueue.enqueue({ route, priority: potentialProfit });
-    }
+        // Step 3: Generate routes
+        const maxHops = 3;
+        const preferredStartToken = "USDC";
+        const topN = 5;
+        const routes = await generateRoutes(chainId, maxHops, preferredStartToken, topN);
 
-    while (!routeQueue.isEmpty()) {
-        const { route } = routeQueue.dequeue();
+        if (routes.length === 0) {
+            console.error("No profitable routes generated.");
+            return [];
+        }
 
-        try {
-            // Evaluate route profitability
-            const profit = await evaluateRouteProfit(route);
+        // Step 4: Evaluate routes and their profitability
+        const profitableRoutes = [];
+        for (const route of routes) {
+            const profit = estimateRoutePotential(route, CAPITAL, tokenPrices);
 
-            if (profit.isGreaterThanOrEqualTo(CRITICAL_PROFIT_THRESHOLD)) {
-                console.log(
-                    `Critical profit route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
-                );
-                await sendTelegramMessage(
-                    `🚨 Critical Profit! Route: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
-                );
-                return [{ route, profit }];
-            }
-
-            if (profit.isGreaterThanOrEqualTo(PROFIT_THRESHOLD)) {
-                console.log(
-                    `Profitable route found: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
-                );
-                await sendTelegramMessage(
-                    `Profitable Route: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`
-                );
+            if (profit > 0) {
+                console.log(`Profitable route found: ${route.join(" ➡️ ")} with estimated profit: $${profit.toFixed(2)}`);
                 profitableRoutes.push({ route, profit });
             }
-        } catch (error) {
-            console.error(`Error evaluating route ${route.join(" ➡️ ")}:`, error.message);
         }
-    }
 
-    // Sort profitable routes by actual profit
-    profitableRoutes.sort((a, b) => b.profit.minus(a.profit).toNumber());
-    return profitableRoutes;
+        // Step 5: Sort routes by profitability and return
+        profitableRoutes.sort((a, b) => b.profit - a.profit);
+        return profitableRoutes.slice(0, topN);
+    } catch (error) {
+        console.error("Error in finding profitable routes:", error.message);
+        return [];
+    }
 }
+
 
 // Utility: Priority queue implementation
 class PriorityQueue {
@@ -469,6 +464,17 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
     return basePriority + estimatedProfit.toNumber();
 }
 
+function expandStableTokens(unmatchedTokens) {
+    // Example logic to include dynamically determined stable tokens
+    const additionalStableTokens = unmatchedTokens.filter((token) => {
+        // Criteria: Could include high liquidity or frequent usage in routes
+        return token.liquidity > 1_000_000; // Example threshold
+    });
+
+    STABLE_TOKENS.push(...additionalStableTokens);
+    console.log("Updated STABLE_TOKENS list:", STABLE_TOKENS);
+}
+
 // Function to retrieve a list of stable, high-liquidity tokens from the 1inch API and  Get stable, high-liquidity tokens to focus on profitable paths
 /**
  * Fetch and dynamically match stable tokens from 1inch API.
@@ -480,7 +486,6 @@ async function getStableTokenList(chainId = 42161) {
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const now = Date.now();
 
-    // Check cache for fresh data
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -490,46 +495,46 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        // Fetch token data from 1inch Swap API
-        const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, HEADERS);
+        const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+        const tokenData = response.data.tokens;
 
-        // Validate response structure
-        if (!response.data || !response.data.tokens) {
+        if (!tokenData) {
             console.error("Invalid token data received from 1inch API.");
             return [];
         }
 
-        // Normalize STABLE_TOKENS list for case-insensitive matching
         const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
-
-        // Match tokens dynamically with STABLE_TOKENS
-        const matchedTokens = Object.entries(response.data.tokens).reduce((acc, [address, tokenData]) => {
-            const tokenSymbol = tokenData.symbol.toLowerCase();
+        const unmatchedTokens = [];
+        const matchedTokens = Object.entries(tokenData).reduce((acc, [address, token]) => {
+            const tokenSymbol = token.symbol.toLowerCase();
 
             if (normalizedStableTokens.includes(tokenSymbol)) {
                 acc.push(address);
             } else {
-                console.warn(`Unmatched token: ${tokenSymbol} (${address})`);
+                unmatchedTokens.push({ symbol: tokenSymbol, address });
             }
 
             return acc;
         }, []);
 
-        // Handle cases where no tokens match
+        unmatchedTokens.forEach(({ symbol, address }) => {
+            console.warn(`Unmatched token: ${symbol} (${address})`);
+        });
+
         if (matchedTokens.length === 0) {
             console.error("No tokens matched the STABLE_TOKENS list.");
             return [];
         }
 
-        // Cache the matched tokens
+        // Optional: Dynamically expand stable tokens
+        expandStableTokens(unmatchedTokens);
+
         cache.set(cacheKey, { data: matchedTokens, timestamp: now });
         console.log("Matched stable tokens:", matchedTokens);
-
         return matchedTokens;
     } catch (error) {
         console.error("Error fetching stable tokens:", error.message);
 
-        // Fallback to cached data if available
         if (cache.has(cacheKey)) {
             console.warn("Using stale cached stable tokens due to errors.");
             return cache.get(cacheKey).data;
@@ -538,6 +543,7 @@ async function getStableTokenList(chainId = 42161) {
         return [];
     }
 }
+
 
 // Helper function to fetch token price and liquidity
 async function fetchTokenPrice(tokenAddresses, chainId = 42161) {
