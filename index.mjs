@@ -700,109 +700,56 @@ async function generateRoutes(chainId = 42161, maxHops = 3, preferredStartToken 
 // Helper: Fetch prices across protocols
 export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     const url = `${ONE_INCH_PRICE_API_URL}/${chainId}`;
-    const cacheKeyPrefix = `tokenPrices:${chainId}`;
+    const cacheKey = `tokenPrices:${chainId}`;
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
-    const batchSize = 50; // Number of tokens to query per batch
-    const delayBetweenBatches = 1200; // 1.2 seconds delay to respect 1 RPS limit
     const now = Date.now();
-    const prices = {};
 
-    // Split tokens into batches
-    const tokenBatches = [];
-    for (let i = 0; i < tokens.length; i += batchSize) {
-        tokenBatches.push(tokens.slice(i, i + batchSize));
+    // Validate tokens array
+    if (!tokens || tokens.length === 0) {
+        console.error("Tokens array is empty or undefined.");
+        return {};
     }
 
-    // Helper function to fetch prices for a batch of tokens
-    const fetchBatchPrices = async (batch) => {
-        const batchKey = `${cacheKeyPrefix}:${batch.join(",")}`;
-        const cachedData = cache.get(batchKey);
-
-        // Check if the batch prices are already cached and fresh
-        if (cachedData && now - cachedData.timestamp < cacheDuration) {
-            console.log(`Returning cached prices for batch: ${batch.join(",")}`);
-            return cachedData.data;
+    // Check cache
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached token prices.");
+            return data;
         }
+    }
 
-        try {
-            const response = await axios.post(
-                url,
-                { tokens: batch, currency: "USD" },
-                { headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` } }
-            );
-
-            if (response.status !== 200 || !response.data) {
-                throw new Error("Invalid response from 1inch API");
-            }
-
-            // Cache the batch prices
-            cache.set(batchKey, { data: response.data, timestamp: now });
-            return response.data;
-        } catch (error) {
-            console.error(`Error fetching prices for batch: ${batch.join(",")}`, error.message);
-            return {}; // Return an empty object on failure
-        }
+    // Prepare request body
+    const body = {
+        tokens,
+        currency: "USD"
     };
 
-    // Fetch prices batch by batch
-    for (const batch of tokenBatches) {
-        const batchPrices = await fetchBatchPrices(batch);
+    try {
+        console.log("Sending request to 1inch API:", { url, body });
+        const response = await axios.post(url, body, { headers: HEADERS });
 
-        // Merge batch prices into the final prices object
-        batch.forEach((token) => {
-            prices[token] = batchPrices[token] || { price: 0, liquidity: 0 }; // Default fallback
+        if (response.status !== 200 || !response.data) {
+            throw new Error("Invalid response from 1inch API");
+        }
+
+        console.log("Fetched token prices:", response.data);
+
+        // Cache the response
+        cache.set(cacheKey, { data: response.data, timestamp: now });
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching token prices:", {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data
         });
 
-        // Respect the rate limit by introducing a delay
-        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+        // Return an empty object on failure
+        return {};
     }
-
-    console.log("Fetched token prices across protocols:", prices);
-    return prices;
 }
 
-// Helper: Check if a path is profitable
-async function isProfitablePath(path, priceData) {
-    const gasPrice = await fetchGasPrice(); // Fetch current gas price in Wei
-    const estimatedGas = await estimateGas(path, CAPITAL); // Estimated gas for this route
-    const gasCost = gasPrice.multipliedBy(estimatedGas); // Total gas cost
-
-    const slippage = calculateSlippage(path, priceData); // Dynamic slippage based on liquidity
-    const adjustedProfitThreshold = PROFIT_THRESHOLD.plus(gasCost).plus(slippage);
-
-    let potentialProfit = new BigNumber(0);
-    let amountIn = CAPITAL; // Start with initial capital
-
-    // Evaluate each hop in the path
-    for (let i = 0; i < path.length - 1; i++) {
-        const fromToken = path[i];
-        const toToken = path[i + 1];
-
-        try {
-            // Fetch real-time swap quote for the current token pair
-            const swapQuote = await getSwapQuote(fromToken, toToken, null, null, amountIn, null, null, path);
-            const amountOut = new BigNumber(swapQuote.toTokenAmount);
-
-            if (amountOut.isZero()) {
-                console.error(`Swap failed for pair: ${fromToken} -> ${toToken}`);
-                return false; // Abort if a swap cannot be performed
-            }
-
-            // Calculate potential profit for this hop
-            const priceDifference = amountOut.minus(amountIn);
-            potentialProfit = potentialProfit.plus(priceDifference);
-
-            // Update input amount for the next hop
-            amountIn = amountOut;
-        } catch (error) {
-            console.error(`Error fetching swap quote for pair: ${fromToken} -> ${toToken}`, error.message);
-            return false; // Abort if fetching the swap quote fails
-        }
-    }
-
-    // Return true if potential profit exceeds the adjusted profit threshold
-    return potentialProfit.isGreaterThan(adjustedProfitThreshold);
-}
 
 
 function calculateSlippage(path, priceData) {
