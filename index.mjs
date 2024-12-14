@@ -494,7 +494,7 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: HEADERS });
+        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, { headers: HEADERS });
         const tokenData = response.data.tokens;
 
         if (!tokenData) {
