@@ -319,16 +319,14 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
         try {
             // Make the API call to fetch swap data
-            const response = await axios.get(url9, {headers: HEADERS}, params });
+            const response = await axios.get(url9, {headers: HEADERS}, params );
 
             // Extract transaction data from the response
             const swapData = response.data;
             if (!swapData.tx || !swapData.tx.data) {
                 throw new Error("1inch API returned incomplete swap data");
             }
-
             console.log("Valid swap data fetched:", swapData.tx.data);
-
             // Return transaction data and protocols used for this swap
             return {
                 txData: swapData.tx.data, // Transaction data for the swap
