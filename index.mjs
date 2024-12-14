@@ -17,7 +17,7 @@ const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compat
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 const HEADERS = {
     headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
     },
 };
 
