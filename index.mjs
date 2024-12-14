@@ -41,7 +41,6 @@ const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
 const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
-
 // Stable, high-liquidity tokens to include in route evaluations
 const STABLE_TOKENS = ["usdt", "usdc", "dai", "weth", "wbtc", "aave", "link", "arb"];
 const highLiquidityTokens = ["usdt", "usdc", "dai", "weth"];
