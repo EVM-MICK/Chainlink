@@ -495,7 +495,7 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, { headers: HEADERS });
+        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, HEADERS);
         const tokenData = response.data.tokens;
 
         if (!tokenData) {
@@ -557,8 +557,7 @@ async function fetchTokenPrice(tokenAddresses, chainId = 42161) {
     const fetchBatchPrices = async (batch) => {
         try {
             const response = await axios.get(
-                `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`,
-                { headers: HEADERS }
+                `${ONE_INCH_PRICE_API_URL}/${chainId}/${batch.join(",")}`, HEADERS
             );
 
             // Parse response and cache results
