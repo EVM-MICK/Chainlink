@@ -387,7 +387,7 @@ async function findProfitableRoutes() {
 
         // Step 3: Generate routes
         const maxHops = 3;
-        const preferredStartToken = "USDC";
+        const preferredStartToken = "usdc";
         const topN = 5;
         const routes = await generateRoutes(chainId, maxHops, preferredStartToken, topN);
 
@@ -1144,7 +1144,7 @@ const API_KEY2 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
     try {
         // Fetch gas price from Arbitrum Gas Station or similar API
         const response = await axios.get(url3, {
-            headers: { Authorization: `Bearer ${API_KEY1}` },
+            headers: { Authorization: `Bearer ${API_KEY2}` },
             params: {
                 chainId: 42161, // Arbitrum Mainnet Chain ID
             },
