@@ -522,75 +522,86 @@ function expandStableTokens(unmatchedTokens) {
     console.log("Updated STABLE_TOKENS list:", STABLE_TOKENS);
 }
 
-/**
- * Retrieve critical info for stable tokens from the 1inch Token API.
- * Prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
+**
+ * Retrieve a list of stable tokens dynamically from the 1inch Token API.
+ * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
  *
  * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
- * @returns {Promise<Object[]>} - A list of objects containing token details (address, symbol, decimals).
+ * @returns {Promise<Object[]>} - A list of stable token objects (address, symbol, decimals).
  */
-export async function getStableTokenList(chainId = CHAIN_ID ) {
-    const cacheKey = `stableTokens:${chainId}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
-    const now = Date.now();
+export async function getStableTokenList(chainId = 42161) {
+  const cacheKey = `stableTokens:${chainId}`;
+  const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
+  const now = Date.now();
 
-    // Check if cached data exists and is valid
+  // Check if cached data exists and is valid
+  if (cache.has(cacheKey)) {
+    const { data, timestamp } = cache.get(cacheKey);
+    if (now - timestamp < cacheDuration) {
+      console.log("Returning cached stable token list.");
+      return data;
+    }
+  }
+
+  try {
+    console.log(`Fetching stable token list for chain ID ${chainId}...`);
+
+    // Node.js implementation for the 1inch Token API call
+    const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+    const config = {
+      headers: HEADERS,
+      params: {},
+      paramsSerializer: { indexes: null },
+    };
+
+    const response = await axios.get(url, config);
+
+    // Validate the response structure
+    const tokenData = response.data?.tokens;
+    if (!tokenData || Object.keys(tokenData).length === 0) {
+      throw new Error("Invalid or empty token data received from 1inch API.");
+    }
+
+    // Normalize the STABLE_TOKENS array for case-insensitive matching
+    const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
+
+    // Match tokens from the STABLE_TOKENS list and extract details
+    const matchedTokens = Object.entries(tokenData)
+      .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
+      .map(([address, token]) => ({
+        address,
+        symbol: token.symbol,
+        decimals: token.decimals,
+      }));
+
+    if (matchedTokens.length === 0) {
+      console.error("No tokens matched the STABLE_TOKENS list.");
+      return [];
+    }
+
+    // Cache the matched tokens with a timestamp
+    cache.set(cacheKey, { data: matchedTokens, timestamp: now });
+
+    console.log("Fetched and cached stable token list:", matchedTokens);
+    return matchedTokens;
+  } catch (error) {
+    console.error("Error fetching stable tokens:", {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+    });
+
+    // Use stale cached data if available
     if (cache.has(cacheKey)) {
-        const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < cacheDuration) {
-            console.log("Returning cached stable token list.");
-            return data;
-        }
+      console.warn("Using stale cached stable tokens due to errors.");
+      return cache.get(cacheKey).data;
     }
 
-    try {  
-         const response = await apiQueue.add(() =>
-            axios.get(TOKEN_API_URL, { headers: HEADERS, params })
-        );
-        // Validate the response structure
-        const tokenData = response.data?.tokens;
-        if (!tokenData || Object.keys(tokenData).length === 0) {
-            throw new Error("Invalid or empty token data received from 1inch API.");
-        }
-
-        // Normalize the STABLE_TOKENS array for case-insensitive matching
-        const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
-
-        // Match tokens from the STABLE_TOKENS list and extract details
-        const matchedTokens = Object.entries(tokenData)
-            .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
-            .map(([address, token]) => ({
-                address,
-                symbol: token.symbol,
-                decimals: token.decimals,
-            }));
-
-        if (matchedTokens.length === 0) {
-            console.error("No tokens matched the STABLE_TOKENS list.");
-            return [];
-        }
-
-        // Cache the matched tokens with a timestamp
-        cache.set(cacheKey, { data: matchedTokens, timestamp: now });
-
-        console.log("Fetched and cached stable token list:", matchedTokens);
-        return matchedTokens;
-    } catch (error) {
-        console.error("Error fetching stable tokens:", {
-            message: error.message,
-            status: error.response?.status,
-            data: error.response?.data,
-        });
-
-        // Use stale cached data if available
-        if (cache.has(cacheKey)) {
-            console.warn("Using stale cached stable tokens due to errors.");
-            return cache.get(cacheKey).data;
-        }
-
-        return [];
-    }
+    // Return an empty list if no cached data is available
+    return [];
+  }
 }
+
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
  * This function caches the results to minimize redundant API calls.
