@@ -819,13 +819,33 @@ async function safeExecute(fn, ...args) {
 async function fetchGasPrice() {
     const cacheKey = `gasPrice:${CHAIN_ID}`;
     return cachedGet(cacheKey, async () => {
-        const response = await axios.get("https://api.blocknative.com/gasprices/blockprices", {
-            headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
-            params: { chainId: CHAIN_ID },
-        });
-        return new BigNumber(response.data.fast.maxFee).shiftedBy(9); // Convert Gwei to Wei
+        try {
+            // Make the API call to fetch gas prices
+            const response = await axios.get("https://api.blocknative.com/gasprices/blockprices", {
+                headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
+                params: { chainId: CHAIN_ID },
+            });
+
+            // Log the entire response to determine the structure
+            console.log("Gas Price API Response:", JSON.stringify(response.data, null, 2));
+
+            // Attempt to extract gas price from other possible locations
+            const gasPrice = response.data.blockPrices?.[0]?.baseFeePerGas; // Example alternative property
+            if (gasPrice) {
+                return new BigNumber(gasPrice).shiftedBy(9); // Convert Gwei to Wei
+            }
+
+            // If gas price cannot be determined, use a fallback value
+            console.warn("Gas price not found in API response. Using fallback value: 50 Gwei.");
+            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei in Wei
+        } catch (error) {
+            console.error("Error fetching gas price:", error.message);
+            console.warn("Using fallback gas price: 50 Gwei.");
+            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei in Wei
+        }
     }, "gasPrice");
 }
+
 
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
