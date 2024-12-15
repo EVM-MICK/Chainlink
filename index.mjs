@@ -40,7 +40,7 @@ const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
 const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
-const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2";
+const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2/42161/custom";
 const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
@@ -173,11 +173,12 @@ async function fetchCachedGasPrice() {
         return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
     }
 }
+
 async function fetchFromTokenAPI(endpoint, params = {}) {
     const url = `${TOKEN_API_URL}/${CHAIN_ID}${endpoint}`;
     try {
         const response = await apiQueue.add(() =>
-            axios.get(url, { headers: HEADERS, params })
+            axios.get(TOKEN_API_URL, { headers: HEADERS, params })
         );
         return response.data;
     } catch (error) {
@@ -542,12 +543,10 @@ export async function getStableTokenList(chainId = CHAIN_ID ) {
         }
     }
 
-    try {
-        // Fetch token data from the 1inch Token API
-        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/custom`, {
-            headers: HEADERS,
-        });
-
+    try {  
+         const response = await apiQueue.add(() =>
+            axios.get(TOKEN_API_URL, { headers: HEADERS, params })
+        );
         // Validate the response structure
         const tokenData = response.data?.tokens;
         if (!tokenData || Object.keys(tokenData).length === 0) {
