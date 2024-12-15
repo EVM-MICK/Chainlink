@@ -544,7 +544,7 @@ export async function getStableTokenList(chainId = CHAIN_ID ) {
 
     try {
         // Fetch token data from the 1inch Token API
-        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/tokens`, {
+        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/custom`, {
             headers: HEADERS,
         });
 
