@@ -8,6 +8,7 @@ import { createRequire } from 'module';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
+import cache from "node-cache"; // Replace with your caching logic if needed
 dotenv.config();
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
@@ -36,11 +37,11 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 //const chainId = 42161;
 // Base URL for 1inch APIs
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
-
+const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
 const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
-const TOKEN_API_URL = `${ONEINCH_BASE_URL}/token/v1.2`; // Token API
-const PRICE_API_URL = `${ONEINCH_BASE_URL}/price/v1.1`; // Price API
+const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2";
+const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
@@ -418,7 +419,7 @@ async function findProfitableRoutes() {
         console.log("Finding profitable routes...");
 
         // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(42161);
+        const stableTokens = await getStableTokenList();
         if (stableTokens.length === 0) {
             console.error("No stable tokens available. Skipping profitable route search.");
             return [];
@@ -521,18 +522,18 @@ function expandStableTokens(unmatchedTokens) {
 }
 
 /**
- * Retrieve a list of stable tokens dynamically from the 1inch Token API.
- * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
+ * Retrieve critical info for stable tokens from the 1inch Token API.
+ * Prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
  *
  * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
- * @returns {Promise<string[]>} - A list of stable token addresses.
+ * @returns {Promise<Object[]>} - A list of objects containing token details (address, symbol, decimals).
  */
-export async function getStableTokenList(CHAIN_ID) {
-    const cacheKey = `stableTokens:${CHAIN_ID}`;
+export async function getStableTokenList(chainId = CHAIN_ID ) {
+    const cacheKey = `stableTokens:${chainId}`;
     const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
     const now = Date.now();
 
-    // Check if the cache exists and is still valid
+    // Check if cached data exists and is valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -543,23 +544,27 @@ export async function getStableTokenList(CHAIN_ID) {
 
     try {
         // Fetch token data from the 1inch Token API
-        const response = await axios.get(`${TOKEN_API_URL}/${CHAIN_ID}/token-list`, {
+        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/tokens`, {
             headers: HEADERS,
         });
 
-        // Parse and validate the response
+        // Validate the response structure
         const tokenData = response.data?.tokens;
         if (!tokenData || Object.keys(tokenData).length === 0) {
             throw new Error("Invalid or empty token data received from 1inch API.");
         }
 
-        // Normalize the STABLE_TOKENS array for comparison
+        // Normalize the STABLE_TOKENS array for case-insensitive matching
         const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
 
-        // Match tokens based on their symbols in the STABLE_TOKENS list
+        // Match tokens from the STABLE_TOKENS list and extract details
         const matchedTokens = Object.entries(tokenData)
             .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
-            .map(([address]) => address);
+            .map(([address, token]) => ({
+                address,
+                symbol: token.symbol,
+                decimals: token.decimals,
+            }));
 
         if (matchedTokens.length === 0) {
             console.error("No tokens matched the STABLE_TOKENS list.");
@@ -572,24 +577,21 @@ export async function getStableTokenList(CHAIN_ID) {
         console.log("Fetched and cached stable token list:", matchedTokens);
         return matchedTokens;
     } catch (error) {
-        // Log the error details
         console.error("Error fetching stable tokens:", {
             message: error.message,
             status: error.response?.status,
             data: error.response?.data,
         });
 
-        // Use stale cached data if available in case of an error
+        // Use stale cached data if available
         if (cache.has(cacheKey)) {
             console.warn("Using stale cached stable tokens due to errors.");
             return cache.get(cacheKey).data;
         }
 
-        // Return an empty array if no data is available
         return [];
     }
 }
-
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
  * This function caches the results to minimize redundant API calls.
@@ -667,7 +669,7 @@ export async function fetchTokenPrices(tokenAddresses, CHAIN_ID) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
-    const stableTokens = await getStableTokenList(CHAIN_ID);
+    const stableTokens = await getStableTokenList();
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
         return [];
@@ -704,93 +706,84 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usd
 
 
 /**
- * Fetch token prices across protocols using the 1inch Price API.
- * This function caches the results to optimize performance and minimize redundant API calls.
- *
- * @param {string[]} tokens - Array of token addresses to fetch prices for.
+ * Fetch token prices and critical data across protocols using the 1inch Price API.
+ * @param {string[]} tokens - Array of token symbols (e.g., ["usdt", "usdc", ...]).
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
- * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity data.
+ * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
-export async function fetchTokenPricesAcrossProtocols(tokens, CHAIN_ID) {
-    const url = `${PRICE_API_URL}/${CHAIN_ID}`;
-    const cacheKey = `tokenPrices:${CHAIN_ID}:${tokens.join(",")}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
-    const now = Date.now();
-
+export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     if (!tokens || tokens.length === 0) {
-        console.error("Tokens array is empty or undefined.");
+        console.error("Token array is empty or undefined.");
         return {};
     }
 
-    // Check cache
+    const cacheKey = `tokenPrices:${chainId}:${tokens.join(",")}`;
+    const now = Date.now();
+
+    // Return cached data if still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < cacheDuration) {
+        if (now - timestamp < CACHE_DURATION) {
             console.log("Returning cached token prices.");
             return data;
         }
     }
 
-    // Prepare request payload
-    const payload = {
-        tokens,
-        currency: "USD",
-    };
+    // Prepare API URL and payload
+    const url = `${PRICE_API_URL}/${chainId}/${tokens.join(",")}`;
 
     try {
-        console.log("Sending request to 1inch Price API:", { url, payload });
+        console.log("Fetching token prices from 1inch Price API...");
 
-        // Use the rate-limited queue for the API call
         const response = await apiQueue.add(() =>
-            safeApiCall(async () => {
-                return await axios.post(url, payload, { headers: HEADERS });
-            })
+            axios.get(url, { headers: HEADERS })
         );
 
         if (!response || response.status !== 200 || !response.data) {
-            throw new Error("Invalid response from 1inch Price API");
+            throw new Error("Invalid response from 1inch Price API.");
         }
 
-        const tokenPrices = response.data;
+        const tokenData = response.data; // Expected format: { address: { price, symbol, decimals, ... }, ... }
 
-        // Validate and format token data (ensure keys are actual addresses)
-        const validatedData = {};
-        for (const [address, tokenInfo] of Object.entries(tokenPrices)) {
+        // Validate and normalize token data
+        const normalizedData = {};
+        for (const [address, data] of Object.entries(tokenData)) {
             if (web3.utils.isAddress(address)) {
-                validatedData[address] = tokenInfo;
+                normalizedData[address] = {
+                    price: new BigNumber(data.price || 0),
+                    symbol: data.symbol,
+                    decimals: data.decimals,
+                    address,
+                };
             } else {
-                console.warn(`Invalid address detected in token data: ${address}`);
+                console.warn(`Invalid token address found in API response: ${address}`);
             }
         }
 
-        console.log("Fetched token prices:", validatedData);
+        console.log("Fetched and validated token data:", normalizedData);
 
         // Cache the results
-        cache.set(cacheKey, { data: validatedData, timestamp: now });
-        return validatedData;
+        cache.set(cacheKey, { data: normalizedData, timestamp: now });
+
+        return normalizedData;
     } catch (error) {
-        console.error("Error fetching token prices from 1inch API:", {
-            message: error.message,
-            status: error.response?.status,
-            data: error.response?.data,
-        });
+        console.error("Error fetching token prices:", error.message);
 
         if (error.response?.status === 429) {
             console.warn(
-                `Rate limit exceeded. Retry-After: ${error.response.headers['retry-after']} seconds`
+                `Rate limit exceeded. Retry-After: ${error.response.headers["retry-after"] || "unknown"} seconds.`
             );
         }
 
-        // Use stale cached data if available
+        // Fallback to stale cache if available
         if (cache.has(cacheKey)) {
-            console.warn("Using stale cached token prices due to API error.");
+            console.warn("Using stale cached data due to API failure.");
             return cache.get(cacheKey).data;
         }
 
         return {};
     }
 }
-
 function calculateSlippage(path, priceData) {
     const slippageFactors = path.map(token => {
         const liquidity = getLiquidityForToken(token, priceData);
