@@ -488,7 +488,6 @@ export async function getStableTokenList(chainId = 42161) {
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const now = Date.now();
 
-    // Check cache
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -499,64 +498,31 @@ export async function getStableTokenList(chainId = 42161) {
 
     try {
         const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, {
-            headers: {
-                Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-            }
+            headers: HEADERS,
         });
-        const tokenData = response.data.tokens;
 
+        const tokenData = response.data?.tokens;
         if (!tokenData) {
-            console.error("Invalid token data received from 1inch API.");
-            return [];
+            throw new Error("Invalid token data received from 1inch API.");
         }
 
-        // Normalize and match tokens against the STABLE_TOKENS list
         const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
-        const unmatchedTokens = [];
-        const matchedTokens = Object.entries(tokenData).reduce((acc, [address, token]) => {
-            const tokenSymbol = token.symbol.toLowerCase();
-
-            if (normalizedStableTokens.includes(tokenSymbol)) {
-                acc.push(address);
-            } else {
-                unmatchedTokens.push({ symbol: tokenSymbol, address });
-            }
-
-            return acc;
-        }, []);
-
-        unmatchedTokens.forEach(({ symbol, address }) => {
-            console.warn(`Unmatched token: ${symbol} (${address})`);
-        });
+        const matchedTokens = Object.entries(tokenData)
+            .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
+            .map(([address]) => address);
 
         if (matchedTokens.length === 0) {
             console.error("No tokens matched the STABLE_TOKENS list.");
             return [];
         }
 
-        // Fetch prices for matched tokens
-        const tokenPrices = await fetchTokenPricesAcrossProtocols(matchedTokens, chainId);
-
-        // Filter tokens with valid prices
-        const stableTokensWithPrices = matchedTokens.filter((address) => {
-            const tokenPrice = tokenPrices[address];
-            return tokenPrice && tokenPrice.price > 0; // Ensure valid price exists
-        });
-
-        if (stableTokensWithPrices.length === 0) {
-            console.error("No valid stable tokens found with prices.");
-            return [];
-        }
-
-        // Cache the result
-        cache.set(cacheKey, { data: stableTokensWithPrices, timestamp: now });
-        console.log("Matched stable tokens with prices:", stableTokensWithPrices);
-        return stableTokensWithPrices;
+        cache.set(cacheKey, { data: matchedTokens, timestamp: now });
+        return matchedTokens;
     } catch (error) {
         console.error("Error fetching stable tokens:", {
             message: error.message,
             status: error.response?.status,
-            data: error.response?.data
+            data: error.response?.data,
         });
 
         if (cache.has(cacheKey)) {
@@ -567,6 +533,7 @@ export async function getStableTokenList(chainId = 42161) {
         return [];
     }
 }
+
 // Helper function to fetch token price and liquidity
 async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
     const cacheKeyPrefix = `tokenPrice:${chainId}:`;
