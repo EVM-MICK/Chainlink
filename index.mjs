@@ -33,7 +33,7 @@ const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.005);  // Equivalent to 0.5% pro
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum profit threshold $500 (6 decimals)
 // Optional: Setting a higher threshold for "critical" profits
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
-const chainId = 42161;
+//const chainId = 42161;
 // Base URL for 1inch APIs
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 
@@ -425,7 +425,7 @@ async function findProfitableRoutes() {
         }
 
         // Step 2: Fetch token prices across protocols
-        const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, chainId);
+        const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, CHAIN_ID);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices. Skipping profitable route search.");
             return [];
@@ -435,7 +435,7 @@ async function findProfitableRoutes() {
         const maxHops = 3;
         const preferredStartToken = "usdc";
         const topN = 5;
-        const routes = await generateRoutes(chainId, maxHops, preferredStartToken, topN);
+        const routes = await generateRoutes(CHAIN_ID, maxHops, preferredStartToken, topN);
 
         if (routes.length === 0) {
             console.error("No profitable routes generated.");
@@ -527,8 +527,8 @@ function expandStableTokens(unmatchedTokens) {
  * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<string[]>} - A list of stable token addresses.
  */
-export async function getStableTokenList(chainId = 42161) {
-    const cacheKey = `stableTokens:${chainId}`;
+export async function getStableTokenList(CHAIN_ID) {
+    const cacheKey = `stableTokens:${CHAIN_ID}`;
     const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
     const now = Date.now();
 
@@ -543,7 +543,7 @@ export async function getStableTokenList(chainId = 42161) {
 
     try {
         // Fetch token data from the 1inch Token API
-        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/token-list`, {
+        const response = await axios.get(`${TOKEN_API_URL}/${CHAIN_ID}/token-list`, {
             headers: HEADERS,
         });
 
@@ -598,13 +598,13 @@ export async function getStableTokenList(chainId = 42161) {
  * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity.
  */
-export async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
+export async function fetchTokenPrices(tokenAddresses, CHAIN_ID) {
     if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
         throw new Error("Invalid tokenAddresses array provided.");
     }
 
     // Generate a unique cache key based on chainId and token addresses
-    const cacheKey = `tokenPrices:${chainId}:${tokenAddresses.join(",")}`;
+    const cacheKey = `tokenPrices:${CHAIN_ID}:${tokenAddresses.join(",")}`;
     const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
     const now = Date.now();
 
@@ -625,7 +625,7 @@ export async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
         };
 
         // Make an API request to the 1inch Price API
-        const response = await axios.post(`${PRICE_API_URL}/${chainId}`, payload, {
+        const response = await axios.post(`${PRICE_API_URL}/${CHAIN_ID}`, payload, {
             headers: HEADERS,
         });
 
@@ -666,14 +666,14 @@ export async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "usdc").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function generateRoutes(chainId = CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
-    const stableTokens = await getStableTokenList(chainId);
+async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
+    const stableTokens = await getStableTokenList(CHAIN_ID);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
         return [];
     }
 
-    const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, chainId);
+    const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, CHAIN_ID);
     if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
         console.error("Failed to fetch token prices for route generation.");
         return [];
@@ -711,9 +711,9 @@ async function generateRoutes(chainId = CHAIN_ID, maxHops = 3, preferredStartTok
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity data.
  */
-export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
-    const url = `${PRICE_API_URL}/${chainId}`;
-    const cacheKey = `tokenPrices:${chainId}:${tokens.join(",")}`;
+export async function fetchTokenPricesAcrossProtocols(tokens, CHAIN_ID) {
+    const url = `${PRICE_API_URL}/${CHAIN_ID}`;
+    const cacheKey = `tokenPrices:${CHAIN_ID}:${tokens.join(",")}`;
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const now = Date.now();
 
@@ -980,13 +980,13 @@ export function formatAmount(amount, decimals) {
  * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
  * @returns {Promise<Object>} - The transaction data required to execute the swap.
  */
-export async function getSwapQuote(fromToken, toToken, amount, slippage = 1, chainId = CHAIN_ID) {
+export async function getSwapQuote(fromToken, toToken, amount, slippage = 1, CHAIN_ID) {
     if (!fromToken || !toToken || !amount || amount.lte(0)) {
         throw new Error("Invalid parameters provided for getSwapQuote.");
     }
 
     // Generate a unique cache key for the swap quote
-    const cacheKey = `swapQuote:${chainId}:${fromToken}-${toToken}-${amount.toFixed()}-${slippage}`;
+    const cacheKey = `swapQuote:${CHAIN_ID}:${fromToken}-${toToken}-${amount.toFixed()}-${slippage}`;
     const cacheDuration = 1 * 60 * 1000; // Cache duration: 1 minute
     const now = Date.now();
 
@@ -1012,7 +1012,7 @@ export async function getSwapQuote(fromToken, toToken, amount, slippage = 1, cha
         };
 
         // Make an API request to the 1inch Swap API
-        const response = await axios.get(`${SWAP_API_URL}/${chainId}/swap`, {
+        const response = await axios.get(`${SWAP_API_URL}/${CHAIN_ID}/swap`, {
             headers: HEADERS,
             params,
         });
