@@ -374,7 +374,7 @@ async function findProfitableRoutes() {
         console.log("Finding profitable routes...");
 
         // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(chainId);
+        const stableTokens = await getStableTokenList(42161);
         if (stableTokens.length === 0) {
             console.error("No stable tokens available. Skipping profitable route search.");
             return [];
@@ -483,11 +483,12 @@ function expandStableTokens(unmatchedTokens) {
  * @returns {Promise<string[]>} - Array of matched stable token addresses.
  */
 
-async function getStableTokenList(chainId = 42161) {
+export async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
     const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const now = Date.now();
 
+    // Check cache
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -497,9 +498,11 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`,{ headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    }});
+        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, {
+            headers: {
+                Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+            }
+        });
         const tokenData = response.data.tokens;
 
         if (!tokenData) {
@@ -507,6 +510,7 @@ async function getStableTokenList(chainId = 42161) {
             return [];
         }
 
+        // Normalize and match tokens against the STABLE_TOKENS list
         const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
         const unmatchedTokens = [];
         const matchedTokens = Object.entries(tokenData).reduce((acc, [address, token]) => {
@@ -530,14 +534,30 @@ async function getStableTokenList(chainId = 42161) {
             return [];
         }
 
-        // Optional: Dynamically expand stable tokens
-        expandStableTokens(unmatchedTokens);
+        // Fetch prices for matched tokens
+        const tokenPrices = await fetchTokenPricesAcrossProtocols(matchedTokens, chainId);
 
-        cache.set(cacheKey, { data: matchedTokens, timestamp: now });
-        console.log("Matched stable tokens:", matchedTokens);
-        return matchedTokens;
+        // Filter tokens with valid prices
+        const stableTokensWithPrices = matchedTokens.filter((address) => {
+            const tokenPrice = tokenPrices[address];
+            return tokenPrice && tokenPrice.price > 0; // Ensure valid price exists
+        });
+
+        if (stableTokensWithPrices.length === 0) {
+            console.error("No valid stable tokens found with prices.");
+            return [];
+        }
+
+        // Cache the result
+        cache.set(cacheKey, { data: stableTokensWithPrices, timestamp: now });
+        console.log("Matched stable tokens with prices:", stableTokensWithPrices);
+        return stableTokensWithPrices;
     } catch (error) {
-        console.error("Error fetching stable tokens:", error.message);
+        console.error("Error fetching stable tokens:", {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data
+        });
 
         if (cache.has(cacheKey)) {
             console.warn("Using stale cached stable tokens due to errors.");
@@ -547,9 +567,6 @@ async function getStableTokenList(chainId = 42161) {
         return [];
     }
 }
-
-
-
 // Helper function to fetch token price and liquidity
 async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
     const cacheKeyPrefix = `tokenPrice:${chainId}:`;
@@ -636,7 +653,7 @@ async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
 async function generateRoutes(chainId = 42161, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
     try {
         // Step 1: Fetch stable tokens dynamically
-        const stableTokens = await getStableTokenList(chainId);
+        const stableTokens = await getStableTokenList(42161);
         if (stableTokens.length === 0) {
             console.error("No stable tokens found. Route generation skipped.");
             return [];
