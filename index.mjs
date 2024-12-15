@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
-import cache from "node-cache"; // Replace with your caching logic if needed
+
 dotenv.config();
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
@@ -53,7 +53,7 @@ const MAX_HOPS = 3;
 let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
-//const cache = new Map();
+const cache = new Map();
 
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
