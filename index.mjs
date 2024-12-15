@@ -703,20 +703,27 @@ async function generateRoutes(chainId = CHAIN_ID, maxHops = 3, preferredStartTok
 }
 
 
-// Helper: Fetch prices across protocols
+/**
+ * Fetch token prices across protocols using the 1inch Price API.
+ * This function caches the results to optimize performance and minimize redundant API calls.
+ *
+ * @param {string[]} tokens - Array of token addresses to fetch prices for.
+ * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
+ * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity data.
+ */
 export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
-    const url = `${ONE_INCH_PRICE_API_URL}/${chainId}`;
-    const cacheKey = `tokenPrices:${chainId}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
+    const url = `${PRICE_API_URL}/${chainId}`;
+    const cacheKey = `tokenPrices:${chainId}:${tokens.join(",")}`;
+    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
     const now = Date.now();
 
-    // Validate tokens array
-    if (!tokens || tokens.length === 0) {
-        console.error("Tokens array is empty or undefined.");
+    // Validate the tokens array
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+        console.error("Tokens array is empty or not an array.");
         return {};
     }
 
-    // Check cache
+    // Check if cached data exists and is still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -725,18 +732,21 @@ export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         }
     }
 
-    // Prepare request body
-    const body = {
+    // Prepare the API request payload
+    const payload = {
         tokens,
-        currency: "USD"
+        currency: "USD", // Fetch prices in USD
     };
 
     try {
-        console.log("Sending request to 1inch API:", { url, body });
-        const response = await axios.post(url, body, { headers: HEADERS });
+        console.log("Sending request to 1inch Price API:", { url, payload });
 
-        if (response.status !== 200 || !response.data) {
-            throw new Error("Invalid response from 1inch API");
+        // Make the API request
+        const response = await axios.post(url, payload, { headers: HEADERS });
+
+        // Validate the response
+        if (response.status !== 200 || !response.data || Object.keys(response.data).length === 0) {
+            throw new Error("Invalid or empty response from 1inch Price API");
         }
 
         console.log("Fetched token prices:", response.data);
@@ -745,17 +755,22 @@ export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         cache.set(cacheKey, { data: response.data, timestamp: now });
         return response.data;
     } catch (error) {
-        console.error("Error fetching token prices:", {
+        console.error("Error fetching token prices from 1inch API:", {
             message: error.message,
             status: error.response?.status,
-            data: error.response?.data
+            data: error.response?.data,
         });
 
-        // Return an empty object on failure
+        // Use stale cached data if available in case of an error
+        if (cache.has(cacheKey)) {
+            console.warn("Using stale cached token prices due to API error.");
+            return cache.get(cacheKey).data;
+        }
+
+        // Return an empty object if no data is available
         return {};
     }
 }
-
 
 
 function calculateSlippage(path, priceData) {
