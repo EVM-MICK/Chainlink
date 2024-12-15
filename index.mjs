@@ -522,7 +522,7 @@ function expandStableTokens(unmatchedTokens) {
     console.log("Updated STABLE_TOKENS list:", STABLE_TOKENS);
 }
 
-**
+/**
  * Retrieve a list of stable tokens dynamically from the 1inch Token API.
  * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
  *
