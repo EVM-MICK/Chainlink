@@ -16,9 +16,8 @@ const ABI = require('./YourSmartContractABI.json');
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
 const contract = new web3.eth.Contract(ABI, process.env.CONTRACT_ADDRESS);
 const HEADERS = {
-    headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`
-    },
+    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+    Accept: "application/json",
 };
 
 // Configurable parameters
@@ -35,8 +34,13 @@ const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum pr
 // Optional: Setting a higher threshold for "critical" profits
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
 const chainId = 42161;
-const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
-const ONE_INCH_PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
+// Base URL for 1inch APIs
+const ONEINCH_BASE_URL = "https://api.1inch.dev";
+
+// API Endpoints
+const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
+const TOKEN_API_URL = `${ONEINCH_BASE_URL}/token/v1.2`; // Token API
+const PRICE_API_URL = `${ONEINCH_BASE_URL}/price/v1.1`; // Price API
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 // const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Replace with Permit2 address on Arbitrum
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
@@ -168,6 +172,45 @@ async function fetchCachedGasPrice() {
         return new BigNumber(50).multipliedBy(1e9); // Fallback to 50 Gwei
     }
 }
+async function fetchFromTokenAPI(endpoint, params = {}) {
+    const url = `${TOKEN_API_URL}/${CHAIN_ID}${endpoint}`;
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get(url, { headers: HEADERS, params })
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Token API Error [${endpoint}]:`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
+async function fetchFromSwapAPI(endpoint, params = {}) {
+    const url = `${SWAP_API_URL}/${CHAIN_ID}${endpoint}`;
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get(url, { headers: HEADERS, params })
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Swap API Error [${endpoint}]:`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
+async function fetchFromPriceAPI(endpoint, params = {}) {
+    const url = `${PRICE_API_URL}/${CHAIN_ID}${endpoint}`;
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get(url, { headers: HEADERS, params })
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Price API Error [${endpoint}]:`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
 
 export async function cachedGetLiquidityData(tokens) {
     const cacheKey = `liquidity:${tokens.join(",")}`;
@@ -195,22 +238,23 @@ export async function cachedGetLiquidityData(tokens) {
 // Generic API call wrapper
 async function safeApiCall(apiCallFunction, ...args) {
     return apiQueue.add(async () => {
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < 3; attempt++) {
             try {
                 return await apiCallFunction(...args);
             } catch (error) {
-                if (error.response && error.response.status === 429) { // Too many requests
-                    const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
-                    console.warn(`Rate limit hit, retrying in ${waitTime}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                if (error.response?.status === 429) { // Too many requests
+                    const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+                    console.warn(`Rate limit hit. Retrying in ${delay}ms...`);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
                 } else {
-                    throw error; // Non-throttling error
+                    throw error; // Other errors
                 }
             }
         }
         throw new Error("Max retries reached for API call");
     });
 }
+
 
 // Construct `params` with SwapDescription and Permit2 signature
 async function constructParams(route, amount, permitBatchSignature) {
@@ -476,18 +520,19 @@ function expandStableTokens(unmatchedTokens) {
     console.log("Updated STABLE_TOKENS list:", STABLE_TOKENS);
 }
 
-// Function to retrieve a list of stable, high-liquidity tokens from the 1inch API and  Get stable, high-liquidity tokens to focus on profitable paths
 /**
- * Fetch and dynamically match stable tokens from 1inch API.
- * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
- * @returns {Promise<string[]>} - Array of matched stable token addresses.
+ * Retrieve a list of stable tokens dynamically from the 1inch Token API.
+ * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
+ *
+ * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
+ * @returns {Promise<string[]>} - A list of stable token addresses.
  */
-
 export async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
+    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
     const now = Date.now();
 
+    // Check if the cache exists and is still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -497,16 +542,21 @@ export async function getStableTokenList(chainId = 42161) {
     }
 
     try {
-        const response = await axios.get(`${ONE_INCH_PRICE_API_URL}/${chainId}/tokens`, {
+        // Fetch token data from the 1inch Token API
+        const response = await axios.get(`${TOKEN_API_URL}/${chainId}/token-list`, {
             headers: HEADERS,
         });
 
+        // Parse and validate the response
         const tokenData = response.data?.tokens;
-        if (!tokenData) {
-            throw new Error("Invalid token data received from 1inch API.");
+        if (!tokenData || Object.keys(tokenData).length === 0) {
+            throw new Error("Invalid or empty token data received from 1inch API.");
         }
 
+        // Normalize the STABLE_TOKENS array for comparison
         const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
+
+        // Match tokens based on their symbols in the STABLE_TOKENS list
         const matchedTokens = Object.entries(tokenData)
             .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
             .map(([address]) => address);
@@ -516,98 +566,97 @@ export async function getStableTokenList(chainId = 42161) {
             return [];
         }
 
+        // Cache the matched tokens with a timestamp
         cache.set(cacheKey, { data: matchedTokens, timestamp: now });
+
+        console.log("Fetched and cached stable token list:", matchedTokens);
         return matchedTokens;
     } catch (error) {
+        // Log the error details
         console.error("Error fetching stable tokens:", {
             message: error.message,
             status: error.response?.status,
             data: error.response?.data,
         });
 
+        // Use stale cached data if available in case of an error
         if (cache.has(cacheKey)) {
             console.warn("Using stale cached stable tokens due to errors.");
             return cache.get(cacheKey).data;
         }
 
+        // Return an empty array if no data is available
         return [];
     }
 }
 
-// Helper function to fetch token price and liquidity
-async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
-    const cacheKeyPrefix = `tokenPrice:${chainId}:`;
-    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
-    const batchSize = 10; // Number of tokens per batch (adjustable for efficiency)
-    const prices = {};
-
-    const ONE_INCH_PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
-
-    // Helper function to fetch a batch of token prices
-    const fetchBatchPrices = async (batch) => {
-        try {
-            const response = await axios.post(
-                `${ONE_INCH_PRICE_API_URL}/${chainId}`,
-                { tokens: batch, currency: "USD" },
-                {
-                    headers: {
-                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                    },
-                }
-            );
-
-            // Parse response and cache results
-            if (response.data) {
-                for (const [tokenAddress, priceData] of Object.entries(response.data)) {
-                    const price = priceData?.price || 0;
-                    const liquidity = priceData?.liquidity || 0;
-
-                    const data = { price, liquidity };
-                    prices[tokenAddress] = data;
-                    cache.set(`${cacheKeyPrefix}${tokenAddress}`, { data, timestamp: Date.now() });
-                }
-            }
-        } catch (error) {
-            console.error(`Error fetching batch prices for tokens [${batch.join(",")}]:`, error.message);
-        }
-    };
-
-    // Split token addresses into batches and fetch prices
-    const tokenBatches = [];
-    for (let i = 0; i < tokenAddresses.length; i += batchSize) {
-        tokenBatches.push(tokenAddresses.slice(i, i + batchSize));
+/**
+ * Fetch the prices of given tokens using the 1inch Price API.
+ * This function caches the results to minimize redundant API calls.
+ *
+ * @param {string[]} tokenAddresses - Array of token addresses to fetch prices for.
+ * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
+ * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity.
+ */
+export async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
+    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
+        throw new Error("Invalid tokenAddresses array provided.");
     }
 
-    // Process batches sequentially (to respect rate limits)
-    for (const batch of tokenBatches) {
-        const freshBatch = batch.filter((tokenAddress) => {
-            const cachedData = cache.get(`${cacheKeyPrefix}${tokenAddress}`);
-            return !cachedData || Date.now() - cachedData.timestamp >= cacheDuration;
+    // Generate a unique cache key based on chainId and token addresses
+    const cacheKey = `tokenPrices:${chainId}:${tokenAddresses.join(",")}`;
+    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
+    const now = Date.now();
+
+    // Check if cached data exists and is still valid
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached token prices.");
+            return data;
+        }
+    }
+
+    try {
+        // Prepare the request payload for the 1inch Price API
+        const payload = {
+            tokens: tokenAddresses,
+            currency: "USD", // Fetch prices in USD
+        };
+
+        // Make an API request to the 1inch Price API
+        const response = await axios.post(`${PRICE_API_URL}/${chainId}`, payload, {
+            headers: HEADERS,
         });
 
-        if (freshBatch.length > 0) {
-            await fetchBatchPrices(freshBatch);
-            await new Promise((resolve) => setTimeout(resolve, 1200)); // Delay to respect 1 RPS limit
+        // Parse and validate the API response
+        const tokenPrices = response.data;
+        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
+            throw new Error("Invalid or empty token price data received from 1inch API.");
         }
-    }
 
-    // Retrieve prices from the cache for all requested tokens
-    for (const tokenAddress of tokenAddresses) {
-        if (prices[tokenAddress]) continue; // Skip if already fetched in this run
+        // Cache the results along with a timestamp
+        cache.set(cacheKey, { data: tokenPrices, timestamp: now });
 
-        const cachedData = cache.get(`${cacheKeyPrefix}${tokenAddress}`);
-        if (cachedData && Date.now() - cachedData.timestamp < cacheDuration) {
-            prices[tokenAddress] = cachedData.data;
-        } else {
-            console.warn(`Price data for ${tokenAddress} is not available.`);
-            prices[tokenAddress] = { price: 0, liquidity: 0 }; // Default fallback
+        console.log("Fetched and cached token prices:", tokenPrices);
+        return tokenPrices;
+    } catch (error) {
+        console.error("Error fetching token prices:", {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data,
+        });
+
+        // Use stale cached data if available in case of an error
+        if (cache.has(cacheKey)) {
+            console.warn("Using stale cached token prices due to errors.");
+            return cache.get(cacheKey).data;
         }
-    }
 
-    console.log("Fetched token prices:", prices);
-    return prices;
+        // Return an empty object if no data is available
+        return {};
+    }
 }
-
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
@@ -617,67 +666,40 @@ async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "usdc").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function generateRoutes(chainId = 42161, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
-    try {
-        // Step 1: Fetch stable tokens dynamically
-        const stableTokens = await getStableTokenList(42161);
-        if (stableTokens.length === 0) {
-            console.error("No stable tokens found. Route generation skipped.");
-            return [];
-        }
+async function generateRoutes(chainId = CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
+    const stableTokens = await getStableTokenList(chainId);
+    if (stableTokens.length === 0) {
+        console.error("No stable tokens found for route generation.");
+        return [];
+    }
 
-        // Step 2: Fetch token prices across protocols
-        const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, chainId);
-        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
-            console.error("Failed to fetch token prices. Route generation skipped.");
-            return [];
-        }
+    const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, chainId);
+    if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
+        console.error("Failed to fetch token prices for route generation.");
+        return [];
+    }
 
-        const routes = new Set(); // Store unique routes
+    const routes = new Set();
+    const startTokens = [preferredStartToken, ...stableTokens.filter(t => t !== preferredStartToken)];
 
-        // Step 3: Generate paths recursively and evaluate profitability
-        const generatePaths = async (path, remainingHops) => {
-            if (remainingHops === 0) return;
+    for (const startToken of startTokens) {
+        const generatePaths = async (path, hopsRemaining) => {
+            if (hopsRemaining === 0) return;
 
             for (const token of stableTokens) {
                 if (!path.includes(token)) {
                     const newPath = [...path, token];
-
-                    // Estimate route potential for the new path
                     const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
-                    if (profit > 0) {
-                        routes.add(newPath.join(",")); // Add unique profitable route
-                    }
-
-                    await generatePaths(newPath, remainingHops - 1);
+                    if (profit > 0) routes.add(newPath.join(","));
+                    await generatePaths(newPath, hopsRemaining - 1);
                 }
             }
         };
 
-        // Step 4: Prioritize start tokens for generating paths
-        const startTokens = [
-            preferredStartToken,
-            ...stableTokens.filter((t) => t !== preferredStartToken),
-        ];
-
-        for (const startToken of startTokens) {
-            await generatePaths([startToken], maxHops - 1);
-        }
-
-        // Step 5: Sort routes by profitability
-        const allRoutes = Array.from(routes).map((route) => route.split(","));
-        const rankedRoutes = allRoutes.sort((a, b) => {
-            const profitA = estimateRoutePotential(a, CAPITAL, tokenPrices);
-            const profitB = estimateRoutePotential(b, CAPITAL, tokenPrices);
-            return profitB - profitA; // Descending order by profit
-        });
-
-        console.log("Generated Routes:", rankedRoutes);
-        return rankedRoutes.slice(0, topN); // Return top N routes
-    } catch (error) {
-        console.error("Error in generateRoutes:", error.message);
-        return [];
+        await generatePaths([startToken], maxHops);
     }
+
+    return Array.from(routes).map(route => route.split(",")).slice(0, topN);
 }
 
 
@@ -773,25 +795,16 @@ function getBestPrice(protocolPrices) {
 }
 
 // Helper Function: Fetch Liquidity Data (1inch API Example)
-async function getLiquidityData(tokens) {
-    const cacheKey = "liquidityData";
+export async function getLiquidityData(tokens) {
+    const cacheKey = `liquidityData:${tokens.join(",")}`;
     return cachedGet(cacheKey, async () => {
-        const liquidityData = {};
-        try {
-            const response = await axios.get(`${PATHFINDER_API_URL}/tokens`, { headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    } });
-            tokens.forEach(token => {
-                const tokenInfo = response.data.tokens[token.toLowerCase()];
-                liquidityData[token] = tokenInfo ? tokenInfo.liquidity || 0 : 0;
-            });
-        } catch (error) {
-            console.error("Error fetching liquidity data:", error.message);
-        }
-        return liquidityData;
+        const response = await fetchFrom1Inch(`/tokens`, { tokens });
+        return tokens.reduce((acc, token) => {
+            acc[token] = response.tokens[token]?.liquidity || 0;
+            return acc;
+        }, {});
     }, "liquidityData");
 }
-
 
 async function safeExecute(fn, ...args) {
     try {
@@ -803,64 +816,17 @@ async function safeExecute(fn, ...args) {
 }
 
 // Fetch current gas price in Gwei from Polygon Gas Station
-async function fetchGasPrice({ useOptimal = false } = {}) {
-    const API_KEY = process.env.BLOCKNATIVE_API_KEY; // Use the API Key from environment variables
-    const url = "https://api.blocknative.com/gasprices/blockprices";
-    const now = Date.now();
-
-    // Use cached gas price if it's fresh (less than 5 minutes old)
-    if (cachedGasPrice && now - lastGasPriceFetch < 5 * 60 * 1000) {
-        console.log("Using cached gas price:", cachedGasPrice.dividedBy(1e9).toFixed(2), "Gwei");
-        return cachedGasPrice;
-    }
-
-    try {
-        // Fetch gas price from the Blocknative API
-        const response = await axios.get(url, {
-            headers: { Authorization: `Bearer ${API_KEY}` },
-            params: {
-                chainId: 42161, // Arbitrum Mainnet Chain ID
-            },
+async function fetchGasPrice() {
+    const cacheKey = `gasPrice:${CHAIN_ID}`;
+    return cachedGet(cacheKey, async () => {
+        const response = await axios.get("https://api.blocknative.com/gasprices/blockprices", {
+            headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
+            params: { chainId: CHAIN_ID },
         });
-
-        // Extract gas price at 90% confidence level
-        const gasPriceInGwei = response.data.blockPrices[0].estimatedPrices.find(
-            (price) => price.confidence === 90
-        ).price;
-
-        // Convert Gwei to Wei
-        const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), "gwei"));
-
-        // If `useOptimal` is enabled, ensure gas price is within optimal thresholds
-        if (useOptimal) {
-            const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize congestion to 0-1 range
-            const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // Maximum gas price in Wei
-
-            if (gasPriceInWei.isGreaterThan(maxGasPrice)) {
-                console.warn("Gas price exceeds optimal threshold. Skipping transaction.");
-                return null;
-            }
-        }
-
-        // Cache the gas price and update the fetch timestamp
-        cachedGasPrice = gasPriceInWei;
-        lastGasPriceFetch = now;
-
-        console.log("Fetched gas price:", gasPriceInWei.dividedBy(1e9).toFixed(2), "Gwei");
-        return gasPriceInWei;
-    } catch (error) {
-        console.error("Error fetching gas price:", error.message);
-
-        // Use cached gas price if available, or fallback to default
-        if (cachedGasPrice) {
-            console.warn("Using cached gas price due to error fetching new data.");
-            return cachedGasPrice;
-        }
-
-        console.warn("Falling back to default gas price (50 Gwei).");
-        return new BigNumber(50).multipliedBy(1e9); // Default fallback: 50 Gwei in Wei
-    }
+        return new BigNumber(response.data.fast.maxFee).shiftedBy(9); // Convert Gwei to Wei
+    }, "gasPrice");
 }
+
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
 export async function calculateDynamicMinimumProfit() {
@@ -950,26 +916,81 @@ export function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
 }
 
-// Get a swap quote for a multihop with retry logic
-async function getSwapQuote(fromToken, toToken, amount, slippage) {
-    const cacheKey = `swapQuote:${fromToken}-${toToken}-${amount}`;
-    return cachedGet(cacheKey, async () => {
-        const response = await axios.get(`${PATHFINDER_API_URL}/swap`, {
-            headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    },
-            params: {
-                fromTokenAddress: fromToken,
-                toTokenAddress: toToken,
-                amount: amount.toFixed(0),
-                slippage: slippage.toFixed(2),
-                allowPartialFill: false,
-            },
-        });
-        return response.data.tx.data;
-    }, "swapQuotes");
-}
+/**
+ * Fetch a swap quote using the 1inch Swap API.
+ * Retrieves the transaction data required to execute a token swap.
+ *
+ * @param {string} fromToken - The address of the token to swap from.
+ * @param {string} toToken - The address of the token to swap to.
+ * @param {BigNumber} amount - The amount of the `fromToken` to swap (in the smallest unit).
+ * @param {number} slippage - The slippage tolerance percentage (default: 1).
+ * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
+ * @returns {Promise<Object>} - The transaction data required to execute the swap.
+ */
+export async function getSwapQuote(fromToken, toToken, amount, slippage = 1, chainId = CHAIN_ID) {
+    if (!fromToken || !toToken || !amount || amount.lte(0)) {
+        throw new Error("Invalid parameters provided for getSwapQuote.");
+    }
 
+    // Generate a unique cache key for the swap quote
+    const cacheKey = `swapQuote:${chainId}:${fromToken}-${toToken}-${amount.toFixed()}-${slippage}`;
+    const cacheDuration = 1 * 60 * 1000; // Cache duration: 1 minute
+    const now = Date.now();
+
+    // Check if cached data exists and is still valid
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached swap quote.");
+            return data;
+        }
+    }
+
+    try {
+        // Prepare the request parameters for the 1inch Swap API
+        const params = {
+            fromTokenAddress: fromToken,
+            toTokenAddress: toToken,
+            amount: amount.toFixed(0), // Convert BigNumber to string in the smallest unit
+            slippage: slippage.toFixed(2), // Format slippage as a percentage
+            disableEstimate: false, // Enable price estimation
+            allowPartialFill: false, // Ensure full swaps only
+            includeProtocols: true, // Include protocol details in the response
+        };
+
+        // Make an API request to the 1inch Swap API
+        const response = await axios.get(`${SWAP_API_URL}/${chainId}/swap`, {
+            headers: HEADERS,
+            params,
+        });
+
+        // Validate the API response and extract transaction data
+        const swapData = response.data;
+        if (!swapData || !swapData.tx || !swapData.tx.data) {
+            throw new Error("Invalid or incomplete swap data received from 1inch API.");
+        }
+
+        // Cache the response data along with a timestamp
+        cache.set(cacheKey, { data: swapData.tx, timestamp: now });
+
+        console.log("Fetched and cached swap quote:", swapData.tx);
+        return swapData.tx;
+    } catch (error) {
+        console.error("Error fetching swap quote:", {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data,
+        });
+
+        // Use stale cached data if available during an API error
+        if (cache.has(cacheKey)) {
+            console.warn("Using stale cached swap quote due to errors.");
+            return cache.get(cacheKey).data;
+        }
+
+        throw error; // Re-throw the error if no cached data is available
+    }
+}
 
 // Function to execute the profitable route using flash loan and swap
 export async function executeRoute(route, amount) {
@@ -1078,8 +1099,8 @@ export async function fetchTokenDecimals(tokenAddress) {
         const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
         return await contract.methods.decimals().call();
     } catch (error) {
-        console.warn(`Error fetching decimals for ${tokenAddress}. Assuming 18 decimals.`);
-        return 18; // Default to 18 decimals
+        console.warn(`Error fetching decimals for ${tokenAddress}. Defaulting to known stablecoin decimals.`);
+        return STABLE_TOKENS.includes(tokenAddress.toLowerCase()) ? 6 : 18; // Default based on token type
     }
 }
 
@@ -1161,21 +1182,24 @@ async function cachedGet(key, fetchFunction, type) {
 
 
 // Function to send Telegram notifications
-export async function sendTelegramMessage(message, isCritical = false) {
-    const chatId = isCritical
-        ? process.env.TELEGRAM_CRITICAL_CHAT_ID
-        : process.env.TELEGRAM_CHAT_ID;
+async function sendTelegramMessage(message, isCritical = false) {
+    const chatId = isCritical ? process.env.TELEGRAM_CRITICAL_CHAT_ID : process.env.TELEGRAM_CHAT_ID;
 
     try {
-        await axios.post(
-            `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-            { chat_id: chatId, text: message, parse_mode: "Markdown" }
-        );
-        console.log("Telegram notification sent:", message);
+        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            chat_id: chatId,
+            text: message,
+            parse_mode: "Markdown",
+        });
+        console.log("Telegram message sent:", message);
     } catch (error) {
-        console.error("Failed to send Telegram message:", error.message);
+        console.error("Failed to send Telegram message:", {
+            message: error.message,
+            stack: error.stack,
+        });
     }
 }
+
 
 
 // Start the arbitrage bot
