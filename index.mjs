@@ -419,7 +419,7 @@ async function findProfitableRoutes() {
         console.log("Finding profitable routes...");
 
         // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList();
+        const stableTokens = await getStableTokenList(42161);
         if (stableTokens.length === 0) {
             console.error("No stable tokens available. Skipping profitable route search.");
             return [];
@@ -669,7 +669,7 @@ export async function fetchTokenPrices(tokenAddresses, CHAIN_ID) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
-    const stableTokens = await getStableTokenList();
+    const stableTokens = await getStableTokenList(42161);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
         return [];
