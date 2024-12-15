@@ -23,7 +23,7 @@ const HEADERS = {
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
-    interval: 1200, // 1.2 second interval
+    interval: 1000, // 1 second interval
     intervalCap: 1, // 1 request per second
 });
 
@@ -714,16 +714,15 @@ async function generateRoutes(chainId = CHAIN_ID, maxHops = 3, preferredStartTok
 export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     const url = `${PRICE_API_URL}/${chainId}`;
     const cacheKey = `tokenPrices:${chainId}:${tokens.join(",")}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
+    const cacheDuration = 5 * 60 * 1000; // Cache for 5 minutes
     const now = Date.now();
 
-    // Validate the tokens array
-    if (!Array.isArray(tokens) || tokens.length === 0) {
-        console.error("Tokens array is empty or not an array.");
+    if (!tokens || tokens.length === 0) {
+        console.error("Tokens array is empty or undefined.");
         return {};
     }
 
-    // Check if cached data exists and is still valid
+    // Check cache
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < cacheDuration) {
@@ -732,28 +731,43 @@ export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         }
     }
 
-    // Prepare the API request payload
+    // Prepare request payload
     const payload = {
         tokens,
-        currency: "USD", // Fetch prices in USD
+        currency: "USD",
     };
 
     try {
         console.log("Sending request to 1inch Price API:", { url, payload });
 
-        // Make the API request
-        const response = await axios.post(url, payload, { headers: HEADERS });
+        // Use the rate-limited queue for the API call
+        const response = await apiQueue.add(() =>
+            safeApiCall(async () => {
+                return await axios.post(url, payload, { headers: HEADERS });
+            })
+        );
 
-        // Validate the response
-        if (response.status !== 200 || !response.data || Object.keys(response.data).length === 0) {
-            throw new Error("Invalid or empty response from 1inch Price API");
+        if (!response || response.status !== 200 || !response.data) {
+            throw new Error("Invalid response from 1inch Price API");
         }
 
-        console.log("Fetched token prices:", response.data);
+        const tokenPrices = response.data;
 
-        // Cache the response
-        cache.set(cacheKey, { data: response.data, timestamp: now });
-        return response.data;
+        // Validate and format token data (ensure keys are actual addresses)
+        const validatedData = {};
+        for (const [address, tokenInfo] of Object.entries(tokenPrices)) {
+            if (web3.utils.isAddress(address)) {
+                validatedData[address] = tokenInfo;
+            } else {
+                console.warn(`Invalid address detected in token data: ${address}`);
+            }
+        }
+
+        console.log("Fetched token prices:", validatedData);
+
+        // Cache the results
+        cache.set(cacheKey, { data: validatedData, timestamp: now });
+        return validatedData;
     } catch (error) {
         console.error("Error fetching token prices from 1inch API:", {
             message: error.message,
@@ -761,17 +775,21 @@ export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
             data: error.response?.data,
         });
 
-        // Use stale cached data if available in case of an error
+        if (error.response?.status === 429) {
+            console.warn(
+                `Rate limit exceeded. Retry-After: ${error.response.headers['retry-after']} seconds`
+            );
+        }
+
+        // Use stale cached data if available
         if (cache.has(cacheKey)) {
             console.warn("Using stale cached token prices due to API error.");
             return cache.get(cacheKey).data;
         }
 
-        // Return an empty object if no data is available
         return {};
     }
 }
-
 
 function calculateSlippage(path, priceData) {
     const slippageFactors = path.map(token => {
