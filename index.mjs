@@ -529,6 +529,18 @@ function expandStableTokens(unmatchedTokens) {
  * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object[]>} - A list of stable token objects (address, symbol, decimals).
  */
+// Add token addresses for the Arbitrum chain
+const STABLE_TOKENS_ADD = {
+  usdt: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+  usdc: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+  dai: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+  weth: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
+  aave: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
+  link: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+  arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
+};
+
 export async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
@@ -546,13 +558,11 @@ export async function getStableTokenList(chainId = 42161) {
   try {
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-    // Node.js implementation for the 1inch Token API call
-    const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
     const config = {
       headers: {
-  "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl"
-   },
-      params: {}
+        "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl",
+      }
     };
 
     const response = await axios.get(url, config);
@@ -563,12 +573,9 @@ export async function getStableTokenList(chainId = 42161) {
       throw new Error("Invalid or empty token data received from 1inch API.");
     }
 
-    // Normalize the STABLE_TOKENS array for case-insensitive matching
-    const normalizedStableTokens = STABLE_TOKENS.map((symbol) => symbol.toLowerCase());
-
-    // Match tokens from the STABLE_TOKENS list and extract details
+    // Match tokens from the STABLE_TOKENS list by address
     const matchedTokens = Object.entries(tokenData)
-      .filter(([_, token]) => normalizedStableTokens.includes(token.symbol.toLowerCase()))
+      .filter(([address, token]) => Object.values(STABLE_TOKENS_ADD).includes(address.toLowerCase()))
       .map(([address, token]) => ({
         address,
         symbol: token.symbol,
@@ -602,6 +609,7 @@ export async function getStableTokenList(chainId = 42161) {
     return [];
   }
 }
+
 
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
