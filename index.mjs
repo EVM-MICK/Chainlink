@@ -533,26 +533,25 @@ function expandStableTokens(unmatchedTokens) {
  */
 // Add token addresses for the Arbitrum chain
 const STABLE_TOKENS_ADD = {
-  USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+  "USDT": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
   "USDC.e": "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
-  DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-  WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
-  AAVE: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
-  LINK: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-  arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
+  "DAI": "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+  "WETH": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  "WBTC": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+  "AAVE": "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+  "LINK": "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+  "ARB": "0x912ce59144191c1204e64559fe8253a0e49e6548"
 };
 
 /**
- * Fetch token data with enhanced error handling and rate-limiting logic
+ * Fetch token data with enhanced error handling and rate-limiting logic.
  */
 async function fetchTokenData(address, headers, baseUrl) {
   try {
-    const checksummedAddress = getAddress(address); // Ensure checksum format
+    const checksummedAddress = getAddress(address); // Normalize address to checksum format
     const response = await apiQueue.add(() =>
       axios.get(`${baseUrl}/${checksummedAddress}`, { headers })
     );
-
     return response.data?.tokens?.[checksummedAddress.toLowerCase()] || null;
   } catch (error) {
     if (error.response?.status === 404) {
@@ -562,19 +561,19 @@ async function fetchTokenData(address, headers, baseUrl) {
     } else {
       console.error(`Unexpected error for address ${address}:`, error.message);
     }
-    return null; // Gracefully handle errors by returning null
+    return null; // Return null to allow continued processing
   }
 }
 
 /**
- * Fetch and process stable tokens dynamically, leveraging /token-list for validation
+ * Fetch and process stable tokens dynamically, leveraging /token-list for validation.
  */
 export async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
   const now = Date.now();
 
-  // Check cache validity
+  // Step 1: Return cached data if valid
   if (cache.has(cacheKey)) {
     const { data, timestamp } = cache.get(cacheKey);
     if (now - timestamp < cacheDuration) {
@@ -585,29 +584,31 @@ export async function getStableTokenList(chainId = 42161) {
 
   console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-  // Fetch all supported tokens from /token-list
+  // Step 2: Fetch all supported tokens from /token-list
   let supportedTokens = {};
   try {
-    const tokenListResponse = await axios.get(`${BASE_URL}/../token-list`, { headers: HEADERS });
-    supportedTokens = tokenListResponse.data?.tokens || {};
+    const response = await axios.get(`${BASE_URL}/token-list`, { headers: HEADERS });
+    supportedTokens = response.data?.tokens || {};
     console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens from /token-list.`);
   } catch (error) {
-    console.error("Error fetching supported tokens:", error.response?.data || error.message);
-    return []; // Return an empty list if fetching the token list fails
+    console.error("Error fetching /token-list:", error.response?.data || error.message);
+    return []; // Return empty list if fetching the token list fails
   }
 
-  // Match tokens in STABLE_TOKENS_ADD against the supported tokens
+  // Step 3: Match tokens in STABLE_TOKENS_ADD against the supported tokens
   const matchedTokens = [];
   for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
     const tokenData = await fetchTokenData(address, HEADERS, BASE_URL);
 
+    // Match by address, ensure dynamic symbol support
     if (tokenData && supportedTokens[tokenData.address.toLowerCase()]) {
       matchedTokens.push({
         address: tokenData.address,
         symbol: tokenData.symbol,
         decimals: tokenData.decimals,
+        name: tokenData.name,
       });
-      console.log(`Matched token: ${symbol}`);
+      console.log(`Matched token: ${symbol} -> ${tokenData.symbol}`);
     } else {
       console.warn(`Token not supported or not found: ${symbol}`);
     }
@@ -618,7 +619,7 @@ export async function getStableTokenList(chainId = 42161) {
     return [];
   }
 
-  // Cache the matched tokens
+  // Step 4: Cache and return matched tokens
   cache.set(cacheKey, { data: matchedTokens, timestamp: now });
   console.log("Fetched and cached stable token list:", matchedTokens);
   return matchedTokens;
