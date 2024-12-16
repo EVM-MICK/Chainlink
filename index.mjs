@@ -49,8 +49,8 @@ const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
 const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
 // Stable, high-liquidity tokens to include in route evaluations
-const STABLE_TOKENS = ["usdt", "usdc", "dai", "weth", "wbtc", "aave", "link", "arb"];
-const highLiquidityTokens = ["usdt", "usdc", "dai", "weth"];
+const STABLE_TOKENS = ["USDT", "USDC.e", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
+const highLiquidityTokens = ["USDT", "USDC.e", "DAI", "WETH"];
 const MAX_HOPS = 3;
 let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
@@ -437,7 +437,7 @@ async function findProfitableRoutes() {
 
         // Step 3: Generate routes
         const maxHops = 3;
-        const preferredStartToken = "usdc";
+        const preferredStartToken = "USDC.e";
         const topN = 5;
         const routes = await generateRoutes(CHAIN_ID, maxHops, preferredStartToken, topN);
 
@@ -490,7 +490,7 @@ class PriorityQueue {
 
 // Utility: Estimate route potential (placeholder logic)
 function estimateRoutePotential(route, capital, cachedPriceData) {
-    const preferredTokens = ["usdc", "usdt"];
+    const preferredTokens = ["USDC.e", "USDT"];
     const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
     let estimatedProfit = new BigNumber(0);
 
@@ -533,13 +533,13 @@ function expandStableTokens(unmatchedTokens) {
  */
 // Add token addresses for the Arbitrum chain
 const STABLE_TOKENS_ADD = {
-  usdt: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-  usdc: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
-  dai: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-  weth: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
-  aave: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
-  link: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+  USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+  USDC.e: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+  DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+  WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+  AAVE: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+  LINK: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
   arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
 };
 
@@ -696,10 +696,10 @@ export async function fetchTokenPrices(tokenAddresses, CHAIN_ID) {
  * Generate profitable routes using stable tokens.
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @param {number} maxHops - Maximum number of hops for routes.
- * @param {string} preferredStartToken - Preferred starting token (e.g., "usdc").
+ * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC.e").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usdc", topN = 3) {
+async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USDC.e", topN = 3) {
     const stableTokens = await getStableTokenList(42161);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
@@ -738,7 +738,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "usd
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
- * @param {string[]} tokens - Array of token symbols (e.g., ["usdt", "usdc", ...]).
+ * @param {string[]} tokens - Array of token symbols (e.g., ["USDT", "USDC.e", ...]).
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
@@ -931,7 +931,7 @@ export async function evaluateRouteProfit(route) {
         // Calculate dynamic minimum profit threshold
         const minimumProfitThreshold = await calculateDynamicMinimumProfit();
 
-        // Initial input amount (CAPITAL in usdt, assumed 6 decimals)
+        // Initial input amount (CAPITAL in USDT, assumed 6 decimals)
         let amountIn = CAPITAL;
 
         // Estimate gas cost
@@ -977,7 +977,7 @@ export async function evaluateRouteProfit(route) {
 
         // Return profit only if it meets the minimum profit threshold
         if (profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
-            console.log(`Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} usdt`);
+            console.log(`Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} USDT`);
             return profit;
         } else {
             console.log("Route did not meet the minimum profit threshold.");
