@@ -535,10 +535,10 @@ const STABLE_TOKENS_ADD = {
   usdc: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
   dai: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
   weth: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
-  aave: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
-  link: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-  arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
+  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+  aave: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+  link: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4",
+  arb: "0x912CE59144191C1204E64559FE8253a0e49E6548"
 };
 
 export async function getStableTokenList(chainId = 42161) {
