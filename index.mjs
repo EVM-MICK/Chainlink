@@ -8,6 +8,7 @@ import { createRequire } from 'module';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
+import { getAddress } from "@ethersproject/address";
 
 dotenv.config();
 const { Telegraf } = pkg;
@@ -39,6 +40,7 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
+const BASE_URL = `https://api.1inch.dev/token/v1.2/42161/custom`;
 const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
 const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2/42161/custom";
 const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
@@ -541,23 +543,32 @@ const STABLE_TOKENS_ADD = {
   arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
 };
 
-// Function to fetch token data from the 1inch API
+/**
+ * Fetch token data with enhanced error handling and rate-limiting logic
+ */
 async function fetchTokenData(address, headers, baseUrl) {
   try {
+    const checksummedAddress = getAddress(address); // Ensure checksum format
     const response = await apiQueue.add(() =>
-      axios.get(`${baseUrl}/${address}`, { headers })
+      axios.get(`${baseUrl}/${checksummedAddress}`, { headers })
     );
 
-    return response.data?.tokens?.[address.toLowerCase()] || null;
+    return response.data?.tokens?.[checksummedAddress.toLowerCase()] || null;
   } catch (error) {
-    if (error.response?.status === 429) {
-      console.warn(`Rate limit exceeded for address ${address}. Retrying...`);
+    if (error.response?.status === 404) {
+      console.warn(`Token not found for address: ${address}`);
+    } else if (error.response?.status === 429) {
+      console.warn(`Rate limit exceeded for address: ${address}. Retrying...`);
+    } else {
+      console.error(`Unexpected error for address ${address}:`, error.message);
     }
-    throw error; // Let the calling function handle retries or logging
+    return null; // Gracefully handle errors by returning null
   }
 }
 
-// Main function to fetch and process stable tokens
+/**
+ * Fetch and process stable tokens dynamically, leveraging /token-list for validation
+ */
 export async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
@@ -574,28 +585,31 @@ export async function getStableTokenList(chainId = 42161) {
 
   console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-  const baseUrl = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
-  const headers = {
-    Authorization: "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
-  };
+  // Fetch all supported tokens from /token-list
+  let supportedTokens = {};
+  try {
+    const tokenListResponse = await axios.get(`${BASE_URL}/../token-list`, { headers: HEADERS });
+    supportedTokens = tokenListResponse.data?.tokens || {};
+    console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens from /token-list.`);
+  } catch (error) {
+    console.error("Error fetching supported tokens:", error.response?.data || error.message);
+    return []; // Return an empty list if fetching the token list fails
+  }
 
+  // Match tokens in STABLE_TOKENS_ADD against the supported tokens
   const matchedTokens = [];
   for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
-    try {
-      const tokenData = await fetchTokenData(address, headers, baseUrl);
+    const tokenData = await fetchTokenData(address, HEADERS, BASE_URL);
 
-      if (tokenData) {
-        matchedTokens.push({
-          address,
-          symbol: tokenData.symbol,
-          decimals: tokenData.decimals,
-        });
-        console.log(`Fetched token: ${symbol}`);
-      } else {
-        console.warn(`Token not found: ${symbol}`);
-      }
-    } catch (error) {
-      console.error(`Error fetching token data for ${symbol}:`, error.response?.data || error.message);
+    if (tokenData && supportedTokens[tokenData.address.toLowerCase()]) {
+      matchedTokens.push({
+        address: tokenData.address,
+        symbol: tokenData.symbol,
+        decimals: tokenData.decimals,
+      });
+      console.log(`Matched token: ${symbol}`);
+    } else {
+      console.warn(`Token not supported or not found: ${symbol}`);
     }
   }
 
@@ -604,13 +618,11 @@ export async function getStableTokenList(chainId = 42161) {
     return [];
   }
 
-  // Cache the results
+  // Cache the matched tokens
   cache.set(cacheKey, { data: matchedTokens, timestamp: now });
-
   console.log("Fetched and cached stable token list:", matchedTokens);
   return matchedTokens;
 }
-
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
  * This function caches the results to minimize redundant API calls.
