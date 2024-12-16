@@ -558,32 +558,31 @@ export async function getStableTokenList(chainId = 42161) {
   try {
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-    // **Explicitly Use STABLE_TOKENS**
-    // Extract token addresses from the STABLE_TOKENS constant
-    const tokenAddresses = Object.values(STABLE_TOKENS_ADD).join(",");
-
-    // Build the API URL with /custom/{addresses}
-    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom/${tokenAddresses}`;
-    const config = {
-      headers: {
-        "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
-      },
+    const baseUrl = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+    const headers = {
+      Authorization: "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
     };
 
-    const response = await axios.get(url, config);
+    // Query each token address individually
+    const matchedTokens = [];
+    for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
+      try {
+        const response = await axios.get(`${baseUrl}/${address}`, { headers });
 
-    // Validate the response structure
-    const tokenData = response.data?.tokens;
-    if (!tokenData || Object.keys(tokenData).length === 0) {
-      throw new Error("Invalid or empty token data received from 1inch API.");
+        const tokenData = response.data?.tokens?.[address.toLowerCase()];
+        if (tokenData) {
+          matchedTokens.push({
+            address,
+            symbol: tokenData.symbol,
+            decimals: tokenData.decimals,
+          });
+        } else {
+          console.warn(`Token not found: ${symbol}`);
+        }
+      } catch (error) {
+        console.error(`Error fetching token data for ${symbol}:`, error.response?.data || error.message);
+      }
     }
-
-    // Extract token details
-    const matchedTokens = Object.entries(tokenData).map(([address, token]) => ({
-      address,
-      symbol: token.symbol,
-      decimals: token.decimals,
-    }));
 
     if (matchedTokens.length === 0) {
       console.error("No tokens matched the STABLE_TOKENS list.");
