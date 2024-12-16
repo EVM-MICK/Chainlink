@@ -534,7 +534,7 @@ function expandStableTokens(unmatchedTokens) {
 // Add token addresses for the Arbitrum chain
 const STABLE_TOKENS_ADD = {
   USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-  USDC.e: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+  "USDC.e": "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
   DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
   WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
   WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
