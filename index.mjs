@@ -549,9 +549,13 @@ export async function getStableTokenList(chainId = 42161) {
     // Node.js implementation for the 1inch Token API call
     const url = "https://api.1inch.dev/token/v1.2/42161/custom";
     const config = {
-      headers: HEADERS,
+      headers: {
+  "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl"
+   },
       params: {},
-      paramsSerializer: { indexes: null },
+      paramsSerializer: {
+        indexes: null
+      }
     };
 
     const response = await axios.get(url, config);
