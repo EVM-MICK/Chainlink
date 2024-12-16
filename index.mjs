@@ -541,12 +541,29 @@ const STABLE_TOKENS_ADD = {
   arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
 };
 
+// Function to fetch token data from the 1inch API
+async function fetchTokenData(address, headers, baseUrl) {
+  try {
+    const response = await apiQueue.add(() =>
+      axios.get(`${baseUrl}/${address}`, { headers })
+    );
+
+    return response.data?.tokens?.[address.toLowerCase()] || null;
+  } catch (error) {
+    if (error.response?.status === 429) {
+      console.warn(`Rate limit exceeded for address ${address}. Retrying...`);
+    }
+    throw error; // Let the calling function handle retries or logging
+  }
+}
+
+// Main function to fetch and process stable tokens
 export async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
   const now = Date.now();
 
-  // Check if cached data exists and is valid
+  // Check cache validity
   if (cache.has(cacheKey)) {
     const { data, timestamp } = cache.get(cacheKey);
     if (now - timestamp < cacheDuration) {
@@ -555,61 +572,43 @@ export async function getStableTokenList(chainId = 42161) {
     }
   }
 
-  try {
-    console.log(`Fetching stable token list for chain ID ${chainId}...`);
+  console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-    const baseUrl = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
-    const headers = {
-      Authorization: "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
-    };
+  const baseUrl = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+  const headers = {
+    Authorization: "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
+  };
 
-    // Query each token address individually
-    const matchedTokens = [];
-    for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
-      try {
-        const response = await axios.get(`${baseUrl}/${address}`, { headers });
+  const matchedTokens = [];
+  for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
+    try {
+      const tokenData = await fetchTokenData(address, headers, baseUrl);
 
-        const tokenData = response.data?.tokens?.[address.toLowerCase()];
-        if (tokenData) {
-          matchedTokens.push({
-            address,
-            symbol: tokenData.symbol,
-            decimals: tokenData.decimals,
-          });
-        } else {
-          console.warn(`Token not found: ${symbol}`);
-        }
-      } catch (error) {
-        console.error(`Error fetching token data for ${symbol}:`, error.response?.data || error.message);
+      if (tokenData) {
+        matchedTokens.push({
+          address,
+          symbol: tokenData.symbol,
+          decimals: tokenData.decimals,
+        });
+        console.log(`Fetched token: ${symbol}`);
+      } else {
+        console.warn(`Token not found: ${symbol}`);
       }
+    } catch (error) {
+      console.error(`Error fetching token data for ${symbol}:`, error.response?.data || error.message);
     }
+  }
 
-    if (matchedTokens.length === 0) {
-      console.error("No tokens matched the STABLE_TOKENS list.");
-      return [];
-    }
-
-    // Cache the matched tokens with a timestamp
-    cache.set(cacheKey, { data: matchedTokens, timestamp: now });
-
-    console.log("Fetched and cached stable token list:", matchedTokens);
-    return matchedTokens;
-  } catch (error) {
-    console.error("Error fetching stable tokens:", {
-      message: error.message,
-      status: error.response?.status,
-      data: error.response?.data,
-    });
-
-    // Use stale cached data if available
-    if (cache.has(cacheKey)) {
-      console.warn("Using stale cached stable tokens due to errors.");
-      return cache.get(cacheKey).data;
-    }
-
-    // Return an empty list if no cached data is available
+  if (matchedTokens.length === 0) {
+    console.error("No tokens matched the STABLE_TOKENS list.");
     return [];
   }
+
+  // Cache the results
+  cache.set(cacheKey, { data: matchedTokens, timestamp: now });
+
+  console.log("Fetched and cached stable token list:", matchedTokens);
+  return matchedTokens;
 }
 
 /**
