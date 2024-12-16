@@ -552,10 +552,7 @@ export async function getStableTokenList(chainId = 42161) {
       headers: {
   "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl"
    },
-      params: {},
-      paramsSerializer: {
-        indexes: null
-      }
+      params: {}
     };
 
     const response = await axios.get(url, config);
