@@ -39,8 +39,9 @@ const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;
 const TOKEN_API_URL = `${ONEINCH_BASE_URL}/token/v1.2/42161/custom`;
 const PRICE_API_URL = `${ONEINCH_BASE_URL}/price/v1.1`;
 const HISTORY_API_URL = `${ONEINCH_BASE_URL}/history/v2.0/history`;
-//const STABLE_TOKENS = ["usdc", ""usdt","dai", "weth", "wbtc"];
-const STABLE_TOKENS = ["usdc", "usdt", "dai", "weth", "wbtc"]; // Fixed syntax error
+//const STABLE_TOKENS = ["USDT", "USDC.e", "DAI", "WETH", "WBTC"];
+
+const STABLE_TOKENS = ["USDC.e", "USDT", "DAI", "WETH", "WBTC"]; // Fixed syntax error
 const chainId = 42161;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
 const liquidityCache = {}; // Initialize at the module level to persist cache across calls
@@ -347,7 +348,7 @@ async function generatePermitBatchSignature(route) {
 /**
  * Generate profitable routes using 1inch Swap API
  */
-async function generateRoutes(tokens = STABLE_TOKENS, maxHops = MAX_HOPS, startToken = "usdc") {
+async function generateRoutes(tokens = STABLE_TOKENS, maxHops = MAX_HOPS, startToken = "USDC.e") {
     const routes = [];
     const tokenPairs = new Set();
 
@@ -1057,7 +1058,7 @@ async function startArbitrageBot() {
             }
 
             console.log("Generating profitable routes...");
-            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "usdc", tokenPrices);
+            const routes = await generateRoutes(Object.keys(tokenPrices), MAX_HOPS, "USDC.e", tokenPrices);
 
             if (routes.length === 0) {
                 console.log("No profitable routes found.");
