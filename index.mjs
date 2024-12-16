@@ -535,10 +535,10 @@ const STABLE_TOKENS_ADD = {
   usdc: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
   dai: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
   weth: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
-  aave: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
-  link: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4",
-  arb: "0x912CE59144191C1204E64559FE8253a0e49E6548"
+  wbtc: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
+  aave: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
+  link: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+  arb: "0x912ce59144191c1204e64559fe8253a0e49e6548"
 };
 
 export async function getStableTokenList(chainId = 42161) {
@@ -558,11 +558,16 @@ export async function getStableTokenList(chainId = 42161) {
   try {
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+    // **Explicitly Use STABLE_TOKENS**
+    // Extract token addresses from the STABLE_TOKENS constant
+    const tokenAddresses = Object.values(STABLE_TOKENS_ADD).join(",");
+
+    // Build the API URL with /custom/{addresses}
+    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom/${tokenAddresses}`;
     const config = {
       headers: {
-        "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl",
-      }
+        "Authorization": "Bearer oZ689cJa0IQZ17DVyvmFLne6qMJUjqYl", // Replace with your actual API key
+      },
     };
 
     const response = await axios.get(url, config);
@@ -573,14 +578,12 @@ export async function getStableTokenList(chainId = 42161) {
       throw new Error("Invalid or empty token data received from 1inch API.");
     }
 
-    // Match tokens from the STABLE_TOKENS list by address
-    const matchedTokens = Object.entries(tokenData)
-      .filter(([address, token]) => Object.values(STABLE_TOKENS_ADD).includes(address.toLowerCase()))
-      .map(([address, token]) => ({
-        address,
-        symbol: token.symbol,
-        decimals: token.decimals,
-      }));
+    // Extract token details
+    const matchedTokens = Object.entries(tokenData).map(([address, token]) => ({
+      address,
+      symbol: token.symbol,
+      decimals: token.decimals,
+    }));
 
     if (matchedTokens.length === 0) {
       console.error("No tokens matched the STABLE_TOKENS list.");
@@ -609,7 +612,6 @@ export async function getStableTokenList(chainId = 42161) {
     return [];
   }
 }
-
 
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
