@@ -821,80 +821,64 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         console.log("Fallback Tokens:", tokens.map((t) => t.address));
     }
 
-    // Step 1: Extract and validate token addresses
+    // Step 1: Extract valid token addresses
     const tokenAddresses = tokens
-        .map((token) => {
-            if (typeof token === "object" && token.address) {
-                return token.address; // Extract address from object
-            } else if (typeof token === "string" && web3.utils.isAddress(token)) {
-                return token; // Already a valid address
-            } else {
-                console.warn(`Invalid token format detected and skipped:`, token);
-                return null;
-            }
-        })
-        .filter((address) => address !== null && web3.utils.isAddress(address));
+        .map((token) => (typeof token === "object" ? token.address : token))
+        .filter((address) => address && web3.utils.isAddress(address));
 
     if (tokenAddresses.length === 0) {
         console.error("No valid token addresses provided.");
         return {};
     }
 
-    console.log(`Resolved Token Addresses: ${tokenAddresses.join(", ")}`);
+    console.log(`Valid token addresses: ${tokenAddresses.join(", ")}`);
 
-    const cacheKey = `tokenPrices:${chainId}:${tokenAddresses.join(",")}`;
+    const prices = {};
     const now = Date.now();
 
-    // Step 2: Return cached data if still valid
-    if (cache.has(cacheKey)) {
-        const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < CACHE_DURATION) {
-            console.log("Returning cached token prices.");
-            return data;
+    // Step 2: Check cache and fetch prices individually
+    for (const address of tokenAddresses) {
+        const cacheKey = `tokenPrice:${chainId}:${address}`;
+
+        // Return cached data if valid
+        if (cache.has(cacheKey)) {
+            const { data, timestamp } = cache.get(cacheKey);
+            if (now - timestamp < CACHE_DURATION) {
+                console.log(`Returning cached price for ${address}`);
+                prices[address] = data;
+                continue; // Skip API call for cached tokens
+            }
         }
-    }
 
-    console.log("Fetching token prices from 1inch Price API...");
-    const prices = {};
-    const batchSize = 3;
-
-    // Step 3: Split into batches and process
-    const batches = [];
-    for (let i = 0; i < tokenAddresses.length; i += batchSize) {
-        batches.push(tokenAddresses.slice(i, i + batchSize));
-    }
-
-    for (const batch of batches) {
-        const batchString = batch.join(",");
-
+        // Fetch price for the individual token
         try {
-            const url = `${PRICE_API_URL}/${chainId}/${batchString}`;
-            console.log(`Requesting prices for batch: ${batchString}`);
+            const url = `${PRICE_API_URL}/${chainId}/${address}`;
+            console.log(`Fetching price for token: ${address}`);
 
-            const response = await apiQueue.add(() =>
-                axios.get(url, { headers: HEADERS })
-            );
+            const response = await axios.get(url, { headers: HEADERS });
+            if (response.status === 200 && response.data[address]) {
+                const tokenData = response.data[address];
+                prices[address] = {
+                    price: new BigNumber(tokenData.price || 0),
+                    symbol: tokenData.symbol || "UNKNOWN",
+                    decimals: tokenData.decimals || 18,
+                };
 
-            if (response.status === 200 && response.data) {
-                for (const [address, data] of Object.entries(response.data)) {
-                    if (web3.utils.isAddress(address)) {
-                        prices[address] = {
-                            price: new BigNumber(data.price || 0),
-                            symbol: data.symbol || "UNKNOWN",
-                            decimals: data.decimals || 18,
-                        };
-                    }
-                }
+                // Cache the fetched price
+                cache.set(cacheKey, { data: prices[address], timestamp: now });
+                console.log(`Fetched price for ${address}: ${prices[address].price.toFixed()}`);
+            } else {
+                console.warn(`No price data returned for ${address}`);
             }
         } catch (error) {
-            console.error(`Error fetching batch ${batchString}:`, error.message);
+            console.error(`Error fetching price for ${address}:`, error.message);
         }
     }
 
-    cache.set(cacheKey, { data: prices, timestamp: now });
-    console.log("Fetched and cached token prices:", prices);
+    console.log("Final fetched token prices:", prices);
     return prices;
 }
+
 
 
 function calculateSlippage(path, priceData) {
