@@ -643,12 +643,13 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
-  const addresses = tokenAddresses?.length > 0
-    ? tokenAddresses
-    : FALLBACK_TOKENS.map((token) => token.address);
+async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "USD") {
+  const addresses =
+    tokenAddresses?.length > 0
+      ? tokenAddresses
+      : FALLBACK_TOKENS.map((token) => token.address);
 
-  const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}`;
+  const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}:${currency}`;
   const cacheDuration = 5 * 60 * 1000; // 5-minute cache
   const now = Date.now();
 
@@ -670,18 +671,20 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
 
     while (retries < maxRetries) {
       try {
-        const url = `${PRICE_API_URL}/${chainId}/${address}`;
+        const url = `${PRICE_API_URL}/${chainId}/${address}?currency=${currency}`;
         console.log(`Fetching price for address: ${address} | URL: ${url}`);
 
         const response = await axios.get(url, { headers: HEADERS });
+
         if (response.status === 200 && response.data) {
           const data = response.data[address];
           if (data) {
             prices[address] = {
               price: data.price,
               symbol: data.symbol || "UNKNOWN",
+              currency: currency,
             };
-            console.log(`Price fetched: ${data.symbol} - ${data.price}`);
+            console.log(`Price fetched: ${data.symbol} - ${data.price} ${currency}`);
           } else {
             console.warn(`No price data found for address: ${address}`);
           }
@@ -691,7 +694,9 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
         retries++;
         if (error.response?.status === 429) {
           const retryAfter = retries * 2000; // Exponential backoff
-          console.warn(`Rate limit exceeded for ${address}. Retrying in ${retryAfter / 1000} seconds...`);
+          console.warn(
+            `Rate limit exceeded for ${address}. Retrying in ${retryAfter / 1000} seconds...`
+          );
           await new Promise((resolve) => setTimeout(resolve, retryAfter));
         } else {
           console.error(`Error fetching price for ${address}:`, error.message);
