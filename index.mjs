@@ -643,13 +643,13 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "USD") {
-  const addresses =
-    tokenAddresses?.length > 0
-      ? tokenAddresses
-      : FALLBACK_TOKENS.map((token) => token.address);
+async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
+  // Step 1: Extract addresses - Use FALLBACK_TOKENS if none provided
+  const addresses = tokenAddresses.length
+    ? tokenAddresses
+    : FALLBACK_TOKENS.map((token) => token.address);
 
-  const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}:${currency}`;
+  const cacheKey = `tokenPrices:${chainId}:${currency}`;
   const cacheDuration = 5 * 60 * 1000; // 5-minute cache
   const now = Date.now();
 
@@ -662,9 +662,10 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "
     }
   }
 
-  console.log("Fetching token prices one by one...");
+  console.log("Fetching token prices individually...");
   const prices = {};
 
+  // Step 2: Fetch prices one by one
   for (const address of addresses) {
     let retries = 0;
     const maxRetries = 5;
@@ -675,7 +676,6 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "
         console.log(`Fetching price for address: ${address} | URL: ${url}`);
 
         const response = await axios.get(url, { headers: HEADERS });
-
         if (response.status === 200 && response.data) {
           const data = response.data[address];
           if (data) {
@@ -706,7 +706,7 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "
     }
   }
 
-  // Cache results
+  // Step 3: Cache and return results
   cache.set(cacheKey, { data: prices, timestamp: now });
   console.log("Fetched and cached token prices:", prices);
   return prices;
