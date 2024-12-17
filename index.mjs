@@ -56,7 +56,16 @@ let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
-
+const FALLBACK_TOKENS = [
+  { address: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", symbol: "USDT", decimals: 6, name: "Tether USD" },
+  { address: "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", symbol: "USDC.e", decimals: 6, name: "USD Coin (Arb1)" },
+  { address: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", symbol: "DAI", decimals: 18, name: "Dai Stablecoin" },
+  { address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", symbol: "WETH", decimals: 18, name: "Wrapped Ether" },
+  { address: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de", symbol: "WBTC", decimals: 8, name: "Wrapped Bitcoin" },
+  { address: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", symbol: "AAVE", decimals: 18, name: "Aave Token" },
+  { address: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", symbol: "LINK", decimals: 18, name: "Chainlink Token" },
+  { address: "0x912ce59144191c1204e64559fe8253a0e49e6548", symbol: "ARB", decimals: 18, name: "Arbitrum" },
+];
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
 
@@ -565,14 +574,14 @@ async function fetchTokenData(address, headers, baseUrl) {
 }
 
 /**
- * Fetch and process stable tokens dynamically, leveraging /token-list for validation.
+ * Fetch stable token list dynamically with fallback logic.
  */
 export async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
   const now = Date.now();
 
-  // Return cached data if valid
+  // Step 1: Check Cache
   if (cache.has(cacheKey)) {
     const { data, timestamp } = cache.get(cacheKey);
     if (now - timestamp < cacheDuration) {
@@ -583,47 +592,45 @@ export async function getStableTokenList(chainId = 42161) {
 
   console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-  // Step 1: Fetch all tokens from the correct endpoint
+  // Step 2: Attempt API Call
   let supportedTokens = {};
   try {
     const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
     const response = await apiQueue.add(() =>
       axios.get(url, { headers: HEADERS })
     );
-
     supportedTokens = response.data?.tokens || {};
     console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens.`);
   } catch (error) {
-    console.error("Error fetching whitelisted tokens:", error.response?.data || error.message);
-    return []; // Exit if the token fetch fails
+    console.error("Error fetching tokens from 1inch API. Using fallback tokens...", error.message);
+    supportedTokens = {};
   }
 
-  // Step 2: Match tokens in STABLE_TOKENS_ADD against supported tokens
+  // Step 3: Match Tokens
   const matchedTokens = [];
-  for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
-    const checksummedAddress = getAddress(address); // Normalize address to checksum
-    const tokenData = supportedTokens[checksummedAddress.toLowerCase()];
+  if (Object.keys(supportedTokens).length > 0) {
+    for (const fallback of FALLBACK_TOKENS) {
+      const checksummedAddress = getAddress(fallback.address);
+      const tokenData = supportedTokens[checksummedAddress.toLowerCase()];
 
-    if (tokenData) {
-      matchedTokens.push({
-        address: checksummedAddress,
-        symbol: tokenData.symbol,
-        decimals: tokenData.decimals,
-        name: tokenData.name,
-      });
-      console.log(`Matched token: ${symbol} -> ${tokenData.symbol}`);
-    } else {
-      console.warn(`Token not supported or not found: ${symbol}`);
+      if (tokenData) {
+        matchedTokens.push({
+          address: checksummedAddress,
+          symbol: tokenData.symbol,
+          decimals: tokenData.decimals,
+          name: tokenData.name,
+        });
+        console.log(`Matched token: ${fallback.symbol} -> ${tokenData.symbol}`);
+      } else {
+        console.warn(`Token not found: ${fallback.symbol}`);
+      }
     }
+  } else {
+    console.warn("No tokens returned from API. Using hardcoded fallback list.");
+    matchedTokens.push(...FALLBACK_TOKENS);
   }
 
-  // Step 3: Handle no matches
-  if (matchedTokens.length === 0) {
-    console.error("No tokens matched the STABLE_TOKENS list.");
-    return [];
-  }
-
-  // Step 4: Cache and return the matched tokens
+  // Step 4: Cache Results
   cache.set(cacheKey, { data: matchedTokens, timestamp: now });
   console.log("Fetched and cached stable token list:", matchedTokens);
   return matchedTokens;
