@@ -10,8 +10,6 @@ import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import { getAddress } from "@ethersproject/address";
 
-const web3 = new Web3();
-
 dotenv.config();
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
