@@ -590,8 +590,6 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
 ];
 
-const cache = new Map();
-
 async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
