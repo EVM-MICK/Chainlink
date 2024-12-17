@@ -770,7 +770,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
-export async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
+ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     if (!tokens || tokens.length === 0) {
         console.error("Token array is empty or undefined.");
         return {};
