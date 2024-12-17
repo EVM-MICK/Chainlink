@@ -813,73 +813,81 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
+async function fetchPriceWithRetry(url, maxRetries = 5) {
+    let retries = 0;
+
+    while (retries < maxRetries) {
+        try {
+            const response = await axios.get(url, { headers: HEADERS });
+            return response.data;
+        } catch (error) {
+            if (error.response?.status === 429) {
+                retries++;
+                const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
+                console.warn(`Rate limit hit. Retrying in ${retryDelay / 1000} seconds...`);
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            } else {
+                throw error; // Break on non-rate-limit errors
+            }
+        }
+    }
+    throw new Error(`Failed to fetch after ${maxRetries} retries due to rate limits.`);
+}
+
+async function validateToken(address, chainId = 42161) {
+    const url = `${PRICE_API_URL}/${chainId}/${address}`;
+    try {
+        const response = await axios.get(url, { headers: HEADERS });
+        return response.status === 200;
+    } catch (error) {
+        console.warn(`Token validation failed for ${address}: ${error.message}`);
+        return false;
+    }
+}
+
 async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
-    // Use fallback tokens if none are provided
     if (!tokens || tokens.length === 0) {
         console.warn("Token array is empty. Using fallback tokens...");
         tokens = FALLBACK_TOKENS;
-        console.log("Fallback Tokens:", tokens.map((t) => t.address));
     }
 
-    console.log("Input Tokens:", tokens);
-
-    // Step 1: Extract valid token addresses
     const tokenAddresses = tokens
-        .map((token, index) => {
-            if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
-                console.log(`Token ${index}: Valid object address ${token.address}`);
-                return token.address; // Extract address from object
-            } else if (typeof token === "string" && web3.utils.isAddress(token)) {
-                console.log(`Token ${index}: Valid string address ${token}`);
-                return token; // Already a valid address
-            } else {
-                console.warn(`Token ${index}: Invalid token format detected and skipped:`, token);
-                return null;
-            }
-        })
-        .filter((address) => address !== null);
+        .map((token) => (typeof token === "object" ? token.address : token))
+        .filter((address) => web3.utils.isAddress(address));
 
-    if (tokenAddresses.length === 0) {
-        console.error("No valid token addresses provided.");
-        return {};
-    }
-
-    console.log(`Resolved Token Addresses: ${tokenAddresses.join(", ")}`);
+    console.log("Resolved Token Addresses:", tokenAddresses);
 
     const prices = {};
     const now = Date.now();
 
-    // Step 2: Fetch prices individually
     for (const address of tokenAddresses) {
         const cacheKey = `tokenPrice:${chainId}:${address}`;
-
-        // Check cache for token price
         if (cache.has(cacheKey)) {
             const { data, timestamp } = cache.get(cacheKey);
             if (now - timestamp < CACHE_DURATION) {
-                console.log(`Using cached price for ${address}: ${data.price}`);
                 prices[address] = data;
+                console.log(`Using cached price for ${address}: ${data.price}`);
                 continue;
             }
         }
 
-        try {
-            const url = `${PRICE_API_URL}/${chainId}/${address}`;
-            console.log(`Fetching price for token: ${address}`);
+        // Validate token before making a request
+        const isValid = await validateToken(address, chainId);
+        if (!isValid) {
+            console.warn(`Skipping unsupported token: ${address}`);
+            continue;
+        }
 
-            const response = await axios.get(url, { headers: HEADERS });
-            if (response.status === 200 && response.data[address]) {
-                const tokenData = response.data[address];
-                prices[address] = {
-                    price: new BigNumber(tokenData.price || 0),
-                    symbol: tokenData.symbol || "UNKNOWN",
-                    decimals: tokenData.decimals || 18,
-                };
-                cache.set(cacheKey, { data: prices[address], timestamp: now });
-                console.log(`Fetched price for ${address}: ${prices[address].price.toFixed()}`);
-            } else {
-                console.warn(`No price data returned for ${address}`);
-            }
+        const url = `${PRICE_API_URL}/${chainId}/${address}`;
+        try {
+            console.log(`Fetching price for token: ${address}`);
+            const data = await fetchPriceWithRetry(url);
+            prices[address] = {
+                price: new BigNumber(data[address]?.price || 0),
+                symbol: data[address]?.symbol || "UNKNOWN",
+                decimals: data[address]?.decimals || 18,
+            };
+            cache.set(cacheKey, { data: prices[address], timestamp: now });
         } catch (error) {
             console.error(`Error fetching price for ${address}:`, error.message);
         }
@@ -888,6 +896,7 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     console.log("Final Token Prices:", prices);
     return prices;
 }
+
 
 
 function calculateSlippage(path, priceData) {
