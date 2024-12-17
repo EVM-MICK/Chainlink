@@ -576,52 +576,30 @@ async function fetchTokenData(address, headers, baseUrl) {
 /**
  * Fetch stable token list dynamically with fallback logic.
  */
-async function getStableTokenList(chainId = 42161) {
-    const cacheKey = `stableTokens:${chainId}`;
-    const cacheDuration = 5 * 60 * 1000; // 5 minutes cache
-    const now = Date.now();
+const axios = require("axios");
 
-    // Step 1: Check Cache
-    if (cache.has(cacheKey)) {
-        const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < cacheDuration) {
-            console.log("Returning cached stable token list.");
-            return data;
-        }
-    }
+async function httpCall() {
 
-    console.log(`Fetching stable token list for chain ID ${chainId}...`);
-    try {
-        // Fetch tokens from 1inch API
-        const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
-        const response = await axios.get(url, { headers: HEADERS });
+  const url = "https://api.1inch.dev/token/v1.2/42161/custom";
 
-        // Parse tokens
-        const supportedTokens = response.data?.tokens || {};
-        if (Object.keys(supportedTokens).length === 0) {
-            console.warn("No tokens returned from API. Using fallback list.");
-            cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
-            return FALLBACK_TOKENS;
-        }
+  const config = {
+      headers: {
+  "Authorization": "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+},
+      params: {},
+      paramsSerializer: {
+        indexes: null
+      }
+  };
+  
 
-        // Map to token list
-        const tokenList = Object.values(supportedTokens).map((token) => ({
-            address: token.address,
-            symbol: token.symbol,
-            decimals: token.decimals,
-            name: token.name,
-        }));
-
-        cache.set(cacheKey, { data: tokenList, timestamp: now });
-        console.log("Fetched stable token list from API:", tokenList);
-        return tokenList;
-    } catch (error) {
-        console.error("Error fetching tokens from API. Using fallback tokens.", error.message);
-        cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
-        return FALLBACK_TOKENS;
-    }
+  try {
+    const response = await axios.get(url, config);
+    console.log(response.data);
+  } catch (error) {
+    console.error(error);
+  }
 }
-
 /**
  * Fetch token prices using POST or GET from the 1inch Spot Price API.
  *
@@ -667,6 +645,52 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
 
   console.log("Final Prices:", prices);
   return prices;
+}
+
+async function getStableTokenList(chainId = 42161) {
+    const cacheKey = `stableTokens:${chainId}`;
+    const cacheDuration = 5 * 60 * 1000; // 5 minutes cache
+    const now = Date.now();
+
+    // Step 1: Check Cache
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached stable token list.");
+            return data;
+        }
+    }
+
+    console.log(`Fetching stable token list for chain ID ${chainId}...`);
+    try {
+        // Fetch tokens from 1inch API
+        const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
+        const response = await axios.get(url, { headers: HEADERS });
+
+        // Parse tokens
+        const supportedTokens = response.data?.tokens || {};
+        if (Object.keys(supportedTokens).length === 0) {
+            console.warn("No tokens returned from API. Using fallback list.");
+            cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
+            return FALLBACK_TOKENS;
+        }
+
+        // Map to token list
+        const tokenList = Object.values(supportedTokens).map((token) => ({
+            address: token.address,
+            symbol: token.symbol,
+            decimals: token.decimals,
+            name: token.name,
+        }));
+
+        cache.set(cacheKey, { data: tokenList, timestamp: now });
+        console.log("Fetched stable token list from API:", tokenList);
+        return tokenList;
+    } catch (error) {
+        console.error("Error fetching tokens from API. Using fallback tokens.", error.message);
+        cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
+        return FALLBACK_TOKENS;
+    }
 }
 
 
