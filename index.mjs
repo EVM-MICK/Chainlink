@@ -74,22 +74,22 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     process.exit(1);
 }
 
-export function toDeadline(expirationMs) {
+ function toDeadline(expirationMs) {
     return Math.floor(Date.now() / 1000) + Math.floor(expirationMs / 1000);
 }
 
-export async function fetchNonce(walletAddress, tokenAddress) {
+ async function fetchNonce(walletAddress, tokenAddress) {
     return await contract.methods.nonce(walletAddress, tokenAddress).call();
 }
 
-export function log(message, level = "info") {
+ function log(message, level = "info") {
     if (process.env.DEBUG === 'true' || level === "error") {
         const timestamp = new Date().toISOString();
         console[level === "error" ? "error" : "log"](`[${timestamp}] [${level.toUpperCase()}] ${message}`);
     }
 }
 
-export async function generatePermit2Signature(token, spender, amount) {
+ async function generatePermit2Signature(token, spender, amount) {
     const nonce = await getNonce(token);
     const expiration = Math.floor(Date.now() / 1000) + 86400; // 1-day validity
     const sigDeadline = Math.floor(Date.now() / 1000) + 3600; // 1-hour deadline
@@ -116,7 +116,7 @@ export async function generatePermit2Signature(token, spender, amount) {
 }
 
 // Generate a PermitBatch signature
-export async function generatePermitBatchSignatures(tokens, spender) {
+ async function generatePermitBatchSignatures(tokens, spender) {
     const permitDetails = await Promise.all(
         tokens.map(async (token) => ({
             token: token.address,
@@ -143,7 +143,7 @@ export async function generatePermitBatchSignatures(tokens, spender) {
 }
 
 // Helper to fetch Permit2 nonce dynamically
-export async function getNonce(tokenAddress) {
+ async function getNonce(tokenAddress) {
     const nonce = await AllowanceTransfer.getNonce(web3, process.env.PERMIT2_ADDRESS, process.env.WALLET_ADDRESS, tokenAddress);
     console.log(`Fetched nonce for ${tokenAddress}: ${nonce}`);
     return nonce;
@@ -225,7 +225,7 @@ async function fetchFromPriceAPI(endpoint, params = {}) {
 }
 
 
-export async function cachedGetLiquidityData(tokens) {
+ async function cachedGetLiquidityData(tokens) {
     const cacheKey = `liquidity:${tokens.join(",")}`;
 
     // Check if liquidity data is cached and fresh
@@ -400,7 +400,7 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 
 
 // Primary function to run the arbitrage bot with automated monitoring
-export async function runArbitrageBot() {
+ async function runArbitrageBot() {
     console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
 
     setInterval(async () => {
@@ -576,7 +576,7 @@ async function fetchTokenData(address, headers, baseUrl) {
 /**
  * Fetch stable token list dynamically with fallback logic.
  */
-export async function getStableTokenList(chainId = 42161) {
+ async function getStableTokenList(chainId = 42161) {
   const cacheKey = `stableTokens:${chainId}`;
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
   const now = Date.now();
@@ -643,7 +643,7 @@ export async function getStableTokenList(chainId = 42161) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-export async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
+ async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
   const addresses =
     tokenAddresses?.length > 0
       ? tokenAddresses
@@ -1098,7 +1098,7 @@ async function fetchGasPrice() {
 }
 
 // Function to execute the profitable route using flash loan and swap
-export async function executeRoute(route, amount) {
+ async function executeRoute(route, amount) {
     const assets = [process.env.USDC_ADDRESS]; // Always start with USDC as the first asset
     const amounts = [CAPITAL.toFixed()]; // Flash loan amount in USDC
 
