@@ -9,6 +9,9 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import { getAddress } from "@ethersproject/address";
+import Web3 from "web3";
+
+const web3 = new Web3();
 
 dotenv.config();
 const { Telegraf } = pkg;
@@ -644,74 +647,38 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
 async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
-  // Extract addresses dynamically, even from FALLBACK_TOKENS' object format
-  const addresses = tokenAddresses.length > 0 
-    ? tokenAddresses 
-    : FALLBACK_TOKENS.map((token) => token.address);
+  // Extract valid addresses
+  const addresses =
+    tokenAddresses.length > 0
+      ? tokenAddresses.filter((addr) => web3.utils.isAddress(addr))
+      : FALLBACK_TOKENS.map((token) => token.address).filter((addr) => web3.utils.isAddress(addr));
 
   console.log("Extracted Token Addresses:", addresses);
 
-  const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}:${currency}`;
-  const cacheDuration = 5 * 60 * 1000; // 5-minute cache
-  const now = Date.now();
-
-  // Check Cache
-  if (cache.has(cacheKey)) {
-    const { data, timestamp } = cache.get(cacheKey);
-    if (now - timestamp < cacheDuration) {
-      console.log("Returning cached token prices.");
-      return data;
-    }
-  }
-
-  console.log("Fetching token prices one by one...");
   const prices = {};
 
   for (const address of addresses) {
-    let retries = 0;
-    const maxRetries = 5;
+    try {
+      const url = `${PRICE_API_URL}/${chainId}/${address}?currency=${currency}`;
+      console.log(`Fetching price for: ${address} | URL: ${url}`);
 
-    while (retries < maxRetries) {
-      try {
-        const url = `${PRICE_API_URL}/${chainId}/${address}?currency=${currency}`;
-        console.log(`Fetching price for address: ${address} | URL: ${url}`);
+      const response = await axios.get(url, { headers: HEADERS });
 
-        const response = await axios.get(url, { headers: HEADERS });
-
-        if (response.status === 200 && response.data) {
-          const priceData = response.data[address];
-          if (priceData) {
-            prices[address] = {
-              price: priceData.price,
-              symbol: priceData.symbol || "UNKNOWN",
-              currency: currency,
-            };
-            console.log(`Price fetched: ${priceData.symbol} - ${priceData.price} ${currency}`);
-          } else {
-            console.warn(`No price data found for address: ${address}`);
-          }
-        }
-        break; // Success: exit retry loop
-      } catch (error) {
-        retries++;
-        if (error.response?.status === 429) {
-          const retryAfter = retries * 2000; // Exponential backoff
-          console.warn(`Rate limit hit for ${address}. Retrying in ${retryAfter / 1000} seconds...`);
-          await new Promise((resolve) => setTimeout(resolve, retryAfter));
-        } else {
-          console.error(`Error fetching price for ${address}:`, error.message);
-          break; // Stop retries for other errors
-        }
+      if (response.status === 200 && response.data) {
+        prices[address] = response.data[address] || { price: 0, symbol: "UNKNOWN" };
+        console.log(`Price fetched: ${prices[address].symbol} - ${prices[address].price} ${currency}`);
+      } else {
+        console.warn(`No price data found for: ${address}`);
       }
+    } catch (error) {
+      console.error(`Error fetching price for ${address}:`, error.message);
     }
   }
 
-  // Cache the fetched prices
-  cache.set(cacheKey, { data: prices, timestamp: now });
-  console.log("Fetched and cached token prices:", prices);
-
+  console.log("Final Prices:", prices);
   return prices;
 }
+
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
  * Generate profitable routes using stable tokens.
