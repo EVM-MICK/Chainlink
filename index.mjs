@@ -813,26 +813,35 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
-async function fetchPriceWithRetry(url, maxRetries = 5) {
+async function fetchPriceWithRetry(address, chainId = 42161, maxRetries = 5) {
+    const url = `${PRICE_API_URL}/${chainId}/${address}`;
     let retries = 0;
 
     while (retries < maxRetries) {
         try {
             const response = await axios.get(url, { headers: HEADERS });
-            return response.data;
+            if (response.status === 200) {
+                return response.data; // Return price data
+            }
         } catch (error) {
             if (error.response?.status === 429) {
                 retries++;
                 const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
-                console.warn(`Rate limit hit. Retrying in ${retryDelay / 1000} seconds...`);
+                console.warn(`Rate limit hit for ${address}. Retrying in ${retryDelay / 1000} seconds...`);
                 await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            } else if (error.response?.status === 400) {
+                console.error(`Bad request for ${address}. Skipping this token.`);
+                return null; // Skip invalid tokens
             } else {
-                throw error; // Break on non-rate-limit errors
+                console.error(`Unexpected error for ${address}: ${error.message}`);
+                return null;
             }
         }
     }
-    throw new Error(`Failed to fetch after ${maxRetries} retries due to rate limits.`);
+    console.error(`Failed to fetch price for ${address} after ${maxRetries} retries.`);
+    return null;
 }
+
 
 async function validateToken(address, chainId = 42161) {
     const url = `${PRICE_API_URL}/${chainId}/${address}`;
@@ -858,45 +867,24 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     console.log("Resolved Token Addresses:", tokenAddresses);
 
     const prices = {};
-    const now = Date.now();
-
     for (const address of tokenAddresses) {
-        const cacheKey = `tokenPrice:${chainId}:${address}`;
-        if (cache.has(cacheKey)) {
-            const { data, timestamp } = cache.get(cacheKey);
-            if (now - timestamp < CACHE_DURATION) {
-                prices[address] = data;
-                console.log(`Using cached price for ${address}: ${data.price}`);
-                continue;
-            }
-        }
-
-        // Validate token before making a request
-        const isValid = await validateToken(address, chainId);
-        if (!isValid) {
-            console.warn(`Skipping unsupported token: ${address}`);
-            continue;
-        }
-
-        const url = `${PRICE_API_URL}/${chainId}/${address}`;
-        try {
-            console.log(`Fetching price for token: ${address}`);
-            const data = await fetchPriceWithRetry(url);
+        console.log(`Fetching price for token: ${address}`);
+        const priceData = await fetchPriceWithRetry(address, chainId);
+        if (priceData && priceData[address]) {
             prices[address] = {
-                price: new BigNumber(data[address]?.price || 0),
-                symbol: data[address]?.symbol || "UNKNOWN",
-                decimals: data[address]?.decimals || 18,
+                price: new BigNumber(priceData[address].price || 0),
+                symbol: priceData[address].symbol || "UNKNOWN",
+                decimals: priceData[address].decimals || 18,
             };
-            cache.set(cacheKey, { data: prices[address], timestamp: now });
-        } catch (error) {
-            console.error(`Error fetching price for ${address}:`, error.message);
+            console.log(`Fetched price for ${address}:`, prices[address]);
+        } else {
+            console.warn(`No price data returned for ${address}. Skipping.`);
         }
     }
 
     console.log("Final Token Prices:", prices);
     return prices;
 }
-
 
 
 function calculateSlippage(path, priceData) {
