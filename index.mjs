@@ -533,16 +533,15 @@ function expandStableTokens(unmatchedTokens) {
  */
 // Add token addresses for the Arbitrum chain
 const STABLE_TOKENS_ADD = {
-  "USDT": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+  USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
   "USDC.e": "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
-  "DAI": "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-  "WETH": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-  "WBTC": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
-  "AAVE": "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
-  "LINK": "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-  "ARB": "0x912ce59144191c1204e64559fe8253a0e49e6548"
+  DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+  WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
+  AAVE: "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
+  LINK: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+  ARB: "0x912ce59144191c1204e64559fe8253a0e49e6548",
 };
-
 /**
  * Fetch token data with enhanced error handling and rate-limiting logic.
  */
@@ -573,7 +572,7 @@ export async function getStableTokenList(chainId = 42161) {
   const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
   const now = Date.now();
 
-  // Step 1: Return cached data if valid
+  // Return cached data if valid
   if (cache.has(cacheKey)) {
     const { data, timestamp } = cache.get(cacheKey);
     if (now - timestamp < cacheDuration) {
@@ -584,26 +583,30 @@ export async function getStableTokenList(chainId = 42161) {
 
   console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-  // Step 2: Fetch all supported tokens from /token-list
+  // Step 1: Fetch all tokens from the correct endpoint
   let supportedTokens = {};
   try {
-    const response = await axios.get(`${BASE_URL}/token-list`, { headers: HEADERS });
+    const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
+    const response = await apiQueue.add(() =>
+      axios.get(url, { headers: HEADERS })
+    );
+
     supportedTokens = response.data?.tokens || {};
-    console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens from /token-list.`);
+    console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens.`);
   } catch (error) {
-    console.error("Error fetching /token-list:", error.response?.data || error.message);
-    return []; // Return empty list if fetching the token list fails
+    console.error("Error fetching whitelisted tokens:", error.response?.data || error.message);
+    return []; // Exit if the token fetch fails
   }
 
-  // Step 3: Match tokens in STABLE_TOKENS_ADD against the supported tokens
+  // Step 2: Match tokens in STABLE_TOKENS_ADD against supported tokens
   const matchedTokens = [];
   for (const [symbol, address] of Object.entries(STABLE_TOKENS_ADD)) {
-    const tokenData = await fetchTokenData(address, HEADERS, BASE_URL);
+    const checksummedAddress = getAddress(address); // Normalize address to checksum
+    const tokenData = supportedTokens[checksummedAddress.toLowerCase()];
 
-    // Match by address, ensure dynamic symbol support
-    if (tokenData && supportedTokens[tokenData.address.toLowerCase()]) {
+    if (tokenData) {
       matchedTokens.push({
-        address: tokenData.address,
+        address: checksummedAddress,
         symbol: tokenData.symbol,
         decimals: tokenData.decimals,
         name: tokenData.name,
@@ -614,16 +617,18 @@ export async function getStableTokenList(chainId = 42161) {
     }
   }
 
+  // Step 3: Handle no matches
   if (matchedTokens.length === 0) {
     console.error("No tokens matched the STABLE_TOKENS list.");
     return [];
   }
 
-  // Step 4: Cache and return matched tokens
+  // Step 4: Cache and return the matched tokens
   cache.set(cacheKey, { data: matchedTokens, timestamp: now });
   console.log("Fetched and cached stable token list:", matchedTokens);
   return matchedTokens;
 }
+
 /**
  * Fetch the prices of given tokens using the 1inch Price API.
  * This function caches the results to minimize redundant API calls.
