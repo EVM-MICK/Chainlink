@@ -25,7 +25,7 @@ const HEADERS = {
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
-    interval: 1000, // 1 second interval
+    interval: 1200, // 1 second interval
     intervalCap: 1, // 1 request per second
 });
 
