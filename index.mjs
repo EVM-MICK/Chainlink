@@ -645,63 +645,74 @@ export async function getStableTokenList(chainId = 42161) {
  * @returns {Promise<Object>} - An object mapping token addresses to their prices and liquidity.
  */
 export async function fetchTokenPrices(tokenAddresses, CHAIN_ID) {
-    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
-        throw new Error("Invalid tokenAddresses array provided.");
+  // Use fallback tokens if no addresses are provided
+  const addresses = tokenAddresses?.length > 0
+    ? tokenAddresses
+    : FALLBACK_TOKENS.map((token) => token.address);
+
+  console.log(`Fetching token prices for chain ID ${CHAIN_ID}...`);
+  
+  // Generate a unique cache key
+  const cacheKey = `tokenPrices:${CHAIN_ID}:${addresses.join(",")}`;
+  const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
+  const now = Date.now();
+
+  // Return cached data if still valid
+  if (cache.has(cacheKey)) {
+    const { data, timestamp } = cache.get(cacheKey);
+    if (now - timestamp < cacheDuration) {
+      console.log("Returning cached token prices.");
+      return data;
     }
+  }
 
-    // Generate a unique cache key based on chainId and token addresses
-    const cacheKey = `tokenPrices:${CHAIN_ID}:${tokenAddresses.join(",")}`;
-    const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
-    const now = Date.now();
+  // Fetch token prices in batches
+  const prices = {};
+  const batchSize = 3; // Maximum tokens per batch
+  const tokenBatches = [];
 
-    // Check if cached data exists and is still valid
-    if (cache.has(cacheKey)) {
-        const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < cacheDuration) {
-            console.log("Returning cached token prices.");
-            return data;
-        }
-    }
+  for (let i = 0; i < addresses.length; i += batchSize) {
+    tokenBatches.push(addresses.slice(i, i + batchSize));
+  }
 
+  for (const batch of tokenBatches) {
     try {
-        // Prepare the request payload for the 1inch Price API
-        const payload = {
-            tokens: tokenAddresses,
-            currency: "USD", // Fetch prices in USD
-        };
+      const params = { tokens: batch.join(","), currency: "USD" };
+      console.log(`Fetching batch: ${batch.join(",")}`);
 
-        // Make an API request to the 1inch Price API
-        const response = await axios.post(`${PRICE_API_URL}/${CHAIN_ID}`, payload, {
-            headers: HEADERS,
-        });
+      const response = await apiQueue.add(() =>
+        axios.get(`${PRICE_API_URL}/${CHAIN_ID}`, {
+          headers: HEADERS,
+          params,
+        })
+      );
 
-        // Parse and validate the API response
-        const tokenPrices = response.data;
-        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
-            throw new Error("Invalid or empty token price data received from 1inch API.");
+      // Parse the response
+      const data = response.data;
+      batch.forEach((address) => {
+        if (data[address]) {
+          prices[address] = {
+            price: data[address].price,
+            symbol: data[address].symbol || "UNKNOWN",
+          };
+        } else {
+          console.warn(`Price not found for address: ${address}`);
         }
-
-        // Cache the results along with a timestamp
-        cache.set(cacheKey, { data: tokenPrices, timestamp: now });
-
-        console.log("Fetched and cached token prices:", tokenPrices);
-        return tokenPrices;
+      });
     } catch (error) {
-        console.error("Error fetching token prices:", {
-            message: error.message,
-            status: error.response?.status,
-            data: error.response?.data,
-        });
-
-        // Use stale cached data if available in case of an error
-        if (cache.has(cacheKey)) {
-            console.warn("Using stale cached token prices due to errors.");
-            return cache.get(cacheKey).data;
-        }
-
-        // Return an empty object if no data is available
-        return {};
+      if (error.response?.status === 429) {
+        console.warn("Rate limit exceeded. Retrying after 5 seconds...");
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      } else {
+        console.error(`Error fetching prices for batch: ${batch.join(",")}`, error.message);
+      }
     }
+  }
+
+  // Cache results
+  cache.set(cacheKey, { data: prices, timestamp: now });
+  console.log("Fetched and cached token prices:", prices);
+  return prices;
 }
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
