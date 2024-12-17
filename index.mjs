@@ -643,17 +643,19 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "USD") {
-  const addresses =
-    tokenAddresses?.length > 0
-      ? tokenAddresses
-      : FALLBACK_TOKENS.map((token) => token.address);
+async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
+  // Extract addresses dynamically, even from FALLBACK_TOKENS' object format
+  const addresses = tokenAddresses.length > 0 
+    ? tokenAddresses 
+    : FALLBACK_TOKENS.map((token) => token.address);
+
+  console.log("Extracted Token Addresses:", addresses);
 
   const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}:${currency}`;
   const cacheDuration = 5 * 60 * 1000; // 5-minute cache
   const now = Date.now();
 
-  // Return cached data if still valid
+  // Check Cache
   if (cache.has(cacheKey)) {
     const { data, timestamp } = cache.get(cacheKey);
     if (now - timestamp < cacheDuration) {
@@ -677,26 +679,24 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "
         const response = await axios.get(url, { headers: HEADERS });
 
         if (response.status === 200 && response.data) {
-          const data = response.data[address];
-          if (data) {
+          const priceData = response.data[address];
+          if (priceData) {
             prices[address] = {
-              price: data.price,
-              symbol: data.symbol || "UNKNOWN",
+              price: priceData.price,
+              symbol: priceData.symbol || "UNKNOWN",
               currency: currency,
             };
-            console.log(`Price fetched: ${data.symbol} - ${data.price} ${currency}`);
+            console.log(`Price fetched: ${priceData.symbol} - ${priceData.price} ${currency}`);
           } else {
             console.warn(`No price data found for address: ${address}`);
           }
         }
-        break; // Exit retry loop on success
+        break; // Success: exit retry loop
       } catch (error) {
         retries++;
         if (error.response?.status === 429) {
           const retryAfter = retries * 2000; // Exponential backoff
-          console.warn(
-            `Rate limit exceeded for ${address}. Retrying in ${retryAfter / 1000} seconds...`
-          );
+          console.warn(`Rate limit hit for ${address}. Retrying in ${retryAfter / 1000} seconds...`);
           await new Promise((resolve) => setTimeout(resolve, retryAfter));
         } else {
           console.error(`Error fetching price for ${address}:`, error.message);
@@ -706,9 +706,10 @@ async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "
     }
   }
 
-  // Cache results
+  // Cache the fetched prices
   cache.set(cacheKey, { data: prices, timestamp: now });
   console.log("Fetched and cached token prices:", prices);
+
   return prices;
 }
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
