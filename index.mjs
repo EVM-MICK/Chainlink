@@ -814,15 +814,35 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
  async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
+    // Use fallback tokens if none are provided
     if (!tokens || tokens.length === 0) {
-        console.error("Token array is empty or undefined.");
+        console.warn("Token array is empty. Using fallback tokens...");
+        tokens = FALLBACK_TOKENS;
+    }
+
+    // Step 1: Extract and validate token addresses
+    const tokenAddresses = tokens
+        .map((token) => {
+            if (typeof token === "string" && web3.utils.isAddress(token)) {
+                return token; // Token is already an address string
+            } else if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
+                return token.address; // Extract address from object
+            } else {
+                console.warn(`Invalid token format detected:`, token);
+                return null; // Skip invalid tokens
+            }
+        })
+        .filter((address) => address !== null); // Remove invalid or null addresses
+
+    if (tokenAddresses.length === 0) {
+        console.error("No valid token addresses provided.");
         return {};
     }
 
-    const cacheKey = `tokenPrices:${chainId}:${tokens.map(t => t.address || t).join(",")}`;
+    const cacheKey = `tokenPrices:${chainId}:${tokenAddresses.join(",")}`;
     const now = Date.now();
 
-    // Return cached data if still valid
+    // Step 2: Return cached data if still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < CACHE_DURATION) {
@@ -836,34 +856,13 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
     const prices = {};
     const batchSize = 3; // Small batch size to avoid rate limiting
 
-    // Step 1: Extract and validate token addresses
-    const tokenAddresses = tokens
-        .map((token) => {
-            if (typeof token === "string" && web3.utils.isAddress(token)) {
-                return token;
-            } else if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
-                return token.address;
-            } else {
-                console.warn(`Invalid token format detected:`, token);
-                return null; // Skip invalid tokens
-            }
-        })
-        .filter((address) => address !== null); // Remove invalid or null addresses
-
-    if (tokenAddresses.length === 0) {
-        console.error("No valid token addresses provided.");
-        return {};
-    }
-
-    console.log(`Valid token addresses: ${tokenAddresses.join(", ")}`);
-
-    // Step 2: Split token addresses into batches
+    // Step 3: Split token addresses into batches
     const batches = [];
     for (let i = 0; i < tokenAddresses.length; i += batchSize) {
         batches.push(tokenAddresses.slice(i, i + batchSize));
     }
 
-    // Step 3: Process batches sequentially
+    // Step 4: Process batches sequentially
     for (const batch of batches) {
         const batchString = batch.join(",");
 
@@ -914,7 +913,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         }
     }
 
-    // Step 4: Cache results for 5 minutes
+    // Step 5: Cache results for 5 minutes
     cache.set(cacheKey, { data: prices, timestamp: now });
     console.log("Fetched and cached token prices:", prices);
 
