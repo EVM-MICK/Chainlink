@@ -590,7 +590,6 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
 ];
 
-const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 const cache = new Map();
 
 async function getStableTokenList(chainId = 42161) {
