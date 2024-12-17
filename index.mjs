@@ -40,7 +40,8 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
-const BASE_URL = `https://api.1inch.dev/token/v1.2/42161/custom`;
+//const BASE_URL = `https://api.1inch.dev/token/v1.2/42161/custom`;
+const BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
 const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2/42161/custom";
 const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
@@ -577,59 +578,71 @@ async function fetchTokenData(address, headers, baseUrl) {
  * Fetch stable token list dynamically with fallback logic.
  */
 
+// Hardcoded stable token addresses
+const HARDCODED_STABLE_ADDRESSES = [
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
+    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", // USDC.e
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
+    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", // AAVE
+    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
+    "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
+];
+
+const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
+const cache = new Map();
+
 async function getStableTokenList(chainId = 42161) {
-  const cacheKey = `stableTokens:${chainId}`;
-  const now = Date.now();
+    const cacheKey = `stableTokens:${chainId}`;
+    const now = Date.now();
 
-  // Step 1: Return cached data if available
-  if (cache.has(cacheKey)) {
-    const { data, timestamp } = cache.get(cacheKey);
-    if (now - timestamp < CACHE_DURATION) {
-      console.log("Returning cached stable token list.");
-      return data;
+    // Step 1: Check Cache
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < CACHE_DURATION) {
+            console.log("Returning cached stable token list.");
+            return data;
+        }
     }
-  }
 
-  console.log(`Fetching stable token list for chain ID ${chainId}...`);
+    console.log(`Fetching stable token list for chain ID ${chainId}...`);
 
-  // Extract only addresses from the fallback tokens
-  const fallbackAddresses = FALLBACK_TOKENS.map((token) => token.address);
+    try {
+        // Step 2: API Call with Hardcoded Addresses
+        const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+        const response = await axios.get(url, {
+            headers: HEADERS,
+            params: { addresses: HARDCODED_STABLE_ADDRESSES.join(",") },
+        });
 
-  try {
-    // Step 2: Use 1inch /custom API to fetch token info
-    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
-    const response = await axios.get(url, {
-      headers: HEADERS,
-      params: { addresses: fallbackAddresses.join(",") },
-    });
+        // Step 3: Parse Response
+        const tokens = response.data?.tokens || {};
+        const stableTokens = Object.keys(tokens).map((address) => ({
+            address: getAddress(address), // Checksum format
+            symbol: tokens[address]?.symbol || "UNKNOWN",
+            decimals: tokens[address]?.decimals || 18,
+            name: tokens[address]?.name || "UNKNOWN",
+        }));
 
-    // Step 3: Parse and format the tokens returned
-    const tokens = response.data?.tokens || {};
-    const stableTokens = Object.keys(tokens).map((address) => ({
-      address: getAddress(address), // Ensure checksum address
-      symbol: tokens[address]?.symbol || "UNKNOWN",
-      decimals: tokens[address]?.decimals || 18,
-      name: tokens[address]?.name || "UNKNOWN",
-    }));
+        // Step 4: Cache and Return Data
+        cache.set(cacheKey, { data: stableTokens, timestamp: now });
+        console.log("Fetched stable token list from API:", stableTokens);
+        return stableTokens;
+    } catch (error) {
+        console.error("Error fetching tokens from API. Using fallback tokens:", error.message);
 
-    // Step 4: Cache and return results
-    cache.set(cacheKey, { data: stableTokens, timestamp: now });
-    console.log("Fetched stable token list from API:", stableTokens);
-    return stableTokens;
-  } catch (error) {
-    console.error("Error fetching tokens from API. Using fallback tokens:", error.message);
+        // Fallback tokens in case of API failure
+        const fallbackTokens = HARDCODED_STABLE_ADDRESSES.map((address) => ({
+            address: getAddress(address),
+            symbol: "UNKNOWN", // Symbol unknown during fallback
+            decimals: 18,
+            name: "Fallback Token",
+        }));
 
-    // Return fallback tokens if API call fails
-    const fallbackList = FALLBACK_TOKENS.map((token) => ({
-      address: getAddress(token.address),
-      symbol: token.symbol,
-      decimals: token.decimals || 18,
-      name: token.name || "Unknown Token",
-    }));
-
-    cache.set(cacheKey, { data: fallbackList, timestamp: now });
-    return fallbackList;
-  }
+        cache.set(cacheKey, { data: fallbackTokens, timestamp: now });
+        return fallbackTokens;
+    }
 }
 
 
@@ -654,31 +667,44 @@ const TOKEN_ADDRESSES = [
 
 const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
 
-async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
-  const url = `https://api.1inch.dev/token/v1.2/${CHAIN_ID}/custom`;
+/**
+ * Fetch token prices using the 1inch Price API.
+ * Hardcoded token addresses are used and passed as a comma-separated string.
+ *
+ * @param {string} currency - The target currency for price conversion (default: USD).
+ * @returns {Promise<Object>} - A mapping of token addresses to their price data.
+ */
+async function fetchTokenPrices(currency = "USD") {
+  // Construct the comma-separated addresses string
+  const addresses = HARDCODED_STABLE_ADDRESSES.join(",");
 
+  // Define the API URL with chainId and token addresses
+  const url = `${BASE_URL}/${CHAIN_ID}/${addresses}`;
+
+  // Axios request configuration
   const config = {
     headers: {
       Authorization: `Bearer ${API_KEY_Token}`,
       Accept: "application/json",
     },
     params: {
-      addresses: TOKEN_ADDRESSES,
+      currency: currency,
     },
     paramsSerializer: {
-      indexes: null, // Prevents indexing for array serialization
+      indexes: null, // Prevents indexing during query parameter serialization
     },
   };
 
   try {
     console.log("Fetching token prices for hardcoded addresses...");
 
+    // API Call to 1inch Price API
     const response = await axios.get(url, config);
 
-    if (response.status === 200 && response.data?.tokens) {
+    if (response.status === 200 && response.data) {
       console.log("Token prices fetched successfully.");
-      console.log(response.data.tokens);
-      return response.data.tokens;
+      console.log(response.data);
+      return response.data;
     } else {
       console.warn("No token data received from the 1inch API.");
       return {};
