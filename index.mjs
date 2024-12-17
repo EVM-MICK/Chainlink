@@ -643,11 +643,10 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
-  const addresses =
-    tokenAddresses?.length > 0
-      ? tokenAddresses
-      : FALLBACK_TOKENS.map((token) => token.address);
+async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID) {
+  const addresses = tokenAddresses?.length > 0
+    ? tokenAddresses
+    : FALLBACK_TOKENS.map((token) => token.address);
 
   const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}`;
   const cacheDuration = 5 * 60 * 1000; // 5-minute cache
@@ -662,105 +661,51 @@ async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
     }
   }
 
-  console.log("Fetching token prices...");
-
+  console.log("Fetching token prices one by one...");
   const prices = {};
 
-  try {
-    // Split addresses into batches of 3 (smaller batch size to reduce API pressure)
-    const batchSize = 3;
-    const batches = [];
-    for (let i = 0; i < addresses.length; i += batchSize) {
-      batches.push(addresses.slice(i, i + batchSize));
-    }
+  for (const address of addresses) {
+    let retries = 0;
+    const maxRetries = 5;
 
-    for (const batch of batches) {
-      const batchString = batch.join(",");
-      console.log(`Fetching prices for batch: ${batchString}`);
+    while (retries < maxRetries) {
+      try {
+        const url = `${PRICE_API_URL}/${chainId}/${address}`;
+        console.log(`Fetching price for address: ${address} | URL: ${url}`);
 
-      let retries = 0;
-      const maxRetries = 5;
-      let success = false;
-
-      while (!success && retries < maxRetries) {
-        try {
-          // Dynamically replace {addresses} in the URL with the actual batchString
-          const url = `https://api.1inch.dev/price/v1.1/${chainId}/${batchString}`;
-          console.log(`Request URL: ${url}`);
-
-          // Add the request to the rate-limited queue
-          const response = await apiQueue.add(() =>
-            axios.get(url, {
-              headers: HEADERS,
-            })
-          );
-
-          // Parse response data
-          const data = response.data;
-          batch.forEach((address) => {
-            if (data[address]) {
-              prices[address] = {
-                price: data[address].price,
-                symbol: data[address].symbol || "UNKNOWN",
-              };
-            } else {
-              console.warn(`Price not found for address: ${address}`);
-            }
-          });
-
-          success = true; // Exit the retry loop if successful
-        } catch (error) {
-          if (error.response?.status === 429) {
-            retries++;
-            const retryAfter = error.response.headers["retry-after"]
-              ? parseInt(error.response.headers["retry-after"], 10) * 1000
-              : retries * 2000; // Exponential backoff
-
-            console.warn(
-              `Rate limit exceeded for batch: ${batchString}. Retrying in ${
-                retryAfter / 1000
-              } seconds...`
-            );
-
-            await new Promise((resolve) => setTimeout(resolve, retryAfter));
+        const response = await axios.get(url, { headers: HEADERS });
+        if (response.status === 200 && response.data) {
+          const data = response.data[address];
+          if (data) {
+            prices[address] = {
+              price: data.price,
+              symbol: data.symbol || "UNKNOWN",
+            };
+            console.log(`Price fetched: ${data.symbol} - ${data.price}`);
           } else {
-            console.error(`Error fetching prices for batch: ${batchString}`, {
-              message: error.message,
-              status: error.response?.status,
-              data: error.response?.data,
-            });
-            break; // Exit the retry loop on non-rate-limit errors
+            console.warn(`No price data found for address: ${address}`);
           }
         }
-      }
-
-      if (!success) {
-        console.error(`Failed to fetch prices for batch: ${batchString}`);
+        break; // Exit retry loop on success
+      } catch (error) {
+        retries++;
+        if (error.response?.status === 429) {
+          const retryAfter = retries * 2000; // Exponential backoff
+          console.warn(`Rate limit exceeded for ${address}. Retrying in ${retryAfter / 1000} seconds...`);
+          await new Promise((resolve) => setTimeout(resolve, retryAfter));
+        } else {
+          console.error(`Error fetching price for ${address}:`, error.message);
+          break; // Stop retries for other errors
+        }
       }
     }
-
-    // Cache results
-    cache.set(cacheKey, { data: prices, timestamp: now });
-    console.log("Fetched and cached token prices:", prices);
-    return prices;
-  } catch (error) {
-    console.error("Error fetching token prices:", {
-      message: error.message,
-      status: error.response?.status,
-      data: error.response?.data,
-    });
-
-    // Use fallback cache if available
-    if (cache.has(cacheKey)) {
-      console.warn("Using stale cached token prices due to errors.");
-      return cache.get(cacheKey).data;
-    }
-
-    return {};
   }
+
+  // Cache results
+  cache.set(cacheKey, { data: prices, timestamp: now });
+  console.log("Fetched and cached token prices:", prices);
+  return prices;
 }
-
-
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
