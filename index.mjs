@@ -57,14 +57,14 @@ let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
 const FALLBACK_TOKENS = [
-  { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT", decimals: 6, name: "Tether USD" },
-  { address: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", symbol: "USDC.e", decimals: 6, name: "USD Coin (Arb1)" },
-  { address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", symbol: "DAI", decimals: 18, name: "Dai Stablecoin" },
-  { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", symbol: "WETH", decimals: 18, name: "Wrapped Ether" },
-  { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC", decimals: 8, name: "Wrapped Bitcoin" },
-  { address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", symbol: "AAVE", decimals: 18, name: "Aave Token" },
-  { address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", symbol: "LINK", decimals: 18, name: "Chainlink Token" },
-  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB", decimals: 18, name: "Arbitrum" },
+  { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
+  { address: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", symbol: "USDC.e"},
+  { address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", symbol: "DAI"},
+  { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", symbol: "WETH"},
+  { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC"},
+  { address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", symbol: "AAVE"},
+  { address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", symbol: "LINK"},
+  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"},
 ];
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
@@ -644,7 +644,7 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
 async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
-  // Extract valid addresses
+  // Extract addresses from FALLBACK_TOKENS when no addresses are provided
   const addresses =
     tokenAddresses.length > 0
       ? tokenAddresses.filter((addr) => web3.utils.isAddress(addr))
@@ -662,10 +662,17 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
       const response = await axios.get(url, { headers: HEADERS });
 
       if (response.status === 200 && response.data) {
-        prices[address] = response.data[address] || { price: 0, symbol: "UNKNOWN" };
-        console.log(`Price fetched: ${prices[address].symbol} - ${prices[address].price} ${currency}`);
-      } else {
-        console.warn(`No price data found for: ${address}`);
+        const data = response.data[address];
+        if (data) {
+          prices[address] = {
+            price: data.price,
+            symbol: data.symbol || "UNKNOWN",
+            currency: currency,
+          };
+          console.log(`Price fetched: ${data.symbol} - ${data.price} ${currency}`);
+        } else {
+          console.warn(`No price data found for address: ${address}`);
+        }
       }
     } catch (error) {
       console.error(`Error fetching price for ${address}:`, error.message);
@@ -675,6 +682,7 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
   console.log("Final Prices:", prices);
   return prices;
 }
+
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
