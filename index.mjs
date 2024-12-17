@@ -718,6 +718,7 @@ async function fetchTokenData(address, headers, baseUrl) {
 
     return {};
   }
+}
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
