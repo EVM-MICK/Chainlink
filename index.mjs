@@ -643,13 +643,13 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
-async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
-  // Step 1: Extract addresses - Use FALLBACK_TOKENS if none provided
-  const addresses = tokenAddresses.length
-    ? tokenAddresses
-    : FALLBACK_TOKENS.map((token) => token.address);
+async function fetchTokenPrices(tokenAddresses, chainId = CHAIN_ID, currency = "USD") {
+  const addresses =
+    tokenAddresses?.length > 0
+      ? tokenAddresses
+      : FALLBACK_TOKENS.map((token) => token.address);
 
-  const cacheKey = `tokenPrices:${chainId}:${currency}`;
+  const cacheKey = `tokenPrices:${chainId}:${addresses.join(",")}:${currency}`;
   const cacheDuration = 5 * 60 * 1000; // 5-minute cache
   const now = Date.now();
 
@@ -662,10 +662,9 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
     }
   }
 
-  console.log("Fetching token prices individually...");
+  console.log("Fetching token prices one by one...");
   const prices = {};
 
-  // Step 2: Fetch prices one by one
   for (const address of addresses) {
     let retries = 0;
     const maxRetries = 5;
@@ -676,6 +675,7 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
         console.log(`Fetching price for address: ${address} | URL: ${url}`);
 
         const response = await axios.get(url, { headers: HEADERS });
+
         if (response.status === 200 && response.data) {
           const data = response.data[address];
           if (data) {
@@ -706,12 +706,11 @@ async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currenc
     }
   }
 
-  // Step 3: Cache and return results
+  // Cache results
   cache.set(cacheKey, { data: prices, timestamp: now });
   console.log("Fetched and cached token prices:", prices);
   return prices;
 }
-
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
  * Generate profitable routes using stable tokens.
