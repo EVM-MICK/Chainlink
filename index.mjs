@@ -831,61 +831,74 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         }
     }
 
-    // Prepare API URL and payload
-    const url = `${PRICE_API_URL}/${chainId}/${tokens.join(",")}`;
+    console.log("Fetching token prices from 1inch Price API...");
 
-    try {
-        console.log("Fetching token prices from 1inch Price API...");
+    const prices = {};
+    const batchSize = 3; // Small batch size to avoid rate limiting
+    const tokenAddresses = tokens.map((t) => STABLE_TOKENS_ADD[t] || t); // Resolve token addresses
 
-        const response = await apiQueue.add(() =>
-            axios.get(url, { headers: HEADERS })
-        );
+    // Split tokens into batches
+    const batches = [];
+    for (let i = 0; i < tokenAddresses.length; i += batchSize) {
+        batches.push(tokenAddresses.slice(i, i + batchSize));
+    }
 
-        if (!response || response.status !== 200 || !response.data) {
-            throw new Error("Invalid response from 1inch Price API.");
-        }
+    // Process batches sequentially to avoid exceeding rate limits
+    for (const batch of batches) {
+        const batchString = batch.join(",");
 
-        const tokenData = response.data; // Expected format: { address: { price, symbol, decimals, ... }, ... }
+        let retries = 0;
+        const maxRetries = 5;
+        let success = false;
 
-        // Validate and normalize token data
-        const normalizedData = {};
-        for (const [address, data] of Object.entries(tokenData)) {
-            if (web3.utils.isAddress(address)) {
-                normalizedData[address] = {
-                    price: new BigNumber(data.price || 0),
-                    symbol: data.symbol,
-                    decimals: data.decimals,
-                    address,
-                };
-            } else {
-                console.warn(`Invalid token address found in API response: ${address}`);
+        while (!success && retries < maxRetries) {
+            try {
+                const url = `${PRICE_API_URL}/${chainId}/${batchString}`;
+                console.log(`Requesting prices for batch: ${batchString}`);
+
+                // Rate limit requests using the queue
+                const response = await apiQueue.add(() =>
+                    axios.get(url, { headers: HEADERS })
+                );
+
+                if (response.status === 200 && response.data) {
+                    for (const [address, data] of Object.entries(response.data)) {
+                        if (web3.utils.isAddress(address)) {
+                            prices[address] = {
+                                price: new BigNumber(data.price || 0),
+                                symbol: data.symbol || "UNKNOWN",
+                                decimals: data.decimals || 18,
+                            };
+                        }
+                    }
+                }
+                success = true; // Mark batch as successful
+            } catch (error) {
+                retries++;
+                const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
+                if (error.response?.status === 429) {
+                    console.warn(`Rate limit hit. Retrying batch in ${retryDelay / 1000} seconds...`);
+                    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+                } else {
+                    console.error(`Error fetching batch ${batchString}:`, error.message);
+                    break; // Break on non-rate-limit errors
+                }
             }
         }
 
-        console.log("Fetched and validated token data:", normalizedData);
-
-        // Cache the results
-        cache.set(cacheKey, { data: normalizedData, timestamp: now });
-
-        return normalizedData;
-    } catch (error) {
-        console.error("Error fetching token prices:", error.message);
-
-        if (error.response?.status === 429) {
-            console.warn(
-                `Rate limit exceeded. Retry-After: ${error.response.headers["retry-after"] || "unknown"} seconds.`
-            );
+        if (!success) {
+            console.error(`Failed to fetch prices for batch: ${batchString}`);
         }
-
-        // Fallback to stale cache if available
-        if (cache.has(cacheKey)) {
-            console.warn("Using stale cached data due to API failure.");
-            return cache.get(cacheKey).data;
-        }
-
-        return {};
     }
+
+    // Cache results for 5 minutes
+    cache.set(cacheKey, { data: prices, timestamp: now });
+    console.log("Fetched and cached token prices:", prices);
+
+    return prices;
 }
+
+
 function calculateSlippage(path, priceData) {
     const slippageFactors = path.map(token => {
         const liquidity = getLiquidityForToken(token, priceData);
