@@ -880,7 +880,7 @@ function getBestPrice(protocolPrices) {
 }
 
 // Helper Function: Fetch Liquidity Data (1inch API Example)
-export async function getLiquidityData(tokens) {
+ async function getLiquidityData(tokens) {
     const cacheKey = `liquidityData:${tokens.join(",")}`;
     return cachedGet(cacheKey, async () => {
         const response = await fetchFrom1Inch(`/tokens`, { tokens });
@@ -934,7 +934,7 @@ async function fetchGasPrice() {
 
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
-export async function calculateDynamicMinimumProfit() {
+ async function calculateDynamicMinimumProfit() {
     const gasPrice = await fetchGasPrice();
     const estimatedGas = await estimateGas(800000); // Example estimated gas; adjust based on actual route complexity
     const gasCost = gasPrice.multipliedBy(estimatedGas);
@@ -947,7 +947,7 @@ export async function calculateDynamicMinimumProfit() {
 }
 
 // Evaluate the profitability of a given route with dynamic profit adjustment
-export async function evaluateRouteProfit(route) {
+ async function evaluateRouteProfit(route) {
     try {
         // Fetch real-time token prices across protocols
         const priceData = await fetchTokenPricesAcrossProtocols(route);
@@ -1017,7 +1017,7 @@ export async function evaluateRouteProfit(route) {
     }
 }
 
-export function formatAmount(amount, decimals) {
+ function formatAmount(amount, decimals) {
     return new BigNumber(amount).toFixed(decimals);
 }
 
@@ -1032,7 +1032,7 @@ export function formatAmount(amount, decimals) {
  * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
  * @returns {Promise<Object>} - The transaction data required to execute the swap.
  */
-export async function getSwapQuote(fromToken, toToken, amount, slippage = 1, CHAIN_ID) {
+ async function getSwapQuote(fromToken, toToken, amount, slippage = 1, CHAIN_ID) {
     if (!fromToken || !toToken || !amount || amount.lte(0)) {
         throw new Error("Invalid parameters provided for getSwapQuote.");
     }
@@ -1159,7 +1159,7 @@ export async function executeRoute(route, amount) {
 }
 
 // Helper function to encode calldata for a multi-hop route using 1inch API
-export async function encodeSwapData(route, amount, slippagePercent) {
+ async function encodeSwapData(route, amount, slippagePercent) {
     const fromToken = route[0];
     const toToken = route[route.length - 1];
     const formattedAmount = amount.toFixed(STABLE_TOKENS.includes(fromToken) ? 6 : 18);
@@ -1199,7 +1199,7 @@ export async function encodeSwapData(route, amount, slippagePercent) {
     }
 }
 
-export async function fetchTokenDecimals(tokenAddress) {
+ async function fetchTokenDecimals(tokenAddress) {
     try {
         const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
         return await contract.methods.decimals().call();
@@ -1209,7 +1209,7 @@ export async function fetchTokenDecimals(tokenAddress) {
     }
 }
 
-export async function estimateGas(route, amount) {
+ async function estimateGas(route, amount) {
     try {
         const gasEstimate = await web3.eth.estimateGas({
             from: process.env.WALLET_ADDRESS,
@@ -1224,7 +1224,7 @@ export async function estimateGas(route, amount) {
 }
 
 // Fetch current gas price with a maximum threshold
-export async function fetchOptimalGasPrice() {
+async function fetchOptimalGasPrice() {
 const API_KEY2 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
     const url3 = "https://api.blocknative.com/gasprices/blockprices";
     try {
