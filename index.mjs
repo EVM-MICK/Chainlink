@@ -576,64 +576,50 @@ async function fetchTokenData(address, headers, baseUrl) {
 /**
  * Fetch stable token list dynamically with fallback logic.
  */
- async function getStableTokenList(chainId = 42161) {
-  const cacheKey = `stableTokens:${chainId}`;
-  const cacheDuration = 5 * 60 * 1000; // Cache duration: 5 minutes
-  const now = Date.now();
+async function getStableTokenList(chainId = 42161) {
+    const cacheKey = `stableTokens:${chainId}`;
+    const cacheDuration = 5 * 60 * 1000; // 5 minutes cache
+    const now = Date.now();
 
-  // Step 1: Check Cache
-  if (cache.has(cacheKey)) {
-    const { data, timestamp } = cache.get(cacheKey);
-    if (now - timestamp < cacheDuration) {
-      console.log("Returning cached stable token list.");
-      return data;
+    // Step 1: Check Cache
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < cacheDuration) {
+            console.log("Returning cached stable token list.");
+            return data;
+        }
     }
-  }
 
-  console.log(`Fetching stable token list for chain ID ${chainId}...`);
+    console.log(`Fetching stable token list for chain ID ${chainId}...`);
+    try {
+        // Fetch tokens from 1inch API
+        const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
+        const response = await axios.get(url, { headers: HEADERS });
 
-  // Step 2: Attempt API Call
-  let supportedTokens = {};
-  try {
-    const url = `https://api.1inch.dev/token/v1.2/${chainId}`;
-    const response = await apiQueue.add(() =>
-      axios.get(url, { headers: HEADERS })
-    );
-    supportedTokens = response.data?.tokens || {};
-    console.log(`Fetched ${Object.keys(supportedTokens).length} supported tokens.`);
-  } catch (error) {
-    console.error("Error fetching tokens from 1inch API. Using fallback tokens...", error.message);
-    supportedTokens = {};
-  }
+        // Parse tokens
+        const supportedTokens = response.data?.tokens || {};
+        if (Object.keys(supportedTokens).length === 0) {
+            console.warn("No tokens returned from API. Using fallback list.");
+            cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
+            return FALLBACK_TOKENS;
+        }
 
-  // Step 3: Match Tokens
-  const matchedTokens = [];
-  if (Object.keys(supportedTokens).length > 0) {
-    for (const fallback of FALLBACK_TOKENS) {
-      const checksummedAddress = getAddress(fallback.address);
-      const tokenData = supportedTokens[checksummedAddress.toLowerCase()];
+        // Map to token list
+        const tokenList = Object.values(supportedTokens).map((token) => ({
+            address: token.address,
+            symbol: token.symbol,
+            decimals: token.decimals,
+            name: token.name,
+        }));
 
-      if (tokenData) {
-        matchedTokens.push({
-          address: checksummedAddress,
-          symbol: tokenData.symbol,
-          decimals: tokenData.decimals,
-          name: tokenData.name,
-        });
-        console.log(`Matched token: ${fallback.symbol} -> ${tokenData.symbol}`);
-      } else {
-        console.warn(`Token not found: ${fallback.symbol}`);
-      }
+        cache.set(cacheKey, { data: tokenList, timestamp: now });
+        console.log("Fetched stable token list from API:", tokenList);
+        return tokenList;
+    } catch (error) {
+        console.error("Error fetching tokens from API. Using fallback tokens.", error.message);
+        cache.set(cacheKey, { data: FALLBACK_TOKENS, timestamp: now });
+        return FALLBACK_TOKENS;
     }
-  } else {
-    console.warn("No tokens returned from API. Using hardcoded fallback list.");
-    matchedTokens.push(...FALLBACK_TOKENS);
-  }
-
-  // Step 4: Cache Results
-  cache.set(cacheKey, { data: matchedTokens, timestamp: now });
-  console.log("Fetched and cached stable token list:", matchedTokens);
-  return matchedTokens;
 }
 
 /**
