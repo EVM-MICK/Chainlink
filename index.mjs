@@ -438,7 +438,7 @@ async function findProfitableRoutes() {
         }
 
         // Step 2: Fetch token prices across protocols
-        const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, CHAIN_ID);
+        const tokenPrices = await fetchTokenPrices(stableTokens, CHAIN_ID);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices. Skipping profitable route search.");
             return [];
@@ -777,7 +777,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         return [];
     }
 
-    const tokenPrices = await fetchTokenPricesAcrossProtocols(stableTokens, CHAIN_ID);
+    const tokenPrices = await fetchTokenPrices(stableTokens, CHAIN_ID);
     if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
         console.error("Failed to fetch token prices for route generation.");
         return [];
@@ -994,7 +994,7 @@ async function fetchGasPrice() {
  async function evaluateRouteProfit(route) {
     try {
         // Fetch real-time token prices across protocols
-        const priceData = await fetchTokenPricesAcrossProtocols(route);
+        const priceData = await fetchTokenPrices(route);
         if (!priceData || Object.keys(priceData).length === 0) {
             console.error("Failed to fetch price data for route evaluation.");
             return new BigNumber(0);
