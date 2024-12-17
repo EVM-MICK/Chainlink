@@ -821,36 +821,48 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         console.log("Fallback Tokens:", tokens.map((t) => t.address));
     }
 
+    console.log("Input Tokens:", tokens);
+
     // Step 1: Extract valid token addresses
     const tokenAddresses = tokens
-        .map((token) => (typeof token === "object" ? token.address : token))
-        .filter((address) => address && web3.utils.isAddress(address));
+        .map((token, index) => {
+            if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
+                console.log(`Token ${index}: Valid object address ${token.address}`);
+                return token.address; // Extract address from object
+            } else if (typeof token === "string" && web3.utils.isAddress(token)) {
+                console.log(`Token ${index}: Valid string address ${token}`);
+                return token; // Already a valid address
+            } else {
+                console.warn(`Token ${index}: Invalid token format detected and skipped:`, token);
+                return null;
+            }
+        })
+        .filter((address) => address !== null);
 
     if (tokenAddresses.length === 0) {
         console.error("No valid token addresses provided.");
         return {};
     }
 
-    console.log(`Valid token addresses: ${tokenAddresses.join(", ")}`);
+    console.log(`Resolved Token Addresses: ${tokenAddresses.join(", ")}`);
 
     const prices = {};
     const now = Date.now();
 
-    // Step 2: Check cache and fetch prices individually
+    // Step 2: Fetch prices individually
     for (const address of tokenAddresses) {
         const cacheKey = `tokenPrice:${chainId}:${address}`;
 
-        // Return cached data if valid
+        // Check cache for token price
         if (cache.has(cacheKey)) {
             const { data, timestamp } = cache.get(cacheKey);
             if (now - timestamp < CACHE_DURATION) {
-                console.log(`Returning cached price for ${address}`);
+                console.log(`Using cached price for ${address}: ${data.price}`);
                 prices[address] = data;
-                continue; // Skip API call for cached tokens
+                continue;
             }
         }
 
-        // Fetch price for the individual token
         try {
             const url = `${PRICE_API_URL}/${chainId}/${address}`;
             console.log(`Fetching price for token: ${address}`);
@@ -863,8 +875,6 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
                     symbol: tokenData.symbol || "UNKNOWN",
                     decimals: tokenData.decimals || 18,
                 };
-
-                // Cache the fetched price
                 cache.set(cacheKey, { data: prices[address], timestamp: now });
                 console.log(`Fetched price for ${address}: ${prices[address].price.toFixed()}`);
             } else {
@@ -875,10 +885,9 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
         }
     }
 
-    console.log("Final fetched token prices:", prices);
+    console.log("Final Token Prices:", prices);
     return prices;
 }
-
 
 
 function calculateSlippage(path, priceData) {
