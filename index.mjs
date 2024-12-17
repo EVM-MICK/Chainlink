@@ -643,7 +643,7 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
- async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
+async function fetchTokenPrices(tokenAddresses, chainId = 42161) {
   const addresses =
     tokenAddresses?.length > 0
       ? tokenAddresses
@@ -684,9 +684,13 @@ async function fetchTokenData(address, headers, baseUrl) {
 
       while (!success && retries < maxRetries) {
         try {
+          // Dynamically replace {addresses} in the URL with the actual batchString
+          const url = `https://api.1inch.dev/price/v1.1/${chainId}/${batchString}`;
+          console.log(`Request URL: ${url}`);
+
           // Add the request to the rate-limited queue
           const response = await apiQueue.add(() =>
-            axios.get(`${PRICE_API_URL}/${chainId}/${batchString}`, {
+            axios.get(url, {
               headers: HEADERS,
             })
           );
@@ -755,6 +759,7 @@ async function fetchTokenData(address, headers, baseUrl) {
     return {};
   }
 }
+
 
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
