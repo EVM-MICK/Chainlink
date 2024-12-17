@@ -9,7 +9,6 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import { getAddress } from "@ethersproject/address";
-import Web3 from "web3";
 
 const web3 = new Web3();
 
