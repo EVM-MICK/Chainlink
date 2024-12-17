@@ -819,7 +819,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         return {};
     }
 
-    const cacheKey = `tokenPrices:${chainId}:${tokens.join(",")}`;
+    const cacheKey = `tokenPrices:${chainId}:${tokens.map(t => t.address || t).join(",")}`;
     const now = Date.now();
 
     // Return cached data if still valid
@@ -835,15 +835,35 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
 
     const prices = {};
     const batchSize = 3; // Small batch size to avoid rate limiting
-    const tokenAddresses = tokens.map((t) => STABLE_TOKENS_ADD[t] || t); // Resolve token addresses
 
-    // Split tokens into batches
+    // Step 1: Extract and validate token addresses
+    const tokenAddresses = tokens
+        .map((token) => {
+            if (typeof token === "string" && web3.utils.isAddress(token)) {
+                return token;
+            } else if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
+                return token.address;
+            } else {
+                console.warn(`Invalid token format detected:`, token);
+                return null; // Skip invalid tokens
+            }
+        })
+        .filter((address) => address !== null); // Remove invalid or null addresses
+
+    if (tokenAddresses.length === 0) {
+        console.error("No valid token addresses provided.");
+        return {};
+    }
+
+    console.log(`Valid token addresses: ${tokenAddresses.join(", ")}`);
+
+    // Step 2: Split token addresses into batches
     const batches = [];
     for (let i = 0; i < tokenAddresses.length; i += batchSize) {
         batches.push(tokenAddresses.slice(i, i + batchSize));
     }
 
-    // Process batches sequentially to avoid exceeding rate limits
+    // Step 3: Process batches sequentially
     for (const batch of batches) {
         const batchString = batch.join(",");
 
@@ -877,8 +897,11 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
                 retries++;
                 const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
                 if (error.response?.status === 429) {
-                    console.warn(`Rate limit hit. Retrying batch in ${retryDelay / 1000} seconds...`);
+                    console.warn(`Rate limit hit. Retrying in ${retryDelay / 1000} seconds...`);
                     await new Promise((resolve) => setTimeout(resolve, retryDelay));
+                } else if (error.response?.status === 400) {
+                    console.error(`Bad request for batch: ${batchString}. Verify token format.`);
+                    break; // Stop retries for invalid requests
                 } else {
                     console.error(`Error fetching batch ${batchString}:`, error.message);
                     break; // Break on non-rate-limit errors
@@ -891,7 +914,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         }
     }
 
-    // Cache results for 5 minutes
+    // Step 4: Cache results for 5 minutes
     cache.set(cacheKey, { data: prices, timestamp: now });
     console.log("Fetched and cached token prices:", prices);
 
