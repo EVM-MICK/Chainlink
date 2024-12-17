@@ -576,30 +576,63 @@ async function fetchTokenData(address, headers, baseUrl) {
 /**
  * Fetch stable token list dynamically with fallback logic.
  */
-const axios = require("axios");
 
-async function httpCall() {
+async function getStableTokenList(chainId = 42161) {
+  const cacheKey = `stableTokens:${chainId}`;
+  const now = Date.now();
 
-  const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+  // Step 1: Return cached data if available
+  if (cache.has(cacheKey)) {
+    const { data, timestamp } = cache.get(cacheKey);
+    if (now - timestamp < CACHE_DURATION) {
+      console.log("Returning cached stable token list.");
+      return data;
+    }
+  }
 
-  const config = {
-      headers: {
-  "Authorization": "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
-},
-      params: {},
-      paramsSerializer: {
-        indexes: null
-      }
-  };
-  
+  console.log(`Fetching stable token list for chain ID ${chainId}...`);
+
+  // Extract only addresses from the fallback tokens
+  const fallbackAddresses = FALLBACK_TOKENS.map((token) => token.address);
 
   try {
-    const response = await axios.get(url, config);
-    console.log(response.data);
+    // Step 2: Use 1inch /custom API to fetch token info
+    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+    const response = await axios.get(url, {
+      headers: HEADERS,
+      params: { addresses: fallbackAddresses.join(",") },
+    });
+
+    // Step 3: Parse and format the tokens returned
+    const tokens = response.data?.tokens || {};
+    const stableTokens = Object.keys(tokens).map((address) => ({
+      address: getAddress(address), // Ensure checksum address
+      symbol: tokens[address]?.symbol || "UNKNOWN",
+      decimals: tokens[address]?.decimals || 18,
+      name: tokens[address]?.name || "UNKNOWN",
+    }));
+
+    // Step 4: Cache and return results
+    cache.set(cacheKey, { data: stableTokens, timestamp: now });
+    console.log("Fetched stable token list from API:", stableTokens);
+    return stableTokens;
   } catch (error) {
-    console.error(error);
+    console.error("Error fetching tokens from API. Using fallback tokens:", error.message);
+
+    // Return fallback tokens if API call fails
+    const fallbackList = FALLBACK_TOKENS.map((token) => ({
+      address: getAddress(token.address),
+      symbol: token.symbol,
+      decimals: token.decimals || 18,
+      name: token.name || "Unknown Token",
+    }));
+
+    cache.set(cacheKey, { data: fallbackList, timestamp: now });
+    return fallbackList;
   }
 }
+
+
 /**
  * Fetch token prices using POST or GET from the 1inch Spot Price API.
  *
