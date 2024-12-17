@@ -640,46 +640,56 @@ async function getStableTokenList(chainId = 42161) {
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @returns {Promise<Object>} - Mapping of token addresses to their prices.
  */
+
+
+/ Hardcoded token addresses
+const TOKEN_ADDRESSES = [
+  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
+  "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // USDC.e
+  "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // DAI
+  "0x82aF49447D8a07e3bd95bd0d56f35241523fbab1", // WETH
+  "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", // WBTC
+  "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", // AAVE
+  "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", // LINK
+  "0x912CE59144191C1204E64559FE8253a0e49E6548", // ARB
+];
+
+const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
+
 async function fetchTokenPrices(tokenAddresses = [], chainId = CHAIN_ID, currency = "USD") {
-  // Extract addresses from FALLBACK_TOKENS when no addresses are provided
-  const addresses =
-    tokenAddresses.length > 0
-      ? tokenAddresses.filter((addr) => web3.utils.isAddress(addr))
-      : FALLBACK_TOKENS.map((token) => token.address).filter((addr) => web3.utils.isAddress(addr));
+  const url = `https://api.1inch.dev/token/v1.2/${CHAIN_ID}/custom`;
 
-  console.log("Extracted Token Addresses:", addresses);
+  const config = {
+    headers: {
+      Authorization: `Bearer ${API_KEY_Token}`,
+      Accept: "application/json",
+    },
+    params: {
+      addresses: TOKEN_ADDRESSES,
+    },
+    paramsSerializer: {
+      indexes: null, // Prevents indexing for array serialization
+    },
+  };
 
-  const prices = {};
+  try {
+    console.log("Fetching token prices for hardcoded addresses...");
 
-  for (const address of addresses) {
-    try {
-      const url = `${PRICE_API_URL}/${chainId}/${address}?currency=${currency}`;
-      console.log(`Fetching price for: ${address} | URL: ${url}`);
+    const response = await axios.get(url, config);
 
-      const response = await axios.get(url, { headers: HEADERS });
-
-      if (response.status === 200 && response.data) {
-        const data = response.data[address];
-        if (data) {
-          prices[address] = {
-            price: data.price,
-            symbol: data.symbol || "UNKNOWN",
-            currency: currency,
-          };
-          console.log(`Price fetched: ${data.symbol} - ${data.price} ${currency}`);
-        } else {
-          console.warn(`No price data found for address: ${address}`);
-        }
-      }
-    } catch (error) {
-      console.error(`Error fetching price for ${address}:`, error.message);
+    if (response.status === 200 && response.data?.tokens) {
+      console.log("Token prices fetched successfully.");
+      console.log(response.data.tokens);
+      return response.data.tokens;
+    } else {
+      console.warn("No token data received from the 1inch API.");
+      return {};
     }
+  } catch (error) {
+    console.error("Error fetching token prices:", error.message);
+    return {};
   }
-
-  console.log("Final Prices:", prices);
-  return prices;
 }
-
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
