@@ -813,31 +813,34 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
- async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
+async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     // Use fallback tokens if none are provided
     if (!tokens || tokens.length === 0) {
         console.warn("Token array is empty. Using fallback tokens...");
         tokens = FALLBACK_TOKENS;
+        console.log("Fallback Tokens:", tokens.map((t) => t.address));
     }
 
     // Step 1: Extract and validate token addresses
     const tokenAddresses = tokens
         .map((token) => {
-            if (typeof token === "string" && web3.utils.isAddress(token)) {
-                return token; // Token is already an address string
-            } else if (typeof token === "object" && token.address && web3.utils.isAddress(token.address)) {
+            if (typeof token === "object" && token.address) {
                 return token.address; // Extract address from object
+            } else if (typeof token === "string" && web3.utils.isAddress(token)) {
+                return token; // Already a valid address
             } else {
-                console.warn(`Invalid token format detected:`, token);
-                return null; // Skip invalid tokens
+                console.warn(`Invalid token format detected and skipped:`, token);
+                return null;
             }
         })
-        .filter((address) => address !== null); // Remove invalid or null addresses
+        .filter((address) => address !== null && web3.utils.isAddress(address));
 
     if (tokenAddresses.length === 0) {
         console.error("No valid token addresses provided.");
         return {};
     }
+
+    console.log(`Resolved Token Addresses: ${tokenAddresses.join(", ")}`);
 
     const cacheKey = `tokenPrices:${chainId}:${tokenAddresses.join(",")}`;
     const now = Date.now();
@@ -852,71 +855,44 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
     }
 
     console.log("Fetching token prices from 1inch Price API...");
-
     const prices = {};
-    const batchSize = 3; // Small batch size to avoid rate limiting
+    const batchSize = 3;
 
-    // Step 3: Split token addresses into batches
+    // Step 3: Split into batches and process
     const batches = [];
     for (let i = 0; i < tokenAddresses.length; i += batchSize) {
         batches.push(tokenAddresses.slice(i, i + batchSize));
     }
 
-    // Step 4: Process batches sequentially
     for (const batch of batches) {
         const batchString = batch.join(",");
 
-        let retries = 0;
-        const maxRetries = 5;
-        let success = false;
+        try {
+            const url = `${PRICE_API_URL}/${chainId}/${batchString}`;
+            console.log(`Requesting prices for batch: ${batchString}`);
 
-        while (!success && retries < maxRetries) {
-            try {
-                const url = `${PRICE_API_URL}/${chainId}/${batchString}`;
-                console.log(`Requesting prices for batch: ${batchString}`);
+            const response = await apiQueue.add(() =>
+                axios.get(url, { headers: HEADERS })
+            );
 
-                // Rate limit requests using the queue
-                const response = await apiQueue.add(() =>
-                    axios.get(url, { headers: HEADERS })
-                );
-
-                if (response.status === 200 && response.data) {
-                    for (const [address, data] of Object.entries(response.data)) {
-                        if (web3.utils.isAddress(address)) {
-                            prices[address] = {
-                                price: new BigNumber(data.price || 0),
-                                symbol: data.symbol || "UNKNOWN",
-                                decimals: data.decimals || 18,
-                            };
-                        }
+            if (response.status === 200 && response.data) {
+                for (const [address, data] of Object.entries(response.data)) {
+                    if (web3.utils.isAddress(address)) {
+                        prices[address] = {
+                            price: new BigNumber(data.price || 0),
+                            symbol: data.symbol || "UNKNOWN",
+                            decimals: data.decimals || 18,
+                        };
                     }
                 }
-                success = true; // Mark batch as successful
-            } catch (error) {
-                retries++;
-                const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
-                if (error.response?.status === 429) {
-                    console.warn(`Rate limit hit. Retrying in ${retryDelay / 1000} seconds...`);
-                    await new Promise((resolve) => setTimeout(resolve, retryDelay));
-                } else if (error.response?.status === 400) {
-                    console.error(`Bad request for batch: ${batchString}. Verify token format.`);
-                    break; // Stop retries for invalid requests
-                } else {
-                    console.error(`Error fetching batch ${batchString}:`, error.message);
-                    break; // Break on non-rate-limit errors
-                }
             }
-        }
-
-        if (!success) {
-            console.error(`Failed to fetch prices for batch: ${batchString}`);
+        } catch (error) {
+            console.error(`Error fetching batch ${batchString}:`, error.message);
         }
     }
 
-    // Step 5: Cache results for 5 minutes
     cache.set(cacheKey, { data: prices, timestamp: now });
     console.log("Fetched and cached token prices:", prices);
-
     return prices;
 }
 
