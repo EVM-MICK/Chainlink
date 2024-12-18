@@ -70,7 +70,7 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
     "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", // AAVE
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
-    "0x912ce59144191c1204e64559fe8253a0e49e6548",  // ARB
+    "0x912ce59144191c1204e64559fe8253a0e49e6548"  // ARB
 ];
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
@@ -80,7 +80,7 @@ const FALLBACK_TOKENS = [
   { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC"},
   { address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", symbol: "AAVE"},
   { address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", symbol: "LINK"},
-  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"},
+  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"}
 ];
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
@@ -90,6 +90,15 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
     process.exit(1);
 }
 
+let lastRequestTime = 0;
+async function rateLimit() {
+    const now = Date.now();
+    const elapsed = now - lastRequestTime;
+    if (elapsed < 1000) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 - elapsed));
+    }
+    lastRequestTime = Date.now();
+}
  function toDeadline(expirationMs) {
     return Math.floor(Date.now() / 1000) + Math.floor(expirationMs / 1000);
 }
@@ -601,12 +610,7 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object[]>} - A list of stable token objects with address, symbol, and decimals.
  */
-/**
- * Fetch stable token details from the 1inch Token API or return fallback tokens if the API fails.
- *
- * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
- * @returns {Promise<Object[]>} - A list of stable token objects (address, symbol, decimals, name).
- */
+// Main function: Fetch stable token list
 async function getStableTokenList(chainId) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
@@ -621,29 +625,24 @@ async function getStableTokenList(chainId) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
-    const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+    const url = `${BASE_URL}/${chainId}/custom`;
 
     const config = {
-        headers: HEADERS,
+        headers: {
+  "Authorization": "Bearer  emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+   },
         params: {
-            "addresses": [
-    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", 
-    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", 
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", 
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", 
-    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", 
-    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
-    "0x912ce59144191c1204e64559fe8253a0e49e6548" 
-    ] 
-    },
-    paramsSerializer: (params) => {
-            // Ensure query parameters are serialized correctly
+            "addresses": HARDCODED_STABLE_ADDRESSES,
+        },
+        paramsSerializer: (params) => {
             return qs.stringify(params, { indices: false });
         },
     };
 
     try {
+        // Rate-limit the request
+        await rateLimit();
+
         // Send HTTP GET request to fetch token details
         const response = await axios.get(url, config);
 
@@ -715,58 +714,43 @@ const TOKEN_ADDRESSES = [
  * @returns {Promise<Object>} - A mapping of token addresses to their price data.
  */
 async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
-    const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
     const url = `${BASE_URL}/${CHAIN_ID}/${stableTokens.join(",")}`;
     const config = {
         headers: {
-            Authorization: `Bearer ${API_KEY_Token}`, // API Key
-            Accept: "application/json",
-        },
+      "Authorization": "Bearer  emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+      },
         params: {
             currency: "USD", // Fetch prices in USD
         },
     };
 
-    try {
-        // Enforce the 1 RPS limit
-        while (isRateLimited) {
-            console.log("Rate limit in effect. Waiting 1 second...");
-            await delay(1000); // Wait 1 second
+    return apiQueue.add(async () => {
+        try {
+            console.log("Fetching token prices...");
+            console.log("Request URL:", url);
+
+            // Send the GET request to the 1inch API
+            const response = await axios.get(url, config);
+
+            if (response.status === 200 && response.data) {
+                console.log("Fetched token prices successfully:", response.data);
+                return response.data;
+            } else {
+                console.warn("No token data received from the 1inch API.");
+                return {};
+            }
+        } catch (error) {
+            console.error("Error fetching token prices:", error.message);
+
+            // Log additional error response details if available
+            if (error.response) {
+                console.error("Response status:", error.response.status);
+                console.error("Response data:", error.response.data);
+            }
+
+            return null; // Return null to indicate failure
         }
-
-        // Set rate-limited state
-        isRateLimited = true;
-
-        console.log("Fetching token prices...");
-        console.log("Request URL:", url);
-
-        // Send the GET request to the 1inch API
-        const response = await axios.get(url, config);
-
-        // Reset rate-limited state after success
-        isRateLimited = false;
-
-        if (response.status === 200 && response.data) {
-            console.log("Fetched token prices successfully:", response.data);
-            return response.data;
-        } else {
-            console.warn("No token data received from the 1inch API.");
-            return {};
-        }
-    } catch (error) {
-        // Reset rate-limited state on error
-        isRateLimited = false;
-
-        console.error("Error fetching token prices:", error.message);
-
-        // Log additional error response details if available
-        if (error.response) {
-            console.error("Response status:", error.response.status);
-            console.error("Response data:", error.response.data);
-        }
-
-        return null; // Return null to indicate failure
-    }
+    });
 }
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
