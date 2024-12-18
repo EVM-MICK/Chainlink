@@ -8,6 +8,7 @@ import { createRequire } from 'module';
 import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Correct import with proper package name.
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
+import qs from "qs"; 
 import { getAddress } from "@ethersproject/address";
 
 dotenv.config();
@@ -613,8 +614,8 @@ async function getStableTokenList(chainId = 42161) {
         params: {
             addresses: HARDCODED_STABLE_ADDRESSES, // Pass addresses array directly
         },
-        paramsSerializer: {
-            indexes: null, // Prevent array indexes in query parameters
+       paramsSerializer: (params) => {
+            return qs.stringify(params, { indices: false }); // Serialize without array indices
         },
     };
 
@@ -684,7 +685,7 @@ const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
  * @param {string} currency - The target currency for price conversion (default: USD).
  * @returns {Promise<Object>} - A mapping of token addresses to their price data.
  */
-async function fetchTokenPrices(currency = "USD") {
+async function fetchTokenPrices( addresses = [], currency = "USD") {
   // Construct the comma-separated addresses string
   const addresses = HARDCODED_STABLE_ADDRESSES.join(",");
 
@@ -700,9 +701,9 @@ async function fetchTokenPrices(currency = "USD") {
     params: {
       currency: currency,
     },
-    paramsSerializer: {
-      indexes: null, // Prevents indexing during query parameter serialization
-    },
+    paramsSerializer: (params) => {
+            return qs.stringify(params, { indices: false }); // Serialize without array indices
+        },
   };
 
   try {
