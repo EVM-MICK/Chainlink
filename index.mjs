@@ -468,7 +468,7 @@ async function findProfitableRoutes() {
         }
 
         // Step 2: Fetch token prices across protocols
-        const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+        const tokenPrices = await fetchTokenPrices();
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices. Skipping profitable route search.");
             return [];
@@ -611,6 +611,7 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @returns {Promise<Object[]>} - A list of stable token objects with address, symbol, and decimals.
  */
 // Main function: Fetch stable token list
+
 async function getStableTokenList(chainId) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
@@ -631,18 +632,19 @@ async function getStableTokenList(chainId) {
         headers: {
   Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
    },
-        params: {
-            addresses: ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", 
+    params: {
+ addresses: [
+     "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", 
     "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
     "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
     "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
-    "0x912ce59144191c1204e64559fe8253a0e49e6548"
+    "0x912ce59144191c1204e64559fe8253a0e49e6548",
     ]
-        },
-        paramsSerializer: (params) => {
+    },
+     paramsSerializer: (params) => {
             return qs.stringify(params, { indices: false });
         },
     };
@@ -788,7 +790,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
         return [];
     }
 
-    const tokenPrices = await fetchTokenPrices(stableTokens);
+    const tokenPrices = await fetchTokenPrices();
     if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
         console.error("Failed to fetch token prices for route generation.");
         return [];
@@ -1005,7 +1007,7 @@ async function fetchGasPrice() {
  async function evaluateRouteProfit(route) {
     try {
         // Fetch real-time token prices across protocols
-        const priceData = await fetchTokenPrices(route);
+        const priceData = await fetchTokenPrices();
         if (!priceData || Object.keys(priceData).length === 0) {
             console.error("Failed to fetch price data for route evaluation.");
             return new BigNumber(0);
