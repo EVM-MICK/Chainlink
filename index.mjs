@@ -627,7 +627,6 @@ async function getStableTokenList(chainId) {
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
     const url = "https://api.1inch.dev/token/v1.2/42161/custom";
-
     const config = {
         headers: {
   Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
