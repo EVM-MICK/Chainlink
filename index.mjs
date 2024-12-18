@@ -54,8 +54,8 @@ const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
 const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
 // Stable, high-liquidity tokens to include in route evaluations
-const STABLE_TOKENS = ["USDT", "USDC.e", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
-const highLiquidityTokens = ["USDT", "USDC.e", "DAI", "WETH"];
+const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
+const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
 const MAX_HOPS = 3;
 let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
@@ -63,8 +63,8 @@ const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
 // Hardcoded stable token addresses
 const HARDCODED_STABLE_ADDRESSES = [
-    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
-    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", // USDC.e
+    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
     "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
@@ -74,7 +74,7 @@ const HARDCODED_STABLE_ADDRESSES = [
 ];
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
-  { address: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", symbol: "USDC.e"},
+  { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", symbol: "USDC"},
   { address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", symbol: "DAI"},
   { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", symbol: "WETH"},
   { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC"},
@@ -476,7 +476,7 @@ async function findProfitableRoutes() {
 
         // Step 3: Generate routes
         const maxHops = 3;
-        const preferredStartToken = "USDC.e";
+        const preferredStartToken = "USDC";
         const topN = 5;
         const routes = await generateRoutes(CHAIN_ID, maxHops, preferredStartToken, topN);
 
@@ -529,7 +529,7 @@ class PriorityQueue {
 
 // Utility: Estimate route potential (placeholder logic)
 function estimateRoutePotential(route, capital, cachedPriceData) {
-    const preferredTokens = ["USDC.e", "USDT"];
+    const preferredTokens = ["USDC", "USDT"];
     const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
     let estimatedProfit = new BigNumber(0);
 
@@ -572,8 +572,8 @@ function expandStableTokens(unmatchedTokens) {
  */
 // Add token addresses for the Arbitrum chain
 const STABLE_TOKENS_ADD = {
-  USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-  "USDC.e": "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+  USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
   WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
   WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0f6acb6de",
@@ -633,8 +633,8 @@ async function getStableTokenList(chainId) {
    },
     params: {
  addresses: [
-     "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", 
-    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", 
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
@@ -705,7 +705,7 @@ async function getStableTokenList(chainId) {
 
 const TOKEN_ADDRESSES = [
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-  "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // USDC.e
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // DAI
   "0x82aF49447D8a07e3bd95bd0d56f35241523fbab1", // WETH
   "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", // WBTC
@@ -779,10 +779,10 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
  * Generate profitable routes using stable tokens.
  * @param {number} chainId - Blockchain network chain ID (e.g., 42161 for Arbitrum).
  * @param {number} maxHops - Maximum number of hops for routes.
- * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC.e").
+ * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USDC.e", topN = 3) {
+async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
     const stableTokens = await getStableTokenList(CHAIN_ID);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
@@ -821,7 +821,7 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
- * @param {string[]} tokens - Array of token symbols (e.g., ["USDT", "USDC.e", ...]).
+ * @param {string[]} tokens - Array of token symbols (e.g., ["USDT", "USDC", ...]).
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
