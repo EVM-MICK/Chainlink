@@ -22,6 +22,8 @@ const HEADERS = {
     Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
     Accept: "application/json",
 };
+const RETRY_LIMIT = 5;
+const RETRY_BASE_DELAY_MS = 1000; // Start with a 1-second delay
 
 // Configurable parameters
 const apiQueue = new PQueue({
@@ -67,7 +69,7 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
     "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", // AAVE
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
-    "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
+    "0x912ce59144191c1204e64559fe8253a0e49e6548",  // ARB
 ];
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
@@ -593,11 +595,17 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object[]>} - A list of stable token objects with address, symbol, and decimals.
  */
+/**
+ * Fetch stable token details from the 1inch Token API or return fallback tokens if the API fails.
+ *
+ * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
+ * @returns {Promise<Object[]>} - A list of stable token objects (address, symbol, decimals, name).
+ */
 async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
 
-    // Check if the data is already cached and still valid
+    // Check if the data is cached and still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < CACHE_DURATION) {
@@ -612,21 +620,22 @@ async function getStableTokenList(chainId = 42161) {
     const config = {
         headers: HEADERS,
         params: {
-            addresses: HARDCODED_STABLE_ADDRESSES, // Pass addresses array directly
+            addresses: HARDCODED_STABLE_ADDRESSES, // Pass the array of addresses directly
         },
-       paramsSerializer: (params) => {
-            return qs.stringify(params, { indices: false }); // Serialize without array indices
+        paramsSerializer: (params) => {
+            // Ensure query parameters are serialized correctly
+            return qs.stringify(params, { indices: false });
         },
     };
 
     try {
-        // Send the HTTP GET request to fetch token details
+        // Send HTTP GET request to fetch token details
         const response = await axios.get(url, config);
 
         if (response.data && response.data.tokens) {
             // Process and map the response into a clean format
             const stableTokens = Object.entries(response.data.tokens).map(([address, token]) => ({
-                address: getAddress(address), // Normalize to checksum format
+                address: getAddress(address), // Normalize address to checksum format
                 symbol: token.symbol || "UNKNOWN",
                 decimals: token.decimals || 18,
                 name: token.name || "UNKNOWN",
@@ -642,7 +651,13 @@ async function getStableTokenList(chainId = 42161) {
     } catch (error) {
         console.error("Error fetching stable token list from API:", error.message);
 
-        // Fallback: Use hardcoded addresses with minimal info
+        // Log response details if available
+        if (error.response) {
+            console.error("Response status:", error.response.status);
+            console.error("Response data:", error.response.data);
+        }
+
+        // Fallback: Use hardcoded stable token data
         console.warn("Using hardcoded fallback stable tokens.");
         const fallbackTokens = HARDCODED_STABLE_ADDRESSES.map((address) => ({
             address: getAddress(address),
@@ -685,46 +700,48 @@ const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
  * @param {string} currency - The target currency for price conversion (default: USD).
  * @returns {Promise<Object>} - A mapping of token addresses to their price data.
  */
-async function fetchTokenPrices( stableTokens = [], currency = "USD") {
-  // Construct the comma-separated addresses string
-  const addresses = HARDCODED_STABLE_ADDRESSES.join(",");
+async function fetchTokenPrices( stableTokens = []) {
+    // Construct the URL by appending the addresses as a comma-separated string
+    const url = `${BASE_URL}/${CHAIN_ID}/${HARDCODED_STABLE_ADDRESSES.join(",")}`;
 
-  // Define the API URL with chainId and token addresses
-  const url = `${BASE_URL}/${CHAIN_ID}/${addresses}`;
-
-  // Axios request configuration
-  const config = {
-    headers: {
-      Authorization: `Bearer ${API_KEY_Token}`,
-      Accept: "application/json",
-    },
-    params: {
-      currency: currency,
-    },
-    paramsSerializer: (params) => {
-            return qs.stringify(params, { indices: false }); // Serialize without array indices
+    // Axios request configuration
+    const config = {
+        headers: {
+            Authorization: `Bearer ${API_KEY_Token}`, // API Key
+            Accept: "application/json",
         },
-  };
+        params: {
+            currency: "USD", // Fetch prices in USD
+        },
+    };
 
-  try {
-    console.log("Fetching token prices for hardcoded addresses...");
+    try {
+        console.log("Fetching token prices...");
+        console.log("Request URL:", url);
 
-    // API Call to 1inch Price API
-    const response = await axios.get(url, config);
+        // Send the GET request to the 1inch API
+        const response = await axios.get(url, config);
 
-    if (response.status === 200 && response.data) {
-      console.log("Token prices fetched successfully.");
-      console.log(response.data);
-      return response.data;
-    } else {
-      console.warn("No token data received from the 1inch API.");
-      return {};
+        if (response.status === 200 && response.data) {
+            console.log("Fetched token prices successfully:", response.data);
+            return response.data;
+        } else {
+            console.warn("No token data received from the 1inch API.");
+            return {};
+        }
+    } catch (error) {
+        console.error("Error fetching token prices:", error.message);
+
+        // Log additional error response details if available
+        if (error.response) {
+            console.error("Response status:", error.response.status);
+            console.error("Response data:", error.response.data);
+        }
+
+        return null; // Return null to indicate failure
     }
-  } catch (error) {
-    console.error("Error fetching token prices:", error.message);
-    return {};
-  }
 }
+
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
