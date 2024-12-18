@@ -42,7 +42,7 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 //const chainId = 42161;
 // Base URL for 1inch APIs
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
-const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
+const CACHE_DURATION1 = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
 const BASE_URL1 = "https://api.1inch.dev/token/v1.2";
 const BASE_URL = "https://api.1inch.dev/price/v1.1";
@@ -61,6 +61,12 @@ let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
+const priceCache = {
+    data: null,
+    timestamp: 0,
+};
+const CACHE_DURATION = 10 * 1000; // 10 seconds
+
 // Hardcoded stable token addresses
 const HARDCODED_STABLE_ADDRESSES = [
     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
@@ -541,7 +547,7 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
         const toPrice = cachedPriceData[toToken]?.price;
 
         if (!fromPrice || !toPrice) {
-            console.warn(`Missing price data for ${fromToken} or ${toToken}. Skipping route.`);
+           console.warn(`Missing price data for tokens: ${JSON.stringify(tokenA)}, ${JSON.stringify(tokenB)}. Skipping route.`);
             return basePriority; // Fallback priority
         }
 
@@ -619,7 +625,7 @@ async function getStableTokenList(chainId) {
     // Check if the data is cached and still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < CACHE_DURATION) {
+        if (now - timestamp < CACHE_DURATION1) {
             console.log("Returning cached stable token list.");
             return data;
         }
@@ -741,6 +747,14 @@ async function retryRequest(requestFn, retries = 3, delay = 1000) {
 
 
 async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
+    const now = Date.now();
+
+    // Use cached data if valid
+    if (priceCache.data && now - priceCache.timestamp < CACHE_DURATION) {
+        console.log("Using cached token prices.");
+        return priceCache.data;
+    }
+
     const url = `${BASE_URL}/${CHAIN_ID}/${stableTokens.join(",")}`;
     const config = {
         headers: {
@@ -762,6 +776,9 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
 
                 if (response.status === 200 && response.data) {
                     console.log("Fetched token prices successfully:", response.data);
+                      // Update cache
+                      priceCache.data = response.data;
+                      priceCache.timestamp = now;
                     return response.data;
                 } else {
                     console.warn("No token data received from the 1inch API.");
@@ -1012,6 +1029,9 @@ async function fetchGasPrice() {
             return new BigNumber(0);
         }
 
+        // Merge cache with fetched data
+        const mergedPriceData = { ...priceCache.data, ...priceData };
+
         // Calculate dynamic minimum profit threshold
         const minimumProfitThreshold = await calculateDynamicMinimumProfit();
 
@@ -1028,25 +1048,40 @@ async function fetchGasPrice() {
             const fromToken = route[i];
             const toToken = route[i + 1];
 
-            const fromTokenPrices = priceData[fromToken];
-            const toTokenPrices = priceData[toToken];
+            // Fetch prices for the tokens in the current step
+            const fromTokenPrices = mergedPriceData[fromToken];
+            const toTokenPrices = mergedPriceData[toToken];
 
+            // Log missing price data
+            if (!fromTokenPrices) {
+                console.warn(
+                    `Missing price data for fromToken: ${fromToken}. Using cached price if available.`
+                );
+            }
+            if (!toTokenPrices) {
+                console.warn(
+                    `Missing price data for toToken: ${toToken}. Using cached price if available.`
+                );
+            }
+
+            // If either price is missing, skip the route
             if (!fromTokenPrices || !toTokenPrices) {
-                console.error(`Missing price data for ${fromToken} or ${toToken}`);
-                return new BigNumber(0); // Abort evaluation if any hop is invalid
+                console.warn(`Skipping route due to missing prices for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}.` );
+                return new BigNumber(0); // Abort evaluation
             }
 
             // Use the best price for each protocol
             const fromPrice = getBestPrice(fromTokenPrices);
             const toPrice = getBestPrice(toTokenPrices);
 
+            // Log invalid price data
             if (!fromPrice || !toPrice) {
-                console.error(`Invalid price data for ${fromToken} or ${toToken}`);
+                console.error(`Invalid price data for ${JSON.stringify(fromToken)} or ${JSON.stringify(toToken)}`);
                 return new BigNumber(0); // Abort if price data is invalid
             }
 
             // Adjust amount based on slippage
-            const slippage = calculateSlippage([fromToken, toToken], priceData);
+            const slippage = calculateSlippage([fromToken, toToken], mergedPriceData);
             const adjustedAmount = amountIn.multipliedBy(1 - slippage / 100);
             amountIn = adjustedAmount.multipliedBy(toPrice).dividedBy(fromPrice);
 
@@ -1061,7 +1096,9 @@ async function fetchGasPrice() {
 
         // Return profit only if it meets the minimum profit threshold
         if (profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
-            console.log(`Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} USDT`);
+            console.log(
+                `Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} USDT`
+            );
             return profit;
         } else {
             console.log("Route did not meet the minimum profit threshold.");
@@ -1071,10 +1108,6 @@ async function fetchGasPrice() {
         console.error("Unexpected error in evaluateRouteProfit:", error.message);
         return new BigNumber(0); // Return zero profit on unexpected error
     }
-}
-
- function formatAmount(amount, decimals) {
-    return new BigNumber(amount).toFixed(decimals);
 }
 
 /**
