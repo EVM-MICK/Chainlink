@@ -626,7 +626,7 @@ async function getStableTokenList(chainId) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
-    const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+      const url = "https://api.1inch.dev/token/v1.2/42161/custom";
     const config = {
         headers: {
   Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
@@ -640,12 +640,12 @@ async function getStableTokenList(chainId) {
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
     "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
-    "0x912ce59144191c1204e64559fe8253a0e49e6548",
+    "0x912ce59144191c1204e64559fe8253a0e49e6548"
     ]
     },
      paramsSerializer: (params) => {
             return qs.stringify(params, { indices: false });
-        },
+        }
     };
 
     try {
