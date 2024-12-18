@@ -24,7 +24,8 @@ const HEADERS = {
 };
 const RETRY_LIMIT = 5;
 const RETRY_BASE_DELAY_MS = 1000; // Start with a 1-second delay
-
+// Rate limiter state
+let isRateLimited = false;
 // Configurable parameters
 const apiQueue = new PQueue({
     concurrency: 1, // Allow 1 request at a time
@@ -91,6 +92,11 @@ if (!process.env.INFURA_URL || !process.env.ONEINCH_API_KEY || !process.env.CONT
 
  function toDeadline(expirationMs) {
     return Math.floor(Date.now() / 1000) + Math.floor(expirationMs / 1000);
+}
+
+// Delay function for rate limiting
+async function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
  async function fetchNonce(walletAddress, tokenAddress) {
@@ -446,14 +452,14 @@ async function findProfitableRoutes() {
         console.log("Finding profitable routes...");
 
         // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(42161);
+        const stableTokens = await getStableTokenList(CHAIN_ID);
         if (stableTokens.length === 0) {
             console.error("No stable tokens available. Skipping profitable route search.");
             return [];
         }
 
         // Step 2: Fetch token prices across protocols
-        const tokenPrices = await fetchTokenPrices(stableTokens, CHAIN_ID);
+        const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices. Skipping profitable route search.");
             return [];
@@ -601,7 +607,7 @@ async function fetchTokenData(address, headers, baseUrl) {
  * @param {number} chainId - The blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object[]>} - A list of stable token objects (address, symbol, decimals, name).
  */
-async function getStableTokenList(chainId = 42161) {
+async function getStableTokenList(chainId) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
 
@@ -615,14 +621,23 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
-    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+    const url = "https://api.1inch.dev/token/v1.2/42161/custom";
 
     const config = {
         headers: HEADERS,
         params: {
-            addresses: HARDCODED_STABLE_ADDRESSES, // Pass the array of addresses directly
-        },
-        paramsSerializer: (params) => {
+            "addresses": [
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", 
+    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", 
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", 
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", 
+    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", 
+    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
+    "0x912ce59144191c1204e64559fe8253a0e49e6548" 
+    ] 
+    },
+    paramsSerializer: (params) => {
             // Ensure query parameters are serialized correctly
             return qs.stringify(params, { indices: false });
         },
@@ -691,7 +706,6 @@ const TOKEN_ADDRESSES = [
   "0x912CE59144191C1204E64559FE8253a0e49E6548", // ARB
 ];
 
-const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
 
 /**
  * Fetch token prices using the 1inch Price API.
@@ -700,11 +714,9 @@ const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
  * @param {string} currency - The target currency for price conversion (default: USD).
  * @returns {Promise<Object>} - A mapping of token addresses to their price data.
  */
-async function fetchTokenPrices( stableTokens = []) {
-    // Construct the URL by appending the addresses as a comma-separated string
-    const url = `${BASE_URL}/${CHAIN_ID}/${HARDCODED_STABLE_ADDRESSES.join(",")}`;
-
-    // Axios request configuration
+async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
+    const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
+    const url = `${BASE_URL}/${CHAIN_ID}/${stableTokens.join(",")}`;
     const config = {
         headers: {
             Authorization: `Bearer ${API_KEY_Token}`, // API Key
@@ -716,11 +728,23 @@ async function fetchTokenPrices( stableTokens = []) {
     };
 
     try {
+        // Enforce the 1 RPS limit
+        while (isRateLimited) {
+            console.log("Rate limit in effect. Waiting 1 second...");
+            await delay(1000); // Wait 1 second
+        }
+
+        // Set rate-limited state
+        isRateLimited = true;
+
         console.log("Fetching token prices...");
         console.log("Request URL:", url);
 
         // Send the GET request to the 1inch API
         const response = await axios.get(url, config);
+
+        // Reset rate-limited state after success
+        isRateLimited = false;
 
         if (response.status === 200 && response.data) {
             console.log("Fetched token prices successfully:", response.data);
@@ -730,6 +754,9 @@ async function fetchTokenPrices( stableTokens = []) {
             return {};
         }
     } catch (error) {
+        // Reset rate-limited state on error
+        isRateLimited = false;
+
         console.error("Error fetching token prices:", error.message);
 
         // Log additional error response details if available
@@ -742,7 +769,6 @@ async function fetchTokenPrices( stableTokens = []) {
     }
 }
 
-
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
 /**
  * Generate profitable routes using stable tokens.
@@ -752,13 +778,13 @@ async function fetchTokenPrices( stableTokens = []) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USDC.e", topN = 3) {
-    const stableTokens = await getStableTokenList(42161);
+    const stableTokens = await getStableTokenList(CHAIN_ID);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
         return [];
     }
 
-    const tokenPrices = await fetchTokenPrices(stableTokens, CHAIN_ID);
+    const tokenPrices = await fetchTokenPrices(stableTokens);
     if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
         console.error("Failed to fetch token prices for route generation.");
         return [];
