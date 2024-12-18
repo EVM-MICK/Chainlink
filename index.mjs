@@ -44,8 +44,8 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
-//const BASE_URL = `https://api.1inch.dev/token/v1.2/42161/custom`;
-const BASE_URL = `https://api.1inch.dev/price/v1.1`;
+const BASE_URL1 = "https://api.1inch.dev/token/v1.2";
+const BASE_URL = "https://api.1inch.dev/price/v1.1";
 const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
 const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2/42161/custom";
 const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
@@ -625,14 +625,14 @@ async function getStableTokenList(chainId) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
-    const url = `${BASE_URL}/${chainId}/custom`;
+    const url = `${BASE_URL1}/${chainId}/custom`;
 
     const config = {
         headers: {
-  "Authorization": "Bearer  emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+  Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
    },
         params: {
-            "addresses": HARDCODED_STABLE_ADDRESSES,
+            addresses: HARDCODED_STABLE_ADDRESSES,
         },
         paramsSerializer: (params) => {
             return qs.stringify(params, { indices: false });
@@ -717,7 +717,7 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
     const url = `${BASE_URL}/${CHAIN_ID}/${stableTokens.join(",")}`;
     const config = {
         headers: {
-      "Authorization": "Bearer  emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+      Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
       },
         params: {
             currency: "USD", // Fetch prices in USD
