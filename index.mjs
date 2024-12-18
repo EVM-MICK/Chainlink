@@ -57,6 +57,17 @@ let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
+// Hardcoded stable token addresses
+const HARDCODED_STABLE_ADDRESSES = [
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
+    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", // USDC.e
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
+    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", // AAVE
+    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
+    "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
+];
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
   { address: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", symbol: "USDC.e"},
@@ -574,27 +585,18 @@ async function fetchTokenData(address, headers, baseUrl) {
   }
 }
 
+
 /**
- * Fetch stable token list dynamically with fallback logic.
+ * Fetch stable token details from 1inch Token API with fallback logic.
+ *
+ * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
+ * @returns {Promise<Object[]>} - A list of stable token objects with address, symbol, and decimals.
  */
-
-// Hardcoded stable token addresses
-const HARDCODED_STABLE_ADDRESSES = [
-    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
-    "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", // USDC.e
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
-    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d", // AAVE
-    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
-    "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
-];
-
 async function getStableTokenList(chainId = 42161) {
     const cacheKey = `stableTokens:${chainId}`;
     const now = Date.now();
 
-    // Step 1: Check Cache
+    // Check if the data is already cached and still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < CACHE_DURATION) {
@@ -604,35 +606,46 @@ async function getStableTokenList(chainId = 42161) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
+    const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
+
+    const config = {
+        headers: HEADERS,
+        params: {
+            addresses: HARDCODED_STABLE_ADDRESSES, // Pass addresses array directly
+        },
+        paramsSerializer: {
+            indexes: null, // Prevent array indexes in query parameters
+        },
+    };
 
     try {
-        // Step 2: API Call with Hardcoded Addresses
-        const url = `https://api.1inch.dev/token/v1.2/${chainId}/custom`;
-        const response = await axios.get(url, {
-            headers: HEADERS,
-            params: { addresses: HARDCODED_STABLE_ADDRESSES.join(",") },
-        });
+        // Send the HTTP GET request to fetch token details
+        const response = await axios.get(url, config);
 
-        // Step 3: Parse Response
-        const tokens = response.data?.tokens || {};
-        const stableTokens = Object.keys(tokens).map((address) => ({
-            address: getAddress(address), // Checksum format
-            symbol: tokens[address]?.symbol || "UNKNOWN",
-            decimals: tokens[address]?.decimals || 18,
-            name: tokens[address]?.name || "UNKNOWN",
-        }));
+        if (response.data && response.data.tokens) {
+            // Process and map the response into a clean format
+            const stableTokens = Object.entries(response.data.tokens).map(([address, token]) => ({
+                address: getAddress(address), // Normalize to checksum format
+                symbol: token.symbol || "UNKNOWN",
+                decimals: token.decimals || 18,
+                name: token.name || "UNKNOWN",
+            }));
 
-        // Step 4: Cache and Return Data
-        cache.set(cacheKey, { data: stableTokens, timestamp: now });
-        console.log("Fetched stable token list from API:", stableTokens);
-        return stableTokens;
+            // Cache the results for future use
+            cache.set(cacheKey, { data: stableTokens, timestamp: now });
+            console.log("Fetched stable token list:", stableTokens);
+            return stableTokens;
+        } else {
+            throw new Error("Invalid or empty response from 1inch API.");
+        }
     } catch (error) {
-        console.error("Error fetching tokens from API. Using fallback tokens:", error.message);
+        console.error("Error fetching stable token list from API:", error.message);
 
-        // Fallback tokens in case of API failure
+        // Fallback: Use hardcoded addresses with minimal info
+        console.warn("Using hardcoded fallback stable tokens.");
         const fallbackTokens = HARDCODED_STABLE_ADDRESSES.map((address) => ({
             address: getAddress(address),
-            symbol: "UNKNOWN", // Symbol unknown during fallback
+            symbol: "UNKNOWN",
             decimals: 18,
             name: "Fallback Token",
         }));
