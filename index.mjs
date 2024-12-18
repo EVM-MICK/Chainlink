@@ -685,7 +685,7 @@ const API_KEY_Token = "emBOytuT9itLNgAI3jSPlTUXnmL9cEv6";
  * @param {string} currency - The target currency for price conversion (default: USD).
  * @returns {Promise<Object>} - A mapping of token addresses to their price data.
  */
-async function fetchTokenPrices( addresses = [], currency = "USD") {
+async function fetchTokenPrices( stableTokens = [], currency = "USD") {
   // Construct the comma-separated addresses string
   const addresses = HARDCODED_STABLE_ADDRESSES.join(",");
 
