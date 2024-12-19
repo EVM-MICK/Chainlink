@@ -47,7 +47,7 @@ const CACHE_DURATION1 = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
 const BASE_URL1 = "https://api.1inch.dev/token/v1.2";
 const BASE_URL = "https://api.1inch.dev/price/v1.1";
-const SWAP_API_URL = `${ONEINCH_BASE_URL}/swap/v6.0`;   // Swap API
+const SWAP_API_URL = "https://api.1inch.dev/swap/v6.0/42161";   // Swap API
 const TOKEN_API_URL = "https://api.1inch.dev/token/v1.2/42161/custom";
 const PRICE_API_URL = "https://api.1inch.dev/price/v1.1";
 const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
@@ -223,7 +223,7 @@ async function fetchCachedGasPrice() {
 }
 
 async function fetchFromTokenAPI(endpoint, params = {}) {
-    const url = `${TOKEN_API_URL}/${CHAIN_ID}${endpoint}`;
+    const url = `${TOKEN_API_URL}`;
     try {
         const response = await apiQueue.add(() =>
             axios.get(TOKEN_API_URL, { headers: HEADERS, params })
@@ -236,7 +236,7 @@ async function fetchFromTokenAPI(endpoint, params = {}) {
 }
 
 async function fetchFromSwapAPI(endpoint, params = {}) {
-    const url = `${SWAP_API_URL}/${CHAIN_ID}${endpoint}`;
+    const url = `${SWAP_API_URL}/quote`;
     try {
         const response = await apiQueue.add(() =>
             axios.get(url, { headers: HEADERS, params })
@@ -354,7 +354,7 @@ async function approveTokensWithPermit2(tokens) {
                 continue;
             }
 
-            const approvalResponse = await axios.get(`${process.env.PATHFINDER_API_URL}/approve/transaction`, {
+            const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
                 headers: {
                     Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
                 },
@@ -952,7 +952,7 @@ async function fetchTokenPricesAcrossProtocols(tokens, chainId = 42161) {
     const prices = {};
     for (const address of tokenAddresses) {
         console.log(`Fetching price for token: ${address}`);
-        const priceData = await fetchPriceWithRetry(address, chainId);
+        const priceData = await fetchTokenPrices();
         if (priceData && priceData[address]) {
             prices[address] = {
                 price: new BigNumber(priceData[address].price || 0),
@@ -1035,7 +1035,7 @@ async function fetchGasPrice() {
             // Make the API call to fetch gas prices
             const response = await axios.get("https://api.blocknative.com/gasprices/blockprices", {
                 headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
-                params: { chainId: CHAIN_ID },
+                params: { chainId: 42161},
             });
 
             // Log the entire response to determine the structure
@@ -1196,7 +1196,7 @@ async function fetchGasPrice() {
 
     try {
         // Prepare the request parameters for the 1inch Swap API
-        const params = {
+        const Params = {
             fromTokenAddress: fromToken,
             toTokenAddress: toToken,
             amount: amount.toFixed(0), // Convert BigNumber to string in the smallest unit
@@ -1207,9 +1207,9 @@ async function fetchGasPrice() {
         };
 
         // Make an API request to the 1inch Swap API
-        const response = await axios.get(`${SWAP_API_URL}/${CHAIN_ID}/swap`, {
+        const response = await axios.get(`${SWAP_API_URL}/quote`, {
             headers: HEADERS,
-            params,
+            params: Params
         });
 
         // Validate the API response and extract transaction data
