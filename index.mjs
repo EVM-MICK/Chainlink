@@ -552,6 +552,10 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
         let fromToken = route[i];
         let toToken = route[i + 1];
 
+        // Extract addresses if tokens are objects
+        fromToken = typeof fromToken === "object" ? fromToken.address : fromToken;
+        toToken = typeof toToken === "object" ? toToken.address : toToken;
+
         // Ensure fromToken and toToken are strings
         if (typeof fromToken !== "string" || typeof toToken !== "string") {
             console.error(`Invalid token in route: ${JSON.stringify(fromToken)} or ${JSON.stringify(toToken)}`);
@@ -593,6 +597,7 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
 
     return basePriority + estimatedProfit.toNumber();
 }
+
 
 
 function expandStableTokens(unmatchedTokens) {
@@ -864,26 +869,21 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
     const startTokens = [preferredStartToken, ...stableTokens.filter(t => t !== preferredStartToken)];
 
     for (const startToken of startTokens) {
-        const generatePaths = async (path, hopsRemaining, visited) => {
+        const generatePaths = async (path, hopsRemaining) => {
             if (hopsRemaining === 0) return;
 
             for (const token of stableTokens) {
-                if (!visited.has(token)) {
-                    const newPath = [...path, token];
-                    const newVisited = new Set(visited);
-                    newVisited.add(token); // Mark the token as visited
+                const tokenAddress = typeof token === "object" ? token.address : token; // Use address if object
+                if (!path.includes(tokenAddress)) {
+                    const newPath = [...path, tokenAddress];
                     const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
-
-                    if (profit > 0) {
-                        routes.add(newPath.join(","));
-                    }
-
-                    await generatePaths(newPath, hopsRemaining - 1, newVisited);
+                    if (profit > 0) routes.add(newPath.join(","));
+                    await generatePaths(newPath, hopsRemaining - 1);
                 }
             }
         };
 
-        await generatePaths([startToken], maxHops, new Set([startToken])); // Initialize visited set with the start token
+        await generatePaths([startToken], maxHops);
     }
 
     return Array.from(routes).map(route => route.split(",")).slice(0, topN);
