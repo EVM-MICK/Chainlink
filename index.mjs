@@ -552,15 +552,36 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
         const fromToken = route[i];
         const toToken = route[i + 1];
 
-        const fromPrice = cachedPriceData[fromToken]?.price;
-        const toPrice = cachedPriceData[toToken]?.price;
+        // Retrieve prices from the cache or fallback tokens
+        let fromPrice = cachedPriceData[fromToken]?.price;
+        let toPrice = cachedPriceData[toToken]?.price;
+
+        if (!fromPrice) {
+            const fallbackFromToken = FALLBACK_TOKENS.find(
+                (token) => token.address.toLowerCase() === fromToken.toLowerCase()
+            );
+            fromPrice = fallbackFromToken ? fallbackFromToken.price : undefined;
+        }
+
+        if (!toPrice) {
+            const fallbackToToken = FALLBACK_TOKENS.find(
+                (token) => token.address.toLowerCase() === toToken.toLowerCase()
+            );
+            toPrice = fallbackToToken ? fallbackToToken.price : undefined;
+        }
 
         if (!fromPrice || !toPrice) {
-           console.warn(`Missing price data for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}. Skipping route.`);
+            console.warn(
+                `Missing price data for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}. Skipping route.`
+            );
             return basePriority; // Fallback priority
         }
 
-        const stepProfit = new BigNumber(toPrice).minus(fromPrice).multipliedBy(capital).dividedBy(fromPrice);
+        // Calculate step profit
+        const stepProfit = new BigNumber(toPrice)
+            .minus(fromPrice)
+            .multipliedBy(capital)
+            .dividedBy(fromPrice);
         estimatedProfit = estimatedProfit.plus(stepProfit);
     }
 
@@ -785,10 +806,21 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
 
                 if (response.status === 200 && response.data) {
                     console.log("Fetched token prices successfully:", response.data);
-                      // Update cache
-                      priceCache.data = response.data;
-                      priceCache.timestamp = now;
-                    return response.data;
+
+                    // Map prices to FALLBACK_TOKENS
+                    const prices = response.data;
+                    FALLBACK_TOKENS.forEach((token) => {
+                        const address = token.address.toLowerCase();
+                        if (prices[address]) {
+                            token.price = new BigNumber(prices[address]);
+                            console.log(`Price mapped for ${token.symbol}: ${token.price}`);
+                        }
+                    });
+
+                    // Update cache
+                    priceCache.data = prices;
+                    priceCache.timestamp = now;
+                    return prices;
                 } else {
                     console.warn("No token data received from the 1inch API.");
                     return {};
