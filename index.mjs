@@ -548,7 +548,7 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
         const toPrice = cachedPriceData[toToken]?.price;
 
         if (!fromPrice || !toPrice) {
-           console.warn(`Missing price data for tokens: ${JSON.stringify(tokenA)}, ${JSON.stringify(tokenB)}. Skipping route.`);
+           console.warn(`Missing price data for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}. Skipping route.`);
             return basePriority; // Fallback priority
         }
 
