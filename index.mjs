@@ -66,7 +66,7 @@ const priceCache = {
     data: null,
     timestamp: 0,
 };
-const CACHE_DURATION = 10 * 1000; // 10 seconds
+const CACHE_DURATION = 15 * 1000; // 10 seconds
 
 // Hardcoded stable token addresses
 const HARDCODED_STABLE_ADDRESSES = [
@@ -340,19 +340,27 @@ async function constructParams(route, amount, permitBatchSignature) {
 async function approveTokensWithPermit2(tokens) {
     try {
         for (const token of tokens) {
+            // Ensure `token.amount` is a BigNumber
+            const amount = new BigNumber(token.amount);
+
+            if (!amount.isFinite()) {
+                throw new Error(`Invalid amount for token ${token.address}: ${token.amount}`);
+            }
+
             const allowance = await checkAllowance(token.address);
-            if (allowance.isGreaterThanOrEqualTo(token.amount)) {
+
+            if (allowance.isGreaterThanOrEqualTo(amount)) {
                 console.log(`Sufficient allowance for ${token.address}. Skipping approval.`);
                 continue;
             }
 
-            const approvalResponse = await axios.get(`${PATHFINDER_API_URL}/approve/transaction`, {
+            const approvalResponse = await axios.get(`${process.env.PATHFINDER_API_URL}/approve/transaction`, {
                 headers: {
-        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-    },
+                    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                },
                 params: {
                     tokenAddress: token.address,
-                    amount: token.amount.toFixed(),
+                    amount: amount.toFixed(), // Convert to string format compatible with the API
                 },
             });
 
@@ -800,7 +808,7 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
+async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
     const stableTokens = await getStableTokenList(CHAIN_ID);
     if (stableTokens.length === 0) {
         console.error("No stable tokens found for route generation.");
@@ -817,20 +825,26 @@ async function generateRoutes( CHAIN_ID, maxHops = 3, preferredStartToken = "USD
     const startTokens = [preferredStartToken, ...stableTokens.filter(t => t !== preferredStartToken)];
 
     for (const startToken of startTokens) {
-        const generatePaths = async (path, hopsRemaining) => {
+        const generatePaths = async (path, hopsRemaining, visited) => {
             if (hopsRemaining === 0) return;
 
             for (const token of stableTokens) {
-                if (!path.includes(token)) {
+                if (!visited.has(token)) {
                     const newPath = [...path, token];
+                    const newVisited = new Set(visited);
+                    newVisited.add(token); // Mark the token as visited
                     const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
-                    if (profit > 0) routes.add(newPath.join(","));
-                    await generatePaths(newPath, hopsRemaining - 1);
+
+                    if (profit > 0) {
+                        routes.add(newPath.join(","));
+                    }
+
+                    await generatePaths(newPath, hopsRemaining - 1, newVisited);
                 }
             }
         };
 
-        await generatePaths([startToken], maxHops);
+        await generatePaths([startToken], maxHops, new Set([startToken])); // Initialize visited set with the start token
     }
 
     return Array.from(routes).map(route => route.split(",")).slice(0, topN);
