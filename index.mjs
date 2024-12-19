@@ -549,8 +549,14 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
     let estimatedProfit = new BigNumber(0);
 
     for (let i = 0; i < route.length - 1; i++) {
-        const fromToken = route[i];
-        const toToken = route[i + 1];
+        let fromToken = route[i];
+        let toToken = route[i + 1];
+
+        // Ensure fromToken and toToken are strings
+        if (typeof fromToken !== "string" || typeof toToken !== "string") {
+            console.error(`Invalid token in route: ${JSON.stringify(fromToken)} or ${JSON.stringify(toToken)}`);
+            return basePriority; // Fallback priority
+        }
 
         // Retrieve prices from the cache or fallback tokens
         let fromPrice = cachedPriceData[fromToken]?.price;
@@ -587,6 +593,7 @@ function estimateRoutePotential(route, capital, cachedPriceData) {
 
     return basePriority + estimatedProfit.toNumber();
 }
+
 
 function expandStableTokens(unmatchedTokens) {
     // Example logic to include dynamically determined stable tokens
