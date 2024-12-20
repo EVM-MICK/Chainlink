@@ -546,63 +546,68 @@ class PriorityQueue {
 // Utility: Estimate route potential (placeholder logic)
 
 async function estimateRoutePotential(route, capital, cachedPriceData, gasPrice, estimatedGasPerSwap) {
-    const protocolFeePercent = 0.003; // Example protocol fee (0.3%)
-    const basePriority = ["USDC", "USDT"].includes(route[0]) ? 100 : 50; // Higher priority for stable start tokens
-    let estimatedProfit = new BigNumber(0);
-    let amountIn = capital; // Start with the full capital for trading
+    try {
+        const protocolFeePercent = 0.003; // Example protocol fee (0.3%)
+        const basePriority = ["USDC", "USDT"].includes(route[0]) ? 100 : 50; // Higher priority for stable start tokens
+        let estimatedProfit = new BigNumber(0);
+        let amountIn = capital; // Start with the full capital for trading
 
-    for (let i = 0; i < route.length - 1; i++) {
-        let fromToken = route[i];
-        let toToken = route[i + 1];
+        for (let i = 0; i < route.length - 1; i++) {
+            let fromToken = route[i];
+            let toToken = route[i + 1];
 
-        // Normalize addresses
-        fromToken = typeof fromToken === "object" ? fromToken.address : fromToken;
-        toToken = typeof toToken === "object" ? toToken.address : toToken;
+            // Normalize addresses
+            fromToken = typeof fromToken === "object" ? fromToken.address : fromToken;
+            toToken = typeof toToken === "object" ? toToken.address : toToken;
 
-        // Validate token addresses
-        if (typeof fromToken !== "string" || typeof toToken !== "string") {
-            console.error(`Invalid token addresses in route: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}`);
-            return basePriority;
+            // Validate token addresses
+            if (typeof fromToken !== "string" || typeof toToken !== "string") {
+                console.error(`Invalid token addresses in route: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}`);
+                return basePriority;
+            }
+
+            // Retrieve token prices
+            const fromPrice = cachedPriceData[fromToken]?.price;
+            const toPrice = cachedPriceData[toToken]?.price;
+
+            if (!fromPrice || !toPrice) {
+                console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}. Skipping route.`);
+                return basePriority;
+            }
+
+            // Calculate slippage
+            const liquidity = cachedPriceData[fromToken]?.liquidity || 0;
+            const slippage = liquidity < amountIn.toNumber() ? 0.01 : 0.005; // Higher slippage for low liquidity
+
+            // Calculate next hop output
+            const amountOut = amountIn
+                .multipliedBy(new BigNumber(toPrice))
+                .dividedBy(new BigNumber(fromPrice))
+                .multipliedBy(1 - slippage); // Adjust for slippage
+
+            // Subtract protocol fees
+            const fee = amountOut.multipliedBy(protocolFeePercent);
+            const adjustedAmountOut = amountOut.minus(fee);
+
+            // Update the input amount for the next hop
+            amountIn = adjustedAmountOut;
+
+            // Validate intermediate outputs
+            if (amountIn.isLessThanOrEqualTo(0)) {
+                console.error(`Zero or negative output during route calculation: ${fromToken} -> ${toToken}`);
+                return basePriority;
+            }
         }
 
-        // Retrieve token prices
-        const fromPrice = cachedPriceData[fromToken]?.price;
-        const toPrice = cachedPriceData[toToken]?.price;
+        // Subtract gas costs
+        const gasCost = gasPrice.multipliedBy(estimatedGasPerSwap).multipliedBy(route.length - 1);
+        estimatedProfit = amountIn.minus(capital).minus(gasCost);
 
-        if (!fromPrice || !toPrice) {
-            console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}. Skipping route.`);
-            return basePriority;
-        }
-
-        // Calculate slippage
-        const liquidity = cachedPriceData[fromToken]?.liquidity || 0;
-        const slippage = liquidity < amountIn.toNumber() ? 0.01 : 0.005; // Higher slippage for low liquidity
-
-        // Calculate next hop output
-        const amountOut = amountIn
-            .multipliedBy(new BigNumber(toPrice))
-            .dividedBy(new BigNumber(fromPrice))
-            .multipliedBy(1 - slippage); // Adjust for slippage
-
-        // Subtract protocol fees
-        const fee = amountOut.multipliedBy(protocolFeePercent);
-        const adjustedAmountOut = amountOut.minus(fee);
-
-        // Update the input amount for the next hop
-        amountIn = adjustedAmountOut;
-
-        // Validate intermediate outputs
-        if (amountIn.isLessThanOrEqualTo(0)) {
-            console.error(`Zero or negative output during route calculation: ${fromToken} -> ${toToken}`);
-            return basePriority;
-        }
+        return estimatedProfit.isGreaterThan(0) ? basePriority + estimatedProfit.toNumber() : basePriority;
+    } catch (error) {
+        console.error("Error in estimateRoutePotential:", error.message);
+        return 0; // Return a base fallback if an error occurs
     }
-
-    // Subtract gas costs
-    const gasCost = gasPrice.multipliedBy(estimatedGasPerSwap).multipliedBy(route.length - 1);
-    estimatedProfit = amountIn.minus(capital).minus(gasCost);
-
-    return estimatedProfit.isGreaterThan(0) ? basePriority + estimatedProfit.toNumber() : basePriority;
 }
 
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
