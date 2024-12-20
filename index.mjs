@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import axios from 'axios';
 import Web3 from 'web3';
-import BigNumber from 'bignumber.js';
+import { BigNumber } from 'bignumber.js';
 import pkg from 'telegraf';
 import retry from 'async-retry';
 import { createRequire } from 'module'; 
@@ -543,62 +543,162 @@ class PriorityQueue {
 }
 
 // Utility: Estimate route potential (placeholder logic)
-function estimateRoutePotential(route, capital, cachedPriceData) {
-    const preferredTokens = ["USDC", "USDT"];
-    const basePriority = preferredTokens.includes(route[0]) ? 100 : 50;
+
+async function estimateRoutePotential(route, capital, cachedPriceData, gasPrice, estimatedGasPerSwap) {
+    const protocolFeePercent = 0.003; // Example protocol fee (0.3%)
+    const basePriority = ["USDC", "USDT"].includes(route[0]) ? 100 : 50; // Higher priority for stable start tokens
     let estimatedProfit = new BigNumber(0);
+    let amountIn = capital; // Start with the full capital for trading
 
     for (let i = 0; i < route.length - 1; i++) {
         let fromToken = route[i];
         let toToken = route[i + 1];
 
-        // Extract addresses if tokens are objects
+        // Normalize addresses
         fromToken = typeof fromToken === "object" ? fromToken.address : fromToken;
         toToken = typeof toToken === "object" ? toToken.address : toToken;
 
-        // Ensure fromToken and toToken are strings
+        // Validate token addresses
         if (typeof fromToken !== "string" || typeof toToken !== "string") {
-            console.error(`Invalid token in route: ${JSON.stringify(fromToken)} or ${JSON.stringify(toToken)}`);
-            return basePriority; // Fallback priority
+            console.error(`Invalid token addresses in route: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}`);
+            return basePriority;
         }
 
-        // Retrieve prices from the cache or fallback tokens
-        let fromPrice = cachedPriceData[fromToken]?.price;
-        let toPrice = cachedPriceData[toToken]?.price;
-
-        if (!fromPrice) {
-            const fallbackFromToken = FALLBACK_TOKENS.find(
-                (token) => token.address.toLowerCase() === fromToken.toLowerCase()
-            );
-            fromPrice = fallbackFromToken ? fallbackFromToken.price : undefined;
-        }
-
-        if (!toPrice) {
-            const fallbackToToken = FALLBACK_TOKENS.find(
-                (token) => token.address.toLowerCase() === toToken.toLowerCase()
-            );
-            toPrice = fallbackToToken ? fallbackToToken.price : undefined;
-        }
+        // Retrieve token prices
+        const fromPrice = cachedPriceData[fromToken]?.price;
+        const toPrice = cachedPriceData[toToken]?.price;
 
         if (!fromPrice || !toPrice) {
-            console.warn(
-                `Missing price data for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}. Skipping route.`
-            );
-            return basePriority; // Fallback priority
+            console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}. Skipping route.`);
+            return basePriority;
         }
 
-        // Calculate step profit
-        const stepProfit = new BigNumber(toPrice)
-            .minus(fromPrice)
-            .multipliedBy(capital)
-            .dividedBy(fromPrice);
-        estimatedProfit = estimatedProfit.plus(stepProfit);
+        // Calculate slippage
+        const liquidity = cachedPriceData[fromToken]?.liquidity || 0;
+        const slippage = liquidity < amountIn.toNumber() ? 0.01 : 0.005; // Higher slippage for low liquidity
+
+        // Calculate next hop output
+        const amountOut = amountIn
+            .multipliedBy(new BigNumber(toPrice))
+            .dividedBy(new BigNumber(fromPrice))
+            .multipliedBy(1 - slippage); // Adjust for slippage
+
+        // Subtract protocol fees
+        const fee = amountOut.multipliedBy(protocolFeePercent);
+        const adjustedAmountOut = amountOut.minus(fee);
+
+        // Update the input amount for the next hop
+        amountIn = adjustedAmountOut;
+
+        // Validate intermediate outputs
+        if (amountIn.isLessThanOrEqualTo(0)) {
+            console.error(`Zero or negative output during route calculation: ${fromToken} -> ${toToken}`);
+            return basePriority;
+        }
     }
 
-    return basePriority + estimatedProfit.toNumber();
+    // Subtract gas costs
+    const gasCost = gasPrice.multipliedBy(estimatedGasPerSwap).multipliedBy(route.length - 1);
+    estimatedProfit = amountIn.minus(capital).minus(gasCost);
+
+    return estimatedProfit.isGreaterThan(0) ? basePriority + estimatedProfit.toNumber() : basePriority;
 }
 
+async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
+    try {
+        // Step 1: Fetch stable tokens
+        const stableTokens = await getStableTokenList(CHAIN_ID);
+        if (stableTokens.length === 0) {
+            console.error("No stable tokens found for route generation.");
+            return [];
+        }
 
+        // Extract token addresses from objects
+        const stableTokenAddresses = stableTokens.map(token =>
+            typeof token === "object" ? token.address : token
+        );
+
+        // Step 2: Fetch token prices for all stable tokens upfront
+        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
+        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
+            console.error("Failed to fetch token prices for route generation.");
+            return [];
+        }
+
+        // Step 3: Fetch gas price for cost estimation
+        const gasPrice = await fetchGasPrice();
+        const estimatedGasPerSwap = new BigNumber(200000); // Estimated gas per hop
+
+        // Step 4: Prepare a Set to store unique routes
+        const routes = new Set();
+
+        // Step 5: Include the preferred start token at the beginning of stable tokens
+        const startTokens = [
+            preferredStartToken,
+            ...stableTokenAddresses.filter(t => t !== preferredStartToken),
+        ];
+
+        // Step 6: Generate routes iteratively for better control and scalability
+        for (const startToken of startTokens) {
+            const queue = [{ path: [startToken], hopsRemaining: maxHops }];
+
+            while (queue.length > 0) {
+                const { path, hopsRemaining } = queue.shift();
+                if (hopsRemaining === 0) continue;
+
+                for (const token of stableTokenAddresses) {
+                    if (!path.includes(token)) {
+                        const newPath = [...path, token];
+
+                        // Validate liquidity before considering the route
+                        const liquidity = tokenPrices[token]?.liquidity || 0;
+                        if (liquidity < CAPITAL.toNumber()) {
+                            console.warn(`Skipping token ${token} due to insufficient liquidity.`);
+                            continue;
+                        }
+
+                        // Check potential profit
+                        const profit = await estimateRoutePotential(
+                            newPath,
+                            CAPITAL,
+                            tokenPrices,
+                            gasPrice,
+                            estimatedGasPerSwap
+                        );
+
+                        // Add the route if profitable
+                        if (profit > 0) routes.add(newPath.join(","));
+
+                        // Add the new path to the queue for further exploration
+                        queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
+                    }
+                }
+            }
+        }
+
+        // Step 7: Extract, sort, and return the top N profitable routes
+        const routeList = Array.from(routes).map(route => route.split(","));
+        const profitableRoutes = routeList.map(route => ({
+            route,
+            profit: await estimateRoutePotential(
+                route,
+                CAPITAL,
+                tokenPrices,
+                gasPrice,
+                estimatedGasPerSwap
+            ),
+        }));
+
+        return profitableRoutes
+            .sort((a, b) => b.profit - a.profit)
+            .slice(0, topN)
+            .map(({ route }) => route);
+
+    } catch (error) {
+        console.error("Error in generateRoutes:", error.message);
+        return [];
+    }
+}
 
 function expandStableTokens(unmatchedTokens) {
     // Example logic to include dynamically determined stable tokens
@@ -853,42 +953,70 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
-    const stableTokens = await getStableTokenList(CHAIN_ID);
-    if (stableTokens.length === 0) {
-        console.error("No stable tokens found for route generation.");
-        return [];
-    }
+    try {
+        // Fetch stable tokens
+        const stableTokens = await getStableTokenList(CHAIN_ID);
+        if (stableTokens.length === 0) {
+            console.error("No stable tokens found for route generation.");
+            return [];
+        }
 
-    const tokenPrices = await fetchTokenPrices();
-    if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
-        console.error("Failed to fetch token prices for route generation.");
-        return [];
-    }
+        // Fetch token prices for all stable tokens upfront
+        const stableTokenAddresses = stableTokens.map(token => (typeof token === "object" ? token.address : token));
+        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
+        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
+            console.error("Failed to fetch token prices for route generation.");
+            return [];
+        }
 
-    const routes = new Set();
-    const startTokens = [preferredStartToken, ...stableTokens.filter(t => t !== preferredStartToken)];
+        // Prepare the set for storing unique routes
+        const routes = new Set();
 
-    for (const startToken of startTokens) {
-        const generatePaths = async (path, hopsRemaining) => {
-            if (hopsRemaining === 0) return;
+        // Include the preferred start token at the beginning of stable tokens
+        const startTokens = [preferredStartToken, ...stableTokenAddresses.filter(t => t !== preferredStartToken)];
 
-            for (const token of stableTokens) {
-                const tokenAddress = typeof token === "object" ? token.address : token; // Use address if object
-                if (!path.includes(tokenAddress)) {
-                    const newPath = [...path, tokenAddress];
-                    const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
-                    if (profit > 0) routes.add(newPath.join(","));
-                    await generatePaths(newPath, hopsRemaining - 1);
+        // Generate all potential routes
+        for (const startToken of startTokens) {
+            // Use a queue for iterative path generation instead of recursion
+            const queue = [{ path: [startToken], hopsRemaining: maxHops }];
+
+            while (queue.length > 0) {
+                const { path, hopsRemaining } = queue.shift();
+
+                if (hopsRemaining === 0) continue;
+
+                for (const token of stableTokenAddresses) {
+                    if (!path.includes(token)) {
+                        const newPath = [...path, token];
+                        const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
+
+                        // Add the route if it's profitable
+                        if (profit > 0) routes.add(newPath.join(","));
+
+                        // Add the new path to the queue for further exploration
+                        queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
+                    }
                 }
             }
-        };
+        }
 
-        await generatePaths([startToken], maxHops);
+        // Convert routes from Set to an array, sort by profitability, and return the top N routes
+        const routeList = Array.from(routes).map(route => route.split(","));
+        const profitableRoutes = routeList.map(route => ({
+            route,
+            profit: estimateRoutePotential(route, CAPITAL, tokenPrices),
+        }));
+
+        // Sort routes by profit and return the top N
+        return profitableRoutes
+            .sort((a, b) => b.profit - a.profit)
+            .slice(0, topN)
+            .map(({ route }) => route);
+    } catch (error) {
+        console.error("Error in generateRoutes:", error.message);
+        return [];
     }
-
-    return Array.from(routes).map(route => route.split(",")).slice(0, topN);
 }
-
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
