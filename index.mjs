@@ -45,6 +45,7 @@ const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION1 = 5 * 60 * 1000; // Cache duration: 5 minutes
 // API Endpoints
+const baseUrl = "https://api.1inch.dev/token/v1.2/42161";
 const BASE_URL1 = "https://api.1inch.dev/token/v1.2";
 const BASE_URL = "https://api.1inch.dev/price/v1.1";
 const SWAP_API_URL = "https://api.1inch.dev/swap/v6.0/42161";   // Swap API
@@ -70,14 +71,14 @@ const CACHE_DURATION = 15 * 1000; // 10 seconds
 
 // Hardcoded stable token addresses
 const HARDCODED_STABLE_ADDRESSES = [
-    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
-    "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", // AAVE
-    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", // LINK
-    "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
+    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+    "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
+    "0x912ce59144191c1204e64559fe8253a0e49e6548"
 ];
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
@@ -733,22 +734,30 @@ const STABLE_TOKENS_ADD = {
  * Fetch token data with enhanced error handling and rate-limiting logic.
  */
 async function fetchTokenData(address, headers, baseUrl) {
-  try {
-    const checksummedAddress = getAddress(address); // Normalize address to checksum format
-    const response = await apiQueue.add(() =>
-      axios.get(`${baseUrl}/${checksummedAddress}`, { headers })
-    );
-    return response.data?.tokens?.[checksummedAddress.toLowerCase()] || null;
-  } catch (error) {
-    if (error.response?.status === 404) {
-      console.warn(`Token not found for address: ${address}`);
-    } else if (error.response?.status === 429) {
-      console.warn(`Rate limit exceeded for address: ${address}. Retrying...`);
-    } else {
-      console.error(`Unexpected error for address ${address}:`, error.message);
+    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
+        console.warn("No token addresses provided to fetchTokenDataBatch.");
+        return {};
     }
-    return null; // Return null to allow continued processing
-  }
+
+    try {
+        const response = await apiQueue.add(() =>
+            axios.get(`${baseUrl}/custom`, {
+                headers,
+                params: { addresses: tokenAddresses },
+            })
+        );
+
+        if (response.data) {
+            console.log("Fetched batch token data successfully.");
+            return response.data.tokens || {}; // Assuming tokens are returned in a "tokens" field
+        } else {
+            console.warn("No data received in fetchTokenDataBatch.");
+            return {};
+        }
+    } catch (error) {
+        console.error("Error in fetchTokenDataBatch:", error.message);
+        throw error;
+    }
 }
 
 
@@ -774,23 +783,22 @@ async function getStableTokenList(chainId) {
     }
 
     console.log(`Fetching stable token list for chain ID ${chainId}...`);
-      const url = "https://api.1inch.dev/token/v1.2/42161/custom";
+      const url = `${baseUrl}/${ HARDCODED_STABLE_ADDRESSES.join(",")}`;
     const config = {
         headers: {
   Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
    },
     params: {
- addresses: [
-     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", 
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
-    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
-    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
-    "0x912ce59144191c1204e64559fe8253a0e49e6548"
-    ]
-    },
+    }, // addresses: [
+ //     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", 
+ //    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+ //    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+ //    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 
+ //    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+ //    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
+ //    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
+ //    "0x912ce59144191c1204e64559fe8253a0e49e6548"
+ //    ]
      paramsSerializer: (params) => {
             return qs.stringify(params, { indices: false });
         }
@@ -888,60 +896,79 @@ async function retryRequest(requestFn, retries = 3, delay = 1000) {
 }
 
 
-async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
-    const now = Date.now();
-
-    // Use cached data if valid
-    if (priceCache.data && now - priceCache.timestamp < CACHE_DURATION) {
-        console.log("Using cached token prices.");
-        return priceCache.data;
+async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
+    if (!tokenAddresses || tokenAddresses.length === 0) {
+        console.warn("No token addresses provided to fetchTokenPrices.");
+        return {};
     }
 
-    const url = `${BASE_URL}/${CHAIN_ID}/${stableTokens.join(",")}`;
-    const config = {
-        headers: {
-            Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6", // API Key
-            Accept: "application/json",
-        },
-        params: {
-            currency: "USD", // Fetch prices in USD
-        },
-    };
+    const now = Date.now();
+    const cacheKey = `prices:${tokenAddresses.join(",")}`;
 
-    return apiQueue.add(() =>
-        retryRequest(
-            async () => {
-                console.log("Fetching token prices...");
-                console.log("Request URL:", url);
+    // Use cached data if valid
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < CACHE_DURATION) {
+            console.log("Using cached token prices.");
+            return data;
+        }
+    }
 
-                const response = await axios.get(url, config);
+    try {
+        // Construct API request URL with batched token addresses
+        const url = `${PRICE_API_URL}/${CHAIN_ID}/${tokenAddresses.join(",")}`;
+        console.log("Fetching token prices from URL:", url);
 
-                if (response.status === 200 && response.data) {
-                    console.log("Fetched token prices successfully:", response.data);
-
-                    // Map prices to FALLBACK_TOKENS
-                    const prices = response.data;
-                    FALLBACK_TOKENS.forEach((token) => {
-                        const address = token.address.toLowerCase();
-                        if (prices[address]) {
-                            token.price = new BigNumber(prices[address]);
-                            console.log(`Price mapped for ${token.symbol}: ${token.price}`);
-                        }
+        const response = await apiQueue.add(() =>
+            retryRequest(
+                async () => {
+                    return axios.get(url, {
+                        headers: {
+                            Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                            Accept: "application/json",
+                        },
+                        params: {
+                            currency: "USD", // Fetch prices in USD
+                        },
                     });
+                },
+                3, // Retry up to 3 times
+                1000 // Initial delay of 1 second
+            )
+        );
 
-                    // Update cache
-                    priceCache.data = prices;
-                    priceCache.timestamp = now;
-                    return prices;
-                } else {
-                    console.warn("No token data received from the 1inch API.");
-                    return {};
+        // Process response
+        if (response.status === 200 && response.data) {
+            console.log("Fetched token prices successfully:", response.data);
+
+            // Map prices to token addresses
+            const prices = response.data;
+            FALLBACK_TOKENS.forEach((token) => {
+                const address = token.address.toLowerCase();
+                if (prices[address]) {
+                    token.price = new BigNumber(prices[address]);
+                    console.log(`Price mapped for ${token.symbol}: ${token.price}`);
                 }
-            },
-            3, // Number of retries
-            1000 // Initial delay (1 second)
-        )
-    );
+            });
+
+            // Cache the result
+            cache.set(cacheKey, { data: prices, timestamp: now });
+            return prices;
+        } else {
+            console.warn("Failed to fetch token prices. Response:", response.data);
+            return {};
+        }
+    } catch (error) {
+        console.error("Error in fetchTokenPrices:", error.message);
+
+        // Use cached data if available during an error
+        if (cache.has(cacheKey)) {
+            console.warn("Using stale cached token prices due to error.");
+            return cache.get(cacheKey).data;
+        }
+
+        throw error; // Re-throw error if no cached data is available
+    }
 }
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
@@ -954,14 +981,12 @@ async function fetchTokenPrices(stableTokens = HARDCODED_STABLE_ADDRESSES) {
  */
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
     try {
-        // Fetch stable tokens
         const stableTokens = await getStableTokenList(CHAIN_ID);
         if (stableTokens.length === 0) {
             console.error("No stable tokens found for route generation.");
             return [];
         }
 
-        // Fetch token prices for all stable tokens upfront
         const stableTokenAddresses = stableTokens.map(token => (typeof token === "object" ? token.address : token));
         const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
@@ -969,15 +994,10 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
             return [];
         }
 
-        // Prepare the set for storing unique routes
         const routes = new Set();
-
-        // Include the preferred start token at the beginning of stable tokens
         const startTokens = [preferredStartToken, ...stableTokenAddresses.filter(t => t !== preferredStartToken)];
 
-        // Generate all potential routes
         for (const startToken of startTokens) {
-            // Use a queue for iterative path generation instead of recursion
             const queue = [{ path: [startToken], hopsRemaining: maxHops }];
 
             while (queue.length > 0) {
@@ -988,26 +1008,25 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
                 for (const token of stableTokenAddresses) {
                     if (!path.includes(token)) {
                         const newPath = [...path, token];
-                        const profit = estimateRoutePotential(newPath, CAPITAL, tokenPrices);
+                        const profit = await estimateRoutePotential(newPath, CAPITAL, tokenPrices);
 
-                        // Add the route if it's profitable
                         if (profit > 0) routes.add(newPath.join(","));
-
-                        // Add the new path to the queue for further exploration
                         queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
                     }
                 }
             }
         }
 
-        // Convert routes from Set to an array, sort by profitability, and return the top N routes
+        // Calculate profits for all routes
         const routeList = Array.from(routes).map(route => route.split(","));
-        const profitableRoutes = routeList.map(route => ({
-            route,
-            profit: estimateRoutePotential(route, CAPITAL, tokenPrices),
-        }));
+        const profitableRoutes = await Promise.all(
+            routeList.map(async route => ({
+                route,
+                profit: await estimateRoutePotential(route, CAPITAL, tokenPrices),
+            }))
+        );
 
-        // Sort routes by profit and return the top N
+        // Sort by profit and return top N
         return profitableRoutes
             .sort((a, b) => b.profit - a.profit)
             .slice(0, topN)
@@ -1024,8 +1043,8 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
  * @param {number} chainId - Blockchain network chain ID (default: 42161 for Arbitrum).
  * @returns {Promise<Object>} - An object mapping token addresses to their prices, symbols, decimals, and other critical data.
  */
-async function fetchPriceWithRetry(address, chainId = 42161, maxRetries = 5) {
-    const url = `${PRICE_API_URL}/${chainId}/${address}`;
+async function fetchPriceWithRetryBatch(addresses, chainId = 42161, maxRetries = 3) {
+    const url = `${PRICE_API_URL}/${chainId}/${addresses.join(",")}`;
     let retries = 0;
 
     while (retries < maxRetries) {
@@ -1038,20 +1057,17 @@ async function fetchPriceWithRetry(address, chainId = 42161, maxRetries = 5) {
             if (error.response?.status === 429) {
                 retries++;
                 const retryDelay = Math.pow(2, retries) * 1000; // Exponential backoff
-                console.warn(`Rate limit hit for ${address}. Retrying in ${retryDelay / 1000} seconds...`);
+                console.warn(`Rate limit hit. Retrying in ${retryDelay / 1000} seconds...`);
                 await new Promise((resolve) => setTimeout(resolve, retryDelay));
-            } else if (error.response?.status === 400) {
-                console.error(`Bad request for ${address}. Skipping this token.`);
-                return null; // Skip invalid tokens
             } else {
-                console.error(`Unexpected error for ${address}: ${error.message}`);
-                return null;
+                console.error(`Unexpected error: ${error.message}`);
+                throw error;
             }
         }
     }
-    console.error(`Failed to fetch price for ${address} after ${maxRetries} retries.`);
-    return null;
+    throw new Error(`Failed to fetch prices after ${maxRetries} retries.`);
 }
+
 
 
 async function validateToken(address, chainId = 42161) {
@@ -1158,34 +1174,66 @@ async function safeExecute(fn, ...args) {
 // Fetch current gas price in Gwei from Polygon Gas Station
 async function fetchGasPrice() {
     const cacheKey = `gasPrice:${CHAIN_ID}`;
-    return cachedGet(cacheKey, async () => {
+    const now = Date.now();
+
+    // Check cache validity
+    if (cache.has(cacheKey)) {
+        const { data, timestamp } = cache.get(cacheKey);
+        if (now - timestamp < CACHE_DURATION) {
+            console.log("Using cached gas price.");
+            return data;
+        }
+    }
+
+    return apiQueue.add(async () => {
         try {
-            // Make the API call to fetch gas prices
-            const response = await axios.get("https://api.blocknative.com/gasprices/blockprices", {
-                headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
-                params: { chainId: 42161},
-            });
+            const response = await retryRequest(
+                () =>
+                    axios.get("https://api.blocknative.com/gasprices/blockprices", {
+                        headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
+                        params: { chainId: 42161 },
+                    }),
+                3, // Retry up to 3 times
+                1000 // Start with a 1-second delay
+            );
 
-            // Log the entire response to determine the structure
-            console.log("Gas Price API Response:", JSON.stringify(response.data, null, 2));
-
-            // Attempt to extract gas price from other possible locations
-            const gasPrice = response.data.blockPrices?.[0]?.baseFeePerGas; // Example alternative property
+            const gasPrice = response.data.blockPrices?.[0]?.baseFeePerGas;
             if (gasPrice) {
-                return new BigNumber(gasPrice).shiftedBy(9); // Convert Gwei to Wei
+                const weiGasPrice = new BigNumber(gasPrice).shiftedBy(9); // Convert Gwei to Wei
+                cache.set(cacheKey, { data: weiGasPrice, timestamp: now });
+                return weiGasPrice;
             }
 
-            // If gas price cannot be determined, use a fallback value
             console.warn("Gas price not found in API response. Using fallback value: 50 Gwei.");
-            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei in Wei
+            return new BigNumber(50).shiftedBy(9);
         } catch (error) {
-            console.error("Error fetching gas price:", error.message);
-            console.warn("Using fallback gas price: 50 Gwei.");
-            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei in Wei
+            console.error("Error fetching gas price. Using fallback value:", error.message);
+            return new BigNumber(50).shiftedBy(9);
         }
-    }, "gasPrice");
+    });
 }
 
+async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
+    const results = await Promise.all(
+        tokenAddresses.map(async (address) => {
+            try {
+                const checksummedAddress = getAddress(address); // Normalize address
+                const response = await apiQueue.add(() =>
+                    axios.get(`${baseUrl}/${checksummedAddress}`, { headers })
+                );
+                return { address: checksummedAddress, data: response.data?.tokens?.[checksummedAddress.toLowerCase()] };
+            } catch (error) {
+                console.warn(`Failed to fetch data for ${address}:`, error.message);
+                return null;
+            }
+        })
+    );
+
+    return results.filter(Boolean).reduce((acc, { address, data }) => {
+        acc[address] = data;
+        return acc;
+    }, {});
+}
 
 
 // Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
