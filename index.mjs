@@ -692,17 +692,6 @@ async function getStableTokenList(CHAIN_ID) {
         headers: {
             Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
         },
-        params: {
-            const axios = require("axios");
-
-async function httpCall() {
-
-  const url = "https://api.1inch.dev/token/v1.2/42161/custom";
-
-  const config = {
-      headers: {
-  "Authorization": "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
-},
       params: {
   "addresses": [
     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
