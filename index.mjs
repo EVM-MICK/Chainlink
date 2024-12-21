@@ -78,8 +78,9 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
     "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
-    "0x912ce59144191c1204e64559fe8253a0e49e6548"
+    "0x912ce59144191c1204e64559fe8253a0e49e6548",
 ];
+
 const FALLBACK_TOKENS = [
   { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT"},
   { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", symbol: "USDC"},
@@ -88,7 +89,7 @@ const FALLBACK_TOKENS = [
   { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC"},
   { address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", symbol: "AAVE"},
   { address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", symbol: "LINK"},
-  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"}
+  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"},
 ];
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
@@ -675,7 +676,7 @@ async function getStableTokenList(CHAIN_ID) {
     const cacheKey = `stableTokens:${CHAIN_ID}`;
     const now = Date.now();
 
-    // Check if the data is cached and still valid
+    // Check if cached data is available and valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < CACHE_DURATION1) {
@@ -685,38 +686,29 @@ async function getStableTokenList(CHAIN_ID) {
     }
 
     console.log(`Fetching stable token list for chain ID ${CHAIN_ID}...`);
-      const url = `${baseUrl}/${HARDCODED_STABLE_ADDRESSES.join(",")}`;
+    const url = `${BASE_URL1}/${CHAIN_ID}/custom`;
+
     const config = {
         headers: {
-  Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
-   },
-    params: {
-    }, // addresses: [
- //     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", 
- //    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
- //    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
- //    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 
- //    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
- //    "0xba5ddf906d8bbf63d4095028c164e8243b77c77d",
- //    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4", 
- //    "0x912ce59144191c1204e64559fe8253a0e49e6548"
- //    ]
-     paramsSerializer: (params) => {
-            return qs.stringify(params, { indices: false });
-        }
+            Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
+        },
+        params: {
+            addresses: HARDCODED_STABLE_ADDRESSES.join(","),
+        },
+        paramsSerializer: (params) => qs.stringify(params, { indices: false }),
     };
 
     try {
         // Rate-limit the request
         await rateLimit();
 
-        // Send HTTP GET request to fetch token details
+        // Fetch token details from the API
         const response = await axios.get(url, config);
 
         if (response.data && response.data.tokens) {
-            // Process and map the response into a clean format
+            // Process and normalize the response
             const stableTokens = Object.entries(response.data.tokens).map(([address, token]) => ({
-                address: getAddress(address), // Normalize address to checksum format
+                address: getAddress(address), // Normalize to checksum format
                 symbol: token.symbol || "UNKNOWN",
                 decimals: token.decimals || 18,
                 name: token.name || "UNKNOWN",
@@ -751,8 +743,6 @@ async function getStableTokenList(CHAIN_ID) {
         return fallbackTokens;
     }
 }
-
-
 /**
  * Fetch token prices using POST or GET from the 1inch Spot Price API.
  *
@@ -873,39 +863,47 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 async function fetchLiquidityAndPrices(tokenAddresses) {
+    // Validate input
     if (!tokenAddresses || tokenAddresses.length === 0) {
         console.warn("No token addresses provided for liquidity and price fetching.");
         return { prices: {}, liquidity: {} };
     }
 
     try {
+        // Fetch both token prices and liquidity sources concurrently
         const [priceResponse, liquidityResponse] = await Promise.all([
-            fetchTokenPrices(tokenAddresses),
-            fetchLiquiditySources(),
+            fetchTokenPrices(), // Function to fetch token prices
+            fetchLiquiditySources(),          // Function to fetch liquidity data
         ]);
 
+        // Extract price data or default to an empty object
         const prices = priceResponse || {};
+
+        // Extract liquidity sources or fallback
         const liquiditySources = liquidityResponse?.protocols || [];
 
-        // Map liquidity to hardcoded token addresses
-        const liquidityData = HARDCODED_STABLE_ADDRESSES.reduce((acc, token) => {
-            const protocolData = liquiditySources.find(source =>
+        // Map liquidity data to the provided token addresses
+        const liquidityData = tokenAddresses.reduce((acc, token) => {
+            const matchingSource = liquiditySources.find(source =>
                 source.token?.toLowerCase() === token.toLowerCase()
             );
-            acc[token] = protocolData?.liquidity || 0; // Default to 0 if no data
+            acc[token] = matchingSource?.liquidity || 0; // Default to 0 if not found
             return acc;
         }, {});
 
+        // Log data for debugging purposes
         console.log("Fetched prices:", prices);
         console.log("Mapped liquidity data:", liquidityData);
 
+        // Return formatted data
         return { prices, liquidity: liquidityData };
     } catch (error) {
         console.error("Error in fetchLiquidityAndPrices:", error.message);
-        return { prices: {}, liquidity: {} }; // Fallback to empty objects
+
+        // Return empty objects on failure to maintain consistent return structure
+        return { prices: {}, liquidity: {} };
     }
 }
-
 
 async function fetchLiquiditySources() {
     const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/liquidity-sources`;
@@ -975,7 +973,7 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
         ];
 
         // Define minimum liquidity threshold
-        const minimumLiquidity = CAPITAL.plus(CAPITAL.multipliedBy(0.1)); // $100,000 + 10% buffer
+        const minimumLiquidity = new BigNumber(CAPITAL).multipliedBy(1.1); // Example: $100,000 + 10% buffer
 
         // Step 6: Generate routes iteratively for better control and scalability
         for (const startToken of startTokens) {
@@ -987,14 +985,14 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
 
                 for (const token of stableTokenAddresses) {
                     if (!path.includes(token)) {
-                        const newPath = [...path, token];
-
                         // Validate liquidity before considering the route
                         const liquidity = new BigNumber(liquidityData[token] || 0);
                         if (liquidity.isLessThan(minimumLiquidity)) {
-                            console.warn(`Skipping token ${token} due to insufficient liquidity.`);
+                            console.warn(`Skipping token ${token} due to insufficient liquidity: ${liquidity.toString()}`);
                             continue;
                         }
+
+                        const newPath = [...path, token];
 
                         // Check potential profit
                         const profit = await estimateRoutePotential(
@@ -1043,9 +1041,6 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
         return [];
     }
 }
-
- 
-
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
