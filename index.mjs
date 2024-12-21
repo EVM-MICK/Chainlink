@@ -686,42 +686,18 @@ async function getStableTokenList(CHAIN_ID) {
     }
 
     console.log(`Fetching stable token list for chain ID ${CHAIN_ID}...`);
-const url88 = `${BASE_URL1}/${chainId}/custom`;
-const config = {
-headers: HEADERS,
-params: {
-  addresses: [
-    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
-    "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
-    "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-    "0x912ce59144191c1204e64559fe8253a0e49e6548"
-  ]
-  }
+const urlll = `${BASE_URL1}/${chainId}/custom`;
+const configgg = {
+        headers: HEADERS,
+        params: {
+            addresses: HARDCODED_STABLE_ADDRESSES.join(","),
+        },
+        paramsSerializer: (params) => qs.stringify(params, { indices: false }),
     };
 
     try {
         // Fetch token details from the API
-        const response = await axios.get(url88, { headers: {
-                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                        Accept: "application/json",
-                        },
-                        params: {
-                                 addresses: [
-                                             "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-                                              "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-                                              "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
-                                              "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-                                               "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
-                                               "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
-                                               "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-                                               "0x912ce59144191c1204e64559fe8253a0e49e6548"
-                                              ]
-                                 },
-                               });
+        const response = await axios.get(urlll, configgg);
                await rateLimit();
         if (response.data && response.data.tokens) {
             // Process and normalize the response
@@ -888,36 +864,38 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
 // Fetch a quote using the 1inch Quote API
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
 const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
-const config = {
-headers: HEADERS,
-params: {
-  src: `${srcToken}`,
-  dst: `${dstToken}`,
-  amount: `${amount}`,
-  complexityLevel: "2",
-  includeTokensInfo: "true",
-  includeProtocols: "true",
-  includeGas: "true"
- }
-    };
+const includeTokensInfo = true;
+ const includeProtocols = true;
+  const includeGas = true;
+ try {
+        srcToken = web3.utils.toChecksumAddress(srcToken);
+        dstToken = web3.utils.toChecksumAddress(dstToken);
+
+        if (!new BigNumber(amount).isInteger() || new BigNumber(amount).lte(0)) {
+            throw new Error(`Invalid amount: ${amount}`);
+        }
+    } catch (validationError) {
+        console.error("Validation error:", validationError.message);
+        throw validationError;
+    }
+
+ const config = {
+        headers: HEADERS,
+        params: {
+            src: srcToken,
+            dst: dstToken,
+            amount: amount.toString(),
+            complexityLevel,
+           includeTokensInfo,
+            includeProtocols,
+           includeGas,
+        },
+    }; 
 
     for (let attempts = 0; attempts < 3; attempts++) {
         try {
             console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
-            const response = await axios.get(url99, { headers: {
-                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                        Accept: "application/json",
-                    }, 
-                    params: {
-                            src: `${srcToken}`,
-                            dst: `${dstToken}`,
-                            amount: `${amount}`,
-                            complexityLevel: "2",
-                            includeTokensInfo: "true",
-                            includeProtocols: "true",
-                            includeGas: "true"
-                            }, 
-                          });
+            const response = await axios.get(url99, config);
             if (response.status === 200) {
                 console.log(`Received quote: ${response.data}`);
                 return response.data;
