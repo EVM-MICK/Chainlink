@@ -703,8 +703,7 @@ async function getStableTokenList(CHAIN_ID) {
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
     "0x912ce59144191c1204e64559fe8253a0e49e6548",
   ]
-}
-        paramsSerializer: (params) => qs.stringify(params, { indices: false })
+  }
     };
 
     try {
