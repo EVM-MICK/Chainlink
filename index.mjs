@@ -684,16 +684,18 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
 
         // Step 7: Extract, sort, and return the top N profitable routes
         const routeList = Array.from(routes).map(route => route.split(","));
-        const profitableRoutes = routeList.map(route => ({
-            route,
-            profit: await estimateRoutePotential(
+        const profitableRoutes = await Promise.all(
+            routeList.map(async route => ({
                 route,
-                CAPITAL,
-                tokenPrices,
-                gasPrice,
-                estimatedGasPerSwap
-            ),
-        }));
+                profit: await estimateRoutePotential(
+                    route,
+                    CAPITAL,
+                    tokenPrices,
+                    gasPrice,
+                    estimatedGasPerSwap
+                ),
+            }))
+        );
 
         return profitableRoutes
             .sort((a, b) => b.profit - a.profit)
@@ -705,6 +707,7 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
         return [];
     }
 }
+ 
 
 function expandStableTokens(unmatchedTokens) {
     // Example logic to include dynamically determined stable tokens
