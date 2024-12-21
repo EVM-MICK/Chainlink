@@ -675,6 +675,7 @@ async function fetchTokenData(address, headers, baseUrl) {
 async function getStableTokenList(CHAIN_ID) {
     const cacheKey = `stableTokens:${CHAIN_ID}`;
     const now = Date.now();
+     const stableTokenz = HARDCODED_STABLE_ADDRESSES.map(token => token.address);
 
     // Check if cached data is available and valid
     if (cache.has(cacheKey)) {
@@ -693,9 +694,9 @@ async function getStableTokenList(CHAIN_ID) {
             Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
         },
         params: {
-            addresses: HARDCODED_STABLE_ADDRESSES.join(","),
+            addresses: [stableTokenz.join(",")]
         },
-        paramsSerializer: (params) => qs.stringify(params, { indices: false }),
+        paramsSerializer: (params) => qs.stringify(params, { indices: false })
     };
 
     try {
@@ -862,48 +863,7 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-// async function fetchLiquidityAndPrices(tokenAddresses) {
-//     // Validate input
-//     if (!tokenAddresses || tokenAddresses.length === 0) {
-//         console.warn("No token addresses provided for liquidity and price fetching.");
-//         return { prices: {}, liquidity: {} };
-//     }
 
-//     try {
-//         // Fetch both token prices and liquidity sources concurrently
-//         const [priceResponse, liquidityResponse] = await Promise.all([
-//             fetchTokenPrices(), // Function to fetch token prices
-//             fetchQuote(),          // Function to fetch liquidity data
-//         ]);
-
-//         // Extract price data or default to an empty object
-//         const prices = priceResponse || {};
-
-//         // Extract liquidity sources or fallback
-//         const liquiditySources = liquidityResponse?.protocols || [];
-
-//         // Map liquidity data to the provided token addresses
-//         const liquidityData = tokenAddresses.reduce((acc, token) => {
-//             const matchingSource = liquiditySources.find(source =>
-//                 source.token?.toLowerCase() === token.toLowerCase()
-//             );
-//             acc[token] = matchingSource?.liquidity || 0; // Default to 0 if not found
-//             return acc;
-//         }, {});
-
-//         // Log data for debugging purposes
-//         console.log("Fetched prices:", prices);
-//         console.log("Mapped liquidity data:", liquidityData);
-
-//         // Return formatted data
-//         return { prices, liquidity: liquidityData };
-//     } catch (error) {
-//         console.error("Error in fetchLiquidityAndPrices:", error.message);
-
-//         // Return empty objects on failure to maintain consistent return structure
-//         return { prices: {}, liquidity: {} };
-//     }
-// }
 
 // Fetch a single quote with retries and complexity level
 // Fetch a quote using the 1inch Quote API
