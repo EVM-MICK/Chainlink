@@ -40,7 +40,7 @@ const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.005);  // Equivalent to 0.5% pro
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum profit threshold $500 (6 decimals)
 // Optional: Setting a higher threshold for "critical" profits
 const CRITICAL_PROFIT_THRESHOLD = new BigNumber(1000).shiftedBy(6);  // Critical profit threshold $100 (6 decimals)
-//const chainId = 42161;
+const chainId = 42161;
 // Base URL for 1inch APIs
 const ONEINCH_BASE_URL = "https://api.1inch.dev";
 const CACHE_DURATION1 = 5 * 60 * 1000; // Cache duration: 5 minutes
@@ -673,7 +673,7 @@ async function fetchTokenData(address, headers, baseUrl) {
 // Main function: Fetch stable token list
 
 async function getStableTokenList(CHAIN_ID) {
-    const cacheKey = `stableTokens:${CHAIN_ID}`;
+    const cacheKey = `stableTokens:${HARDCODED_STABLE_ADDRESSES.join(",")}}`;
     const now = Date.now();
 
     // Check if cached data is available and valid
@@ -686,13 +686,10 @@ async function getStableTokenList(CHAIN_ID) {
     }
 
     console.log(`Fetching stable token list for chain ID ${CHAIN_ID}...`);
-    const url = `${BASE_URL1}/${CHAIN_ID}/custom`;
-
-    const config = {
-        headers: {
-            Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
-        },
-      params: {
+const url88 = `${BASE_URL1}/${chainId}/custom`;
+const config = {
+headers: HEADERS,
+params: {
   addresses: [
     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
@@ -701,18 +698,31 @@ async function getStableTokenList(CHAIN_ID) {
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
     "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
-    "0x912ce59144191c1204e64559fe8253a0e49e6548",
+    "0x912ce59144191c1204e64559fe8253a0e49e6548"
   ]
   }
     };
 
     try {
-        // Rate-limit the request
-        await rateLimit();
-
         // Fetch token details from the API
-        const response = await axios.get(url, config);
-
+        const response = await axios.get(url88, { headers: {
+                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                        Accept: "application/json",
+                        },
+                        params: {
+                                 addresses: [
+                                             "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+                                              "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+                                              "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+                                              "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+                                               "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+                                               "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196",
+                                               "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
+                                               "0x912ce59144191c1204e64559fe8253a0e49e6548"
+                                              ]
+                                 },
+                               });
+               await rateLimit();
         if (response.data && response.data.tokens) {
             // Process and normalize the response
             const stableTokens = Object.entries(response.data.tokens).map(([address, token]) => ({
@@ -726,6 +736,7 @@ async function getStableTokenList(CHAIN_ID) {
             cache.set(cacheKey, { data: stableTokens, timestamp: now });
             console.log("Fetched stable token list:", stableTokens);
             return stableTokens;
+           // Rate-limit the request
         } else {
             throw new Error("Invalid or empty response from 1inch API.");
         }
@@ -751,6 +762,7 @@ async function getStableTokenList(CHAIN_ID) {
         return fallbackTokens;
     }
 }
+
 /**
  * Fetch token prices using POST or GET from the 1inch Spot Price API.
  *
@@ -875,27 +887,37 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
 // Fetch a single quote with retries and complexity level
 // Fetch a quote using the 1inch Quote API
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
-    const url = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
-
-    const config = {
-        headers: {
-  Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
-},
+const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
+const config = {
+headers: HEADERS,
 params: {
-  src: srcToken,
-  dst:  dstToken,
-  amount: amount,
-  complexityLevel: 2,
-  includeTokensInfo: true,
-  includeProtocols: true,
-  includeGas: true
+  src: `${srcToken}`,
+  dst: `${dstToken}`,
+  amount: `${amount}`,
+  complexityLevel: "2",
+  includeTokensInfo: "true",
+  includeProtocols: "true",
+  includeGas: "true"
  }
     };
 
     for (let attempts = 0; attempts < 3; attempts++) {
         try {
             console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
-            const response = await axios.get(url, config);
+            const response = await axios.get(url99, { headers: {
+                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                        Accept: "application/json",
+                    }, 
+                    params: {
+                            src: `${srcToken}`,
+                            dst: `${dstToken}`,
+                            amount: `${amount}`,
+                            complexityLevel: "2",
+                            includeTokensInfo: "true",
+                            includeProtocols: "true",
+                            includeGas: "true"
+                            }, 
+                          });
             if (response.status === 200) {
                 console.log(`Received quote: ${response.data}`);
                 return response.data;
