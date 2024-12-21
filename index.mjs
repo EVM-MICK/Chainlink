@@ -675,7 +675,7 @@ async function fetchTokenData(address, headers, baseUrl) {
 async function getStableTokenList(CHAIN_ID) {
     const cacheKey = `stableTokens:${CHAIN_ID}`;
     const now = Date.now();
-     const stableTokenz = HARDCODED_STABLE_ADDRESSES.map(token => token.address);
+     const stableTokenz = .map(token => token.address);
 
     // Check if cached data is available and valid
     if (cache.has(cacheKey)) {
@@ -694,7 +694,7 @@ async function getStableTokenList(CHAIN_ID) {
             Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
         },
         params: {
-            addresses: [stableTokenz.join(",")]
+            addresses: HARDCODED_STABLE_ADDRESSES.join(",")
         },
         paramsSerializer: (params) => qs.stringify(params, { indices: false })
     };
@@ -872,7 +872,7 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
 
     const config = {
         headers: { Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6" },
-        params: { src: srcToken, dst: dstToken, amount, complexityLevel, slippage },
+        params: { srcToken, dstToken, amount, complexityLevel, slippage }
     };
 
     for (let attempts = 0; attempts < 3; attempts++) {
