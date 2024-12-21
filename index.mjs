@@ -675,7 +675,6 @@ async function fetchTokenData(address, headers, baseUrl) {
 async function getStableTokenList(CHAIN_ID) {
     const cacheKey = `stableTokens:${CHAIN_ID}`;
     const now = Date.now();
-     const stableTokenz = .map(token => token.address);
 
     // Check if cached data is available and valid
     if (cache.has(cacheKey)) {
@@ -933,7 +932,7 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
         const stableTokenAddresses = stableTokens.map(token => token.address);
 
         // Step 2: Fetch token prices
-        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
+        const tokenPrices = await fetchTokenPrices();
 
         // Step 3: Infer token liquidity using progressive trade analysis
         const liquidityMap = {};
