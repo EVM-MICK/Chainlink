@@ -911,7 +911,7 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
     const url = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
 
     const config = {
-        headers: { Authorization: "Bearer YOUR_API_KEY" },
+        headers: { Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6" },
         params: { src: srcToken, dst: dstToken, amount, complexityLevel, slippage },
     };
 
