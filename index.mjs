@@ -545,38 +545,32 @@ class PriorityQueue {
 
 // Utility: Estimate route potential (placeholder logic)
 
-async function estimateRoutePotential(route, capital, cachedPriceData, gasPrice, estimatedGasPerSwap) {
+async function estimateRoutePotential(route, capital, priceData, gasPrice, estimatedGasPerSwap) {
     try {
-        const protocolFeePercent = 0.003; // Example protocol fee (0.3%)
-        const basePriority = ["USDC", "USDT"].includes(route[0]) ? 100 : 50; // Higher priority for stable start tokens
-        let estimatedProfit = new BigNumber(0);
+        const protocolFeePercent = 0.003; // 0.3% fee
         let amountIn = capital; // Start with the full capital for trading
 
         for (let i = 0; i < route.length - 1; i++) {
-            let fromToken = route[i];
-            let toToken = route[i + 1];
-
-            // Normalize addresses
-            fromToken = typeof fromToken === "object" ? fromToken.address : fromToken;
-            toToken = typeof toToken === "object" ? toToken.address : toToken;
-
-            // Validate token addresses
-            if (typeof fromToken !== "string" || typeof toToken !== "string") {
-                console.error(`Invalid token addresses in route: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}`);
-                return basePriority;
-            }
+            const fromToken = route[i];
+            const toToken = route[i + 1];
 
             // Retrieve token prices
-            const fromPrice = cachedPriceData[fromToken]?.price;
-            const toPrice = cachedPriceData[toToken]?.price;
+            const fromPrice = priceData[fromToken]?.price;
+            const toPrice = priceData[toToken]?.price;
 
             if (!fromPrice || !toPrice) {
                 console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}. Skipping route.`);
-                return basePriority;
+                return -1; // Invalid route
             }
 
-            // Calculate slippage
-            const liquidity = cachedPriceData[fromToken]?.liquidity || 0;
+            // Validate liquidity for the fromToken
+            const liquidity = priceData[fromToken]?.liquidity || 0;
+            if (new BigNumber(liquidity).isLessThan(amountIn)) {
+                console.warn(`Insufficient liquidity for token ${fromToken}. Skipping route.`);
+                return -1; // Invalid route due to low liquidity
+            }
+
+            // Calculate slippage based on liquidity
             const slippage = liquidity < amountIn.toNumber() ? 0.01 : 0.005; // Higher slippage for low liquidity
 
             // Calculate next hop output
@@ -587,29 +581,27 @@ async function estimateRoutePotential(route, capital, cachedPriceData, gasPrice,
 
             // Subtract protocol fees
             const fee = amountOut.multipliedBy(protocolFeePercent);
-            const adjustedAmountOut = amountOut.minus(fee);
+            amountIn = amountOut.minus(fee); // Update amount for the next hop
 
-            // Update the input amount for the next hop
-            amountIn = adjustedAmountOut;
-
-            // Validate intermediate outputs
+            // Validate intermediate output
             if (amountIn.isLessThanOrEqualTo(0)) {
                 console.error(`Zero or negative output during route calculation: ${fromToken} -> ${toToken}`);
-                return basePriority;
+                return -1; // Invalid route
             }
         }
 
         // Subtract gas costs
         const gasCost = gasPrice.multipliedBy(estimatedGasPerSwap).multipliedBy(route.length - 1);
-        estimatedProfit = amountIn.minus(capital).minus(gasCost);
+        const profit = amountIn.minus(capital).minus(gasCost);
 
-        return estimatedProfit.isGreaterThan(0) ? basePriority + estimatedProfit.toNumber() : basePriority;
+        // Return profit if positive, otherwise -1 for invalid/unprofitable routes
+        return profit.isGreaterThan(0) ? profit.toNumber() : -1;
+
     } catch (error) {
         console.error("Error in estimateRoutePotential:", error.message);
-        return 0; // Return a base fallback if an error occurs
+        return -1; // Return a base fallback for errors
     }
 }
-
 
 function expandStableTokens(unmatchedTokens) {
     // Example logic to include dynamically determined stable tokens
@@ -889,6 +881,61 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
+async function fetchLiquidityAndPrices(tokenAddresses) {
+    if (!tokenAddresses || tokenAddresses.length === 0) {
+        console.warn("No token addresses provided for liquidity and price fetching.");
+        return { prices: {}, liquidity: {} };
+    }
+
+    try {
+        const now = Date.now();
+
+        // Fetch prices and liquidity sources in parallel
+        const [priceResponse, liquidityResponse] = await Promise.all([
+            fetchTokenPrices(tokenAddresses), // Fetch token prices
+            fetchLiquiditySources() // Fetch liquidity sources
+        ]);
+
+        const prices = priceResponse || {};
+        const liquiditySources = liquidityResponse?.protocols || [];
+
+        // Map liquidity to hardcoded token addresses
+        const liquidityData = HARDCODED_STABLE_ADDRESSES.reduce((acc, token) => {
+            const protocolData = liquiditySources.find(source =>
+                source.token?.toLowerCase() === token.toLowerCase()
+            );
+            acc[token] = protocolData?.liquidity || 0; // Default to 0 if no data
+            return acc;
+        }, {});
+
+        console.log("Fetched prices:", prices);
+        console.log("Mapped liquidity data:", liquidityData);
+
+        return { prices, liquidity: liquidityData };
+    } catch (error) {
+        console.error("Error in fetchLiquidityAndPrices:", error.message);
+        return { prices: {}, liquidity: {} }; // Fallback to empty objects
+    }
+}
+
+async function fetchLiquiditySources() {
+    const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/liquidity-sources`;
+
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                Accept: "application/json"
+            }
+        });
+
+        console.log("Fetched liquidity sources:", response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching liquidity sources:", error.message);
+        throw error;
+    }
+}
 
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
     try {
@@ -904,8 +951,8 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
             typeof token === "object" ? token.address : token
         );
 
-        // Step 2: Fetch token prices for all stable tokens upfront
-        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
+        // Step 2: Fetch token prices and liquidity for all stable tokens
+        const { prices: tokenPrices, liquidity: liquidityData } = await fetchLiquidityAndPrices(stableTokenAddresses);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices for route generation.");
             return [];
@@ -924,6 +971,9 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
             ...stableTokenAddresses.filter(t => t !== preferredStartToken),
         ];
 
+        // Define minimum liquidity threshold
+        const minimumLiquidity = CAPITAL.plus(CAPITAL.multipliedBy(0.1)); // $100,000 + 10% buffer
+
         // Step 6: Generate routes iteratively for better control and scalability
         for (const startToken of startTokens) {
             const queue = [{ path: [startToken], hopsRemaining: maxHops }];
@@ -937,8 +987,8 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
                         const newPath = [...path, token];
 
                         // Validate liquidity before considering the route
-                        const liquidity = tokenPrices[token]?.liquidity || 0;
-                        if (liquidity < CAPITAL.toNumber()) {
+                        const liquidity = new BigNumber(liquidityData[token] || 0);
+                        if (liquidity.isLessThan(minimumLiquidity)) {
                             console.warn(`Skipping token ${token} due to insufficient liquidity.`);
                             continue;
                         }
@@ -953,7 +1003,10 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
                         );
 
                         // Add the route if profitable
-                        if (profit > 0) routes.add(newPath.join(","));
+                        if (profit > 0) {
+                            console.log(`Profitable route found: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
+                            routes.add(newPath.join(","));
+                        }
 
                         // Add the new path to the queue for further exploration
                         queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
@@ -987,6 +1040,7 @@ async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC
         return [];
     }
 }
+
  
 
 
