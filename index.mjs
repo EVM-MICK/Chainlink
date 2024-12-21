@@ -493,9 +493,9 @@ async function findProfitableRoutes() {
 
         // Step 3: Generate routes
         const maxHops = 3;
-        const preferredStartToken = "USDC";
+        const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
         const topN = 5;
-        const routes = await generateRoutes(CHAIN_ID, maxHops, preferredStartToken, topN);
+        const routes = await generateRoutes(CHAIN_ID, startToken, CAPITAL);
 
         if (routes.length === 0) {
             console.error("No profitable routes generated.");
