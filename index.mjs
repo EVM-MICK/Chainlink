@@ -671,8 +671,8 @@ async function fetchTokenData(address, headers, baseUrl) {
  */
 // Main function: Fetch stable token list
 
-async function getStableTokenList(chainId) {
-    const cacheKey = `stableTokens:${chainId}`;
+async function getStableTokenList(CHAIN_ID) {
+    const cacheKey = `stableTokens:${CHAIN_ID}`;
     const now = Date.now();
 
     // Check if the data is cached and still valid
@@ -684,8 +684,8 @@ async function getStableTokenList(chainId) {
         }
     }
 
-    console.log(`Fetching stable token list for chain ID ${chainId}...`);
-      const url = `${baseUrl}/${ HARDCODED_STABLE_ADDRESSES.join(",")}`;
+    console.log(`Fetching stable token list for chain ID ${CHAIN_ID}...`);
+      const url = `${baseUrl}/${HARDCODED_STABLE_ADDRESSES.join(",")}`;
     const config = {
         headers: {
   Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
@@ -804,10 +804,11 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
         return {};
     }
 
+    const batchSize = 4; // Number of tokens per batch to avoid rate limits
     const now = Date.now();
     const cacheKey = `prices:${tokenAddresses.join(",")}`;
 
-    // Use cached data if valid
+    // Check if cached data is still valid
     if (cache.has(cacheKey)) {
         const { data, timestamp } = cache.get(cacheKey);
         if (now - timestamp < CACHE_DURATION) {
@@ -816,61 +817,51 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
         }
     }
 
-    try {
-        // Construct API request URL with batched token addresses
-        const url = `${PRICE_API_URL}/${CHAIN_ID}/${tokenAddresses.join(",")}`;
-        console.log("Fetching token prices from URL:", url);
-
-        const response = await apiQueue.add(() =>
-            retryRequest(
-                async () => {
-                    return axios.get(url, {
-                        headers: {
-                            Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                            Accept: "application/json",
-                        },
-                        params: {
-                            currency: "USD", // Fetch prices in USD
-                        },
-                    });
-                },
-                3, // Retry up to 3 times
-                1000 // Initial delay of 1 second
-            )
-        );
-
-        // Process response
-        if (response.status === 200 && response.data) {
-            console.log("Fetched token prices successfully:", response.data);
-
-            // Map prices to token addresses
-            const prices = response.data;
-            FALLBACK_TOKENS.forEach((token) => {
-                const address = token.address.toLowerCase();
-                if (prices[address]) {
-                    token.price = new BigNumber(prices[address]);
-                    console.log(`Price mapped for ${token.symbol}: ${token.price}`);
-                }
-            });
-
-            // Cache the result
-            cache.set(cacheKey, { data: prices, timestamp: now });
-            return prices;
-        } else {
-            console.warn("Failed to fetch token prices. Response:", response.data);
-            return {};
-        }
-    } catch (error) {
-        console.error("Error in fetchTokenPrices:", error.message);
-
-        // Use cached data if available during an error
-        if (cache.has(cacheKey)) {
-            console.warn("Using stale cached token prices due to error.");
-            return cache.get(cacheKey).data;
-        }
-
-        throw error; // Re-throw error if no cached data is available
+    const tokenBatches = [];
+    for (let i = 0; i < tokenAddresses.length; i += batchSize) {
+        tokenBatches.push(tokenAddresses.slice(i, i + batchSize));
     }
+
+    const prices = {};
+
+    for (const batch of tokenBatches) {
+        const url = `${PRICE_API_URL}/${CHAIN_ID}/${batch.join(",")}`;
+        let attempts = 0;
+
+        while (attempts < 3) {
+            try {
+                console.log(`Fetching token prices from URL: ${url}`);
+                const response = await axios.get(url, {
+                    headers: {
+                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                        Accept: "application/json",
+                    },
+                    params: { currency: "USD" },
+                });
+
+                if (response.status === 200 && response.data) {
+                    Object.assign(prices, response.data);
+                    break;
+                } else {
+                    console.warn(`Unexpected response: ${response.statusText}`);
+                }
+            } catch (error) {
+                if (error.response?.status === 429) {
+                    attempts++;
+                    const delay = Math.pow(2, attempts) * 1000; // Exponential backoff
+                    console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts}/3)`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    console.error(`Error fetching token prices: ${error.message}`);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Cache the fetched prices
+    cache.set(cacheKey, { data: prices, timestamp: now });
+    return prices;
 }
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
@@ -888,12 +879,9 @@ async function fetchLiquidityAndPrices(tokenAddresses) {
     }
 
     try {
-        const now = Date.now();
-
-        // Fetch prices and liquidity sources in parallel
         const [priceResponse, liquidityResponse] = await Promise.all([
-            fetchTokenPrices(tokenAddresses), // Fetch token prices
-            fetchLiquiditySources() // Fetch liquidity sources
+            fetchTokenPrices(tokenAddresses),
+            fetchLiquiditySources(),
         ]);
 
         const prices = priceResponse || {};
@@ -918,23 +906,38 @@ async function fetchLiquidityAndPrices(tokenAddresses) {
     }
 }
 
+
 async function fetchLiquiditySources() {
     const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/liquidity-sources`;
 
-    try {
-        const response = await axios.get(url, {
-            headers: {
-                Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                Accept: "application/json"
-            }
-        });
+    for (let attempts = 0; attempts < 3; attempts++) {
+        try {
+            console.log(`Fetching liquidity sources from URL: ${url}`);
+            const response = await axios.get(url, {
+                headers: {
+                    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                    Accept: "application/json",
+                },
+            });
 
-        console.log("Fetched liquidity sources:", response.data);
-        return response.data;
-    } catch (error) {
-        console.error("Error fetching liquidity sources:", error.message);
-        throw error;
+            if (response.status === 200) {
+                return response.data.protocols || [];
+            } else {
+                console.warn(`Unexpected response: ${response.statusText}`);
+            }
+        } catch (error) {
+            if (error.response?.status === 429) {
+                const delay = Math.pow(2, attempts + 1) * 1000; // Exponential backoff
+                console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts + 1}/3)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                console.error(`Error fetching liquidity sources: ${error.message}`);
+                throw error;
+            }
+        }
     }
+
+    throw new Error("Failed to fetch liquidity sources after 3 attempts.");
 }
 
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
