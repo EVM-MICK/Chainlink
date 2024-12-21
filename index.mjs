@@ -610,104 +610,6 @@ async function estimateRoutePotential(route, capital, cachedPriceData, gasPrice,
     }
 }
 
-async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
-    try {
-        // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(CHAIN_ID);
-        if (stableTokens.length === 0) {
-            console.error("No stable tokens found for route generation.");
-            return [];
-        }
-
-        // Extract token addresses from objects
-        const stableTokenAddresses = stableTokens.map(token =>
-            typeof token === "object" ? token.address : token
-        );
-
-        // Step 2: Fetch token prices for all stable tokens upfront
-        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
-        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
-            console.error("Failed to fetch token prices for route generation.");
-            return [];
-        }
-
-        // Step 3: Fetch gas price for cost estimation
-        const gasPrice = await fetchGasPrice();
-        const estimatedGasPerSwap = new BigNumber(200000); // Estimated gas per hop
-
-        // Step 4: Prepare a Set to store unique routes
-        const routes = new Set();
-
-        // Step 5: Include the preferred start token at the beginning of stable tokens
-        const startTokens = [
-            preferredStartToken,
-            ...stableTokenAddresses.filter(t => t !== preferredStartToken),
-        ];
-
-        // Step 6: Generate routes iteratively for better control and scalability
-        for (const startToken of startTokens) {
-            const queue = [{ path: [startToken], hopsRemaining: maxHops }];
-
-            while (queue.length > 0) {
-                const { path, hopsRemaining } = queue.shift();
-                if (hopsRemaining === 0) continue;
-
-                for (const token of stableTokenAddresses) {
-                    if (!path.includes(token)) {
-                        const newPath = [...path, token];
-
-                        // Validate liquidity before considering the route
-                        const liquidity = tokenPrices[token]?.liquidity || 0;
-                        if (liquidity < CAPITAL.toNumber()) {
-                            console.warn(`Skipping token ${token} due to insufficient liquidity.`);
-                            continue;
-                        }
-
-                        // Check potential profit
-                        const profit = await estimateRoutePotential(
-                            newPath,
-                            CAPITAL,
-                            tokenPrices,
-                            gasPrice,
-                            estimatedGasPerSwap
-                        );
-
-                        // Add the route if profitable
-                        if (profit > 0) routes.add(newPath.join(","));
-
-                        // Add the new path to the queue for further exploration
-                        queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
-                    }
-                }
-            }
-        }
-
-        // Step 7: Extract, sort, and return the top N profitable routes
-        const routeList = Array.from(routes).map(route => route.split(","));
-        const profitableRoutes = await Promise.all(
-            routeList.map(async route => ({
-                route,
-                profit: await estimateRoutePotential(
-                    route,
-                    CAPITAL,
-                    tokenPrices,
-                    gasPrice,
-                    estimatedGasPerSwap
-                ),
-            }))
-        );
-
-        return profitableRoutes
-            .sort((a, b) => b.profit - a.profit)
-            .slice(0, topN)
-            .map(({ route }) => route);
-
-    } catch (error) {
-        console.error("Error in generateRoutes:", error.message);
-        return [];
-    }
-}
- 
 
 function expandStableTokens(unmatchedTokens) {
     // Example logic to include dynamically determined stable tokens
@@ -987,63 +889,106 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
+
 async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
     try {
+        // Step 1: Fetch stable tokens
         const stableTokens = await getStableTokenList(CHAIN_ID);
         if (stableTokens.length === 0) {
             console.error("No stable tokens found for route generation.");
             return [];
         }
 
-        const stableTokenAddresses = stableTokens.map(token => (typeof token === "object" ? token.address : token));
+        // Extract token addresses from objects
+        const stableTokenAddresses = stableTokens.map(token =>
+            typeof token === "object" ? token.address : token
+        );
+
+        // Step 2: Fetch token prices for all stable tokens upfront
         const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
         if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
             console.error("Failed to fetch token prices for route generation.");
             return [];
         }
 
-        const routes = new Set();
-        const startTokens = [preferredStartToken, ...stableTokenAddresses.filter(t => t !== preferredStartToken)];
+        // Step 3: Fetch gas price for cost estimation
+        const gasPrice = await fetchGasPrice();
+        const estimatedGasPerSwap = new BigNumber(200000); // Estimated gas per hop
 
+        // Step 4: Prepare a Set to store unique routes
+        const routes = new Set();
+
+        // Step 5: Include the preferred start token at the beginning of stable tokens
+        const startTokens = [
+            preferredStartToken,
+            ...stableTokenAddresses.filter(t => t !== preferredStartToken),
+        ];
+
+        // Step 6: Generate routes iteratively for better control and scalability
         for (const startToken of startTokens) {
             const queue = [{ path: [startToken], hopsRemaining: maxHops }];
 
             while (queue.length > 0) {
                 const { path, hopsRemaining } = queue.shift();
-
                 if (hopsRemaining === 0) continue;
 
                 for (const token of stableTokenAddresses) {
                     if (!path.includes(token)) {
                         const newPath = [...path, token];
-                        const profit = await estimateRoutePotential(newPath, CAPITAL, tokenPrices);
 
+                        // Validate liquidity before considering the route
+                        const liquidity = tokenPrices[token]?.liquidity || 0;
+                        if (liquidity < CAPITAL.toNumber()) {
+                            console.warn(`Skipping token ${token} due to insufficient liquidity.`);
+                            continue;
+                        }
+
+                        // Check potential profit
+                        const profit = await estimateRoutePotential(
+                            newPath,
+                            CAPITAL,
+                            tokenPrices,
+                            gasPrice,
+                            estimatedGasPerSwap
+                        );
+
+                        // Add the route if profitable
                         if (profit > 0) routes.add(newPath.join(","));
+
+                        // Add the new path to the queue for further exploration
                         queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
                     }
                 }
             }
         }
 
-        // Calculate profits for all routes
+        // Step 7: Extract, sort, and return the top N profitable routes
         const routeList = Array.from(routes).map(route => route.split(","));
         const profitableRoutes = await Promise.all(
             routeList.map(async route => ({
                 route,
-                profit: await estimateRoutePotential(route, CAPITAL, tokenPrices),
+                profit: await estimateRoutePotential(
+                    route,
+                    CAPITAL,
+                    tokenPrices,
+                    gasPrice,
+                    estimatedGasPerSwap
+                ),
             }))
         );
 
-        // Sort by profit and return top N
         return profitableRoutes
             .sort((a, b) => b.profit - a.profit)
             .slice(0, topN)
             .map(({ route }) => route);
+
     } catch (error) {
         console.error("Error in generateRoutes:", error.message);
         return [];
     }
 }
+ 
+
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
