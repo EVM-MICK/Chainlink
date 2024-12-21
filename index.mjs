@@ -906,19 +906,13 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
 // }
 
 // Fetch a single quote with retries and complexity level
-async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2) {
+// Fetch a quote using the 1inch Quote API
+async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
     const url = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
 
     const config = {
-        headers: {
-            Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
-        },
-        params: {
-            src: srcToken,
-            dst: dstToken,
-            amount,
-            complexityLevel,
-        },
+        headers: { Authorization: "Bearer YOUR_API_KEY" },
+        params: { src: srcToken, dst: dstToken, amount, complexityLevel, slippage },
     };
 
     for (let attempts = 0; attempts < 3; attempts++) {
@@ -926,14 +920,12 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
             console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
             const response = await axios.get(url, config);
             if (response.status === 200) {
-                console.log(`Received quote: ${response.data.dstAmount}`);
-                return response.data.dstAmount;
-            } else {
-                console.warn(`Unexpected response: ${response.statusText}`);
+                console.log(`Received quote: ${response.data}`);
+                return response.data;
             }
         } catch (error) {
             if (error.response?.status === 429) {
-                const delay = (attempts + 1) * 1000; // Linear backoff for rate limiting
+                const delay = (attempts + 1) * 1000; // Linear backoff
                 console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts + 1}/3)`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
@@ -946,7 +938,7 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
     throw new Error("Failed to fetch quote after 3 attempts.");
 }
 
-// Fetch multiple quotes sequentially while respecting the 1 RPS limit
+// Fetch multiple quotes sequentially
 async function fetchMultipleQuotes(chainId, quoteRequests) {
     const results = [];
 
@@ -966,93 +958,9 @@ async function fetchMultipleQuotes(chainId, quoteRequests) {
     return results;
 }
 
-// Generate profitable routes
-async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, profitThreshold = 30000) {
-    try {
-        // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(chainId);
-        if (stableTokens.length === 0) {
-            console.error("No stable tokens found for route generation.");
-            return [];
-        }
-
-        const stableTokenAddresses = stableTokens.map(token =>
-            typeof token === "object" ? token.address : token
-        );
-
-        // Step 2: Prepare initial quotes
-        const quoteRequests = stableTokenAddresses.map(dstToken => ({
-            srcToken: startToken,
-            dstToken,
-            amount: startAmount, // $100,000 in smallest units
-        }));
-
-        const initialQuotes = await fetchMultipleQuotes(chainId, quoteRequests);
-
-        // Step 3: Prepare a Set to store unique routes
-        const routes = new Set();
-
-        // Step 4: Seed route exploration with initial profitable quotes
-        for (const { srcToken, dstToken, amount, quote } of initialQuotes) {
-            if (!quote) continue;
-
-            const initialProfit = new BigNumber(quote).minus(amount);
-            if (initialProfit.isGreaterThan(profitThreshold)) {
-                const initialPath = [srcToken, dstToken];
-                console.log(`Profitable initial route found: ${initialPath.join(" ➡️ ")} with profit: ${initialProfit}`);
-                routes.add(initialPath.join(","));
-            }
-        }
-
-        // Step 5: Iteratively explore additional paths
-        const queue = [...routes].map(route => ({
-            path: route.split(","),
-            hopsRemaining: maxHops - 1,
-            amount: startAmount,
-        }));
-
-        while (queue.length > 0) {
-            const { path, hopsRemaining, amount } = queue.shift();
-
-            if (hopsRemaining === 0) continue;
-
-            const lastToken = path[path.length - 1];
-            for (const nextToken of stableTokenAddresses) {
-                if (path.includes(nextToken)) continue; // Avoid cycles
-
-                const nextAmount = await fetchQuote(chainId, lastToken, nextToken, amount);
-                if (!nextAmount) continue;
-
-                const nextPath = [...path, nextToken];
-                const profit = new BigNumber(nextAmount).minus(startAmount);
-
-                if (profit.isGreaterThan(profitThreshold)) {
-                    console.log(`Profitable route found: ${nextPath.join(" ➡️ ")} with profit: ${profit}`);
-                    routes.add(nextPath.join(","));
-                }
-
-                // Add to queue for further exploration
-                queue.push({ path: nextPath, hopsRemaining: hopsRemaining - 1, amount: nextAmount });
-
-                // Respect 1 RPS limit
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-
-        // Step 6: Extract, sort, and return top routes
-        const profitableRoutes = Array.from(routes).map(route => ({
-            route: route.split(","),
-            profit: new BigNumber(startAmount).minus(startAmount).toString(), // Placeholder
-        }));
-
-        return profitableRoutes.sort((a, b) => b.profit - a.profit);
-    } catch (error) {
-        console.error("Error in generateRoutes:", error.message);
-        return [];
-    }
-}
 
 // Generate routes for profitable swaps
+// Generate routes using a BFS approach and inferred liquidity
 async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, profitThreshold = 30000) {
     try {
         // Step 1: Fetch stable tokens
@@ -1064,14 +972,23 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
 
         const stableTokenAddresses = stableTokens.map(token => token.address);
 
-        // Step 2: Initialize DP table and route queue
+        // Step 2: Fetch token prices
+        const tokenPrices = await fetchTokenPrices(stableTokenAddresses);
+
+        // Step 3: Infer token liquidity using progressive trade analysis
+        const liquidityMap = {};
+        for (const token of stableTokenAddresses) {
+            liquidityMap[token] = await estimateLiquidity(chainId, startToken, token);
+        }
+
         const dp = {}; // Dynamic programming table to store max outputs
-        const queue = [{ path: [startToken], amount: startAmount, hopsRemaining: maxHops }];
         const profitableRoutes = new Set();
+
+        const queue = [{ path: [startToken], amount: startAmount, hopsRemaining: maxHops }];
 
         dp[startToken] = { [0]: startAmount }; // Base case: Start with initial token and amount
 
-        // Step 3: BFS with DP to find profitable routes
+        // Step 4: BFS with DP
         while (queue.length > 0) {
             const { path, amount, hopsRemaining } = queue.shift();
             const currentToken = path[path.length - 1];
@@ -1081,35 +998,38 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
             for (const nextToken of stableTokenAddresses) {
                 if (path.includes(nextToken)) continue; // Avoid cycles
 
-                const nextAmount = await fetchQuote(chainId, currentToken, nextToken, amount);
-                if (!nextAmount) continue; // Skip if no quote available
+                const quote = await fetchQuote(chainId, currentToken, nextToken, amount);
+                if (!quote || !quote.toAmount) continue;
 
-                const profit = new BigNumber(nextAmount).minus(startAmount);
+                const fees = new BigNumber(quote.estimatedGas || 0).times(tokenPrices[currentToken] || 0); // Estimated fees
+                const slippageImpact = new BigNumber(quote.toAmount).times(0.01); // Example 1% slippage
+                const adjustedToAmount = new BigNumber(quote.toAmount).minus(fees).minus(slippageImpact);
+
+                if (adjustedToAmount.isLessThanOrEqualTo(0)) continue;
+
                 const newPath = [...path, nextToken];
+                const profit = adjustedToAmount.minus(startAmount);
 
-                // Prune unprofitable paths
                 if (profit.isGreaterThan(profitThreshold)) {
                     console.log(`Profitable route: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
                     profitableRoutes.add(newPath.join(","));
                 }
 
-                // Update DP table and continue exploring
                 if (!dp[nextToken]) dp[nextToken] = {};
-                if (!dp[nextToken][maxHops - hopsRemaining] || new BigNumber(nextAmount).isGreaterThan(dp[nextToken][maxHops - hopsRemaining])) {
-                    dp[nextToken][maxHops - hopsRemaining] = nextAmount;
-                    queue.push({ path: newPath, amount: nextAmount, hopsRemaining: hopsRemaining - 1 });
+                if (!dp[nextToken][maxHops - hopsRemaining] || adjustedToAmount.isGreaterThan(dp[nextToken][maxHops - hopsRemaining])) {
+                    dp[nextToken][maxHops - hopsRemaining] = adjustedToAmount;
+                    queue.push({ path: newPath, amount: adjustedToAmount.toFixed(0), hopsRemaining: hopsRemaining - 1 });
                 }
 
-                // Respect API rate limits
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Respect API rate limit
             }
         }
 
-        // Step 4: Extract and return top profitable routes
+        // Step 5: Extract and return top profitable routes
         return Array.from(profitableRoutes)
             .map(route => ({
                 route: route.split(","),
-                profit: new BigNumber(dp[route.split(",").slice(-1)]?.[0] || 0).minus(startAmount).toString(),
+                profit: new BigNumber(dp[route.split(",").slice(-1)[0]][0] || 0).minus(startAmount).toString(),
             }))
             .sort((a, b) => new BigNumber(b.profit).minus(a.profit))
             .slice(0, 3); // Return top 3 routes
@@ -1117,6 +1037,31 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
     } catch (error) {
         console.error("Error in generateRoutes:", error.message);
         return [];
+    }
+}
+
+// Estimate liquidity by progressive trade analysis
+async function estimateLiquidity(chainId, srcToken, dstToken) {
+    let amount = new BigNumber(10).pow(18); // Start with a reasonable amount (1 token in decimals)
+    let prevToAmount = new BigNumber(0);
+
+    while (true) {
+        try {
+            const quote = await fetchQuote(chainId, srcToken, dstToken, amount.toFixed(0));
+            const toAmount = new BigNumber(quote.toAmount);
+
+            if (toAmount.isLessThan(prevToAmount)) {
+                // Slippage threshold reached; return the last valid amount
+                return prevToAmount;
+            }
+
+            prevToAmount = toAmount;
+            amount = amount.multipliedBy(2); // Double the amount to test larger liquidity
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Respect API rate limit
+        } catch (error) {
+            console.warn(`Liquidity estimation stopped for ${srcToken} ➡️ ${dstToken}:`, error.message);
+            return prevToAmount;
+        }
     }
 }
 
