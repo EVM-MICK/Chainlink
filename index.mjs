@@ -693,7 +693,7 @@ async function getStableTokenList(CHAIN_ID) {
             Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
         },
       params: {
-  "addresses": [
+  addresses: [
     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
@@ -703,7 +703,7 @@ async function getStableTokenList(CHAIN_ID) {
     "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
     "0x912ce59144191c1204e64559fe8253a0e49e6548",
   ]
-},
+}
         paramsSerializer: (params) => qs.stringify(params, { indices: false })
     };
 
@@ -880,16 +880,16 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
 
     const config = {
         headers: {
-  "Authorization": "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
+  Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6"
 },
-  params: {
-  "src": srcToken,
-  "dst":  dstToken,
-  "amount": amount,
-  "complexityLevel": "2",
-  "includeTokensInfo": "true",
-  "includeProtocols": "true",
-  "includeGas": "true"
+params: {
+  src: srcToken,
+  dst:  dstToken,
+  amount: amount,
+  complexityLevel: 2,
+  includeTokensInfo: true,
+  includeProtocols: true,
+  includeGas: true
  }
     };
 
