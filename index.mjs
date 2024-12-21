@@ -862,179 +862,257 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  * @param {string} preferredStartToken - Preferred starting token (e.g., "USDC").
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
-async function fetchLiquidityAndPrices(tokenAddresses) {
-    // Validate input
-    if (!tokenAddresses || tokenAddresses.length === 0) {
-        console.warn("No token addresses provided for liquidity and price fetching.");
-        return { prices: {}, liquidity: {} };
-    }
+// async function fetchLiquidityAndPrices(tokenAddresses) {
+//     // Validate input
+//     if (!tokenAddresses || tokenAddresses.length === 0) {
+//         console.warn("No token addresses provided for liquidity and price fetching.");
+//         return { prices: {}, liquidity: {} };
+//     }
 
-    try {
-        // Fetch both token prices and liquidity sources concurrently
-        const [priceResponse, liquidityResponse] = await Promise.all([
-            fetchTokenPrices(), // Function to fetch token prices
-            fetchLiquiditySources(),          // Function to fetch liquidity data
-        ]);
+//     try {
+//         // Fetch both token prices and liquidity sources concurrently
+//         const [priceResponse, liquidityResponse] = await Promise.all([
+//             fetchTokenPrices(), // Function to fetch token prices
+//             fetchQuote(),          // Function to fetch liquidity data
+//         ]);
 
-        // Extract price data or default to an empty object
-        const prices = priceResponse || {};
+//         // Extract price data or default to an empty object
+//         const prices = priceResponse || {};
 
-        // Extract liquidity sources or fallback
-        const liquiditySources = liquidityResponse?.protocols || [];
+//         // Extract liquidity sources or fallback
+//         const liquiditySources = liquidityResponse?.protocols || [];
 
-        // Map liquidity data to the provided token addresses
-        const liquidityData = tokenAddresses.reduce((acc, token) => {
-            const matchingSource = liquiditySources.find(source =>
-                source.token?.toLowerCase() === token.toLowerCase()
-            );
-            acc[token] = matchingSource?.liquidity || 0; // Default to 0 if not found
-            return acc;
-        }, {});
+//         // Map liquidity data to the provided token addresses
+//         const liquidityData = tokenAddresses.reduce((acc, token) => {
+//             const matchingSource = liquiditySources.find(source =>
+//                 source.token?.toLowerCase() === token.toLowerCase()
+//             );
+//             acc[token] = matchingSource?.liquidity || 0; // Default to 0 if not found
+//             return acc;
+//         }, {});
 
-        // Log data for debugging purposes
-        console.log("Fetched prices:", prices);
-        console.log("Mapped liquidity data:", liquidityData);
+//         // Log data for debugging purposes
+//         console.log("Fetched prices:", prices);
+//         console.log("Mapped liquidity data:", liquidityData);
 
-        // Return formatted data
-        return { prices, liquidity: liquidityData };
-    } catch (error) {
-        console.error("Error in fetchLiquidityAndPrices:", error.message);
+//         // Return formatted data
+//         return { prices, liquidity: liquidityData };
+//     } catch (error) {
+//         console.error("Error in fetchLiquidityAndPrices:", error.message);
 
-        // Return empty objects on failure to maintain consistent return structure
-        return { prices: {}, liquidity: {} };
-    }
-}
+//         // Return empty objects on failure to maintain consistent return structure
+//         return { prices: {}, liquidity: {} };
+//     }
+// }
 
-async function fetchLiquiditySources() {
-    const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/liquidity-sources`;
+// Fetch a single quote with retries and complexity level
+async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2) {
+    const url = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
+
+    const config = {
+        headers: {
+            Authorization: "Bearer emBOytuT9itLNgAI3jSPlTUXnmL9cEv6",
+        },
+        params: {
+            src: srcToken,
+            dst: dstToken,
+            amount,
+            complexityLevel,
+        },
+    };
 
     for (let attempts = 0; attempts < 3; attempts++) {
         try {
-            console.log(`Fetching liquidity sources from URL: ${url}`);
-            const response = await axios.get(url, {
-                headers: {
-                    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                    Accept: "application/json",
-                },
-            });
-
+            console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
+            const response = await axios.get(url, config);
             if (response.status === 200) {
-                return response.data.protocols || [];
+                console.log(`Received quote: ${response.data.dstAmount}`);
+                return response.data.dstAmount;
             } else {
                 console.warn(`Unexpected response: ${response.statusText}`);
             }
         } catch (error) {
             if (error.response?.status === 429) {
-                const delay = Math.pow(2, attempts + 1) * 1000; // Exponential backoff
+                const delay = (attempts + 1) * 1000; // Linear backoff for rate limiting
                 console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts + 1}/3)`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
-                console.error(`Error fetching liquidity sources: ${error.message}`);
+                console.error(`Error fetching quote: ${error.message}`);
                 throw error;
             }
         }
     }
 
-    throw new Error("Failed to fetch liquidity sources after 3 attempts.");
+    throw new Error("Failed to fetch quote after 3 attempts.");
 }
 
-async function generateRoutes(CHAIN_ID, maxHops = 3, preferredStartToken = "USDC", topN = 3) {
+// Fetch multiple quotes sequentially while respecting the 1 RPS limit
+async function fetchMultipleQuotes(chainId, quoteRequests) {
+    const results = [];
+
+    for (const { srcToken, dstToken, amount } of quoteRequests) {
+        try {
+            const quote = await fetchQuote(chainId, srcToken, dstToken, amount);
+            results.push({ srcToken, dstToken, amount, quote });
+            console.log(`Successfully fetched quote for ${srcToken} ➡️ ${dstToken}`);
+        } catch (error) {
+            console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
+        }
+
+        // Respect 1 RPS limit
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    return results;
+}
+
+// Generate profitable routes
+async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, profitThreshold = 30000) {
     try {
         // Step 1: Fetch stable tokens
-        const stableTokens = await getStableTokenList(CHAIN_ID);
+        const stableTokens = await getStableTokenList(chainId);
         if (stableTokens.length === 0) {
             console.error("No stable tokens found for route generation.");
             return [];
         }
 
-        // Extract token addresses from objects
         const stableTokenAddresses = stableTokens.map(token =>
             typeof token === "object" ? token.address : token
         );
 
-        // Step 2: Fetch token prices and liquidity for all stable tokens
-        const { prices: tokenPrices, liquidity: liquidityData } = await fetchLiquidityAndPrices(stableTokenAddresses);
-        if (!tokenPrices || Object.keys(tokenPrices).length === 0) {
-            console.error("Failed to fetch token prices for route generation.");
-            return [];
-        }
+        // Step 2: Prepare initial quotes
+        const quoteRequests = stableTokenAddresses.map(dstToken => ({
+            srcToken: startToken,
+            dstToken,
+            amount: startAmount, // $100,000 in smallest units
+        }));
 
-        // Step 3: Fetch gas price for cost estimation
-        const gasPrice = await fetchGasPrice();
-        const estimatedGasPerSwap = new BigNumber(200000); // Estimated gas per hop
+        const initialQuotes = await fetchMultipleQuotes(chainId, quoteRequests);
 
-        // Step 4: Prepare a Set to store unique routes
+        // Step 3: Prepare a Set to store unique routes
         const routes = new Set();
 
-        // Step 5: Include the preferred start token at the beginning of stable tokens
-        const startTokens = [
-            preferredStartToken,
-            ...stableTokenAddresses.filter(t => t !== preferredStartToken),
-        ];
+        // Step 4: Seed route exploration with initial profitable quotes
+        for (const { srcToken, dstToken, amount, quote } of initialQuotes) {
+            if (!quote) continue;
 
-        // Define minimum liquidity threshold
-        const minimumLiquidity = new BigNumber(CAPITAL).multipliedBy(1.1); // Example: $100,000 + 10% buffer
-
-        // Step 6: Generate routes iteratively for better control and scalability
-        for (const startToken of startTokens) {
-            const queue = [{ path: [startToken], hopsRemaining: maxHops }];
-
-            while (queue.length > 0) {
-                const { path, hopsRemaining } = queue.shift();
-                if (hopsRemaining === 0) continue;
-
-                for (const token of stableTokenAddresses) {
-                    if (!path.includes(token)) {
-                        // Validate liquidity before considering the route
-                        const liquidity = new BigNumber(liquidityData[token] || 0);
-                        if (liquidity.isLessThan(minimumLiquidity)) {
-                            console.warn(`Skipping token ${token} due to insufficient liquidity: ${liquidity.toString()}`);
-                            continue;
-                        }
-
-                        const newPath = [...path, token];
-
-                        // Check potential profit
-                        const profit = await estimateRoutePotential(
-                            newPath,
-                            CAPITAL,
-                            tokenPrices,
-                            gasPrice,
-                            estimatedGasPerSwap
-                        );
-
-                        // Add the route if profitable
-                        if (profit > 0) {
-                            console.log(`Profitable route found: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
-                            routes.add(newPath.join(","));
-                        }
-
-                        // Add the new path to the queue for further exploration
-                        queue.push({ path: newPath, hopsRemaining: hopsRemaining - 1 });
-                    }
-                }
+            const initialProfit = new BigNumber(quote).minus(amount);
+            if (initialProfit.isGreaterThan(profitThreshold)) {
+                const initialPath = [srcToken, dstToken];
+                console.log(`Profitable initial route found: ${initialPath.join(" ➡️ ")} with profit: ${initialProfit}`);
+                routes.add(initialPath.join(","));
             }
         }
 
-        // Step 7: Extract, sort, and return the top N profitable routes
-        const routeList = Array.from(routes).map(route => route.split(","));
-        const profitableRoutes = await Promise.all(
-            routeList.map(async route => ({
-                route,
-                profit: await estimateRoutePotential(
-                    route,
-                    CAPITAL,
-                    tokenPrices,
-                    gasPrice,
-                    estimatedGasPerSwap
-                ),
-            }))
-        );
+        // Step 5: Iteratively explore additional paths
+        const queue = [...routes].map(route => ({
+            path: route.split(","),
+            hopsRemaining: maxHops - 1,
+            amount: startAmount,
+        }));
 
-        return profitableRoutes
-            .sort((a, b) => b.profit - a.profit)
-            .slice(0, topN)
-            .map(({ route }) => route);
+        while (queue.length > 0) {
+            const { path, hopsRemaining, amount } = queue.shift();
+
+            if (hopsRemaining === 0) continue;
+
+            const lastToken = path[path.length - 1];
+            for (const nextToken of stableTokenAddresses) {
+                if (path.includes(nextToken)) continue; // Avoid cycles
+
+                const nextAmount = await fetchQuote(chainId, lastToken, nextToken, amount);
+                if (!nextAmount) continue;
+
+                const nextPath = [...path, nextToken];
+                const profit = new BigNumber(nextAmount).minus(startAmount);
+
+                if (profit.isGreaterThan(profitThreshold)) {
+                    console.log(`Profitable route found: ${nextPath.join(" ➡️ ")} with profit: ${profit}`);
+                    routes.add(nextPath.join(","));
+                }
+
+                // Add to queue for further exploration
+                queue.push({ path: nextPath, hopsRemaining: hopsRemaining - 1, amount: nextAmount });
+
+                // Respect 1 RPS limit
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        // Step 6: Extract, sort, and return top routes
+        const profitableRoutes = Array.from(routes).map(route => ({
+            route: route.split(","),
+            profit: new BigNumber(startAmount).minus(startAmount).toString(), // Placeholder
+        }));
+
+        return profitableRoutes.sort((a, b) => b.profit - a.profit);
+    } catch (error) {
+        console.error("Error in generateRoutes:", error.message);
+        return [];
+    }
+}
+
+// Generate routes for profitable swaps
+async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, profitThreshold = 30000) {
+    try {
+        // Step 1: Fetch stable tokens
+        const stableTokens = await getStableTokenList(chainId);
+        if (stableTokens.length === 0) {
+            console.error("No stable tokens found for route generation.");
+            return [];
+        }
+
+        const stableTokenAddresses = stableTokens.map(token => token.address);
+
+        // Step 2: Initialize DP table and route queue
+        const dp = {}; // Dynamic programming table to store max outputs
+        const queue = [{ path: [startToken], amount: startAmount, hopsRemaining: maxHops }];
+        const profitableRoutes = new Set();
+
+        dp[startToken] = { [0]: startAmount }; // Base case: Start with initial token and amount
+
+        // Step 3: BFS with DP to find profitable routes
+        while (queue.length > 0) {
+            const { path, amount, hopsRemaining } = queue.shift();
+            const currentToken = path[path.length - 1];
+
+            if (hopsRemaining === 0) continue; // Max hops reached
+
+            for (const nextToken of stableTokenAddresses) {
+                if (path.includes(nextToken)) continue; // Avoid cycles
+
+                const nextAmount = await fetchQuote(chainId, currentToken, nextToken, amount);
+                if (!nextAmount) continue; // Skip if no quote available
+
+                const profit = new BigNumber(nextAmount).minus(startAmount);
+                const newPath = [...path, nextToken];
+
+                // Prune unprofitable paths
+                if (profit.isGreaterThan(profitThreshold)) {
+                    console.log(`Profitable route: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
+                    profitableRoutes.add(newPath.join(","));
+                }
+
+                // Update DP table and continue exploring
+                if (!dp[nextToken]) dp[nextToken] = {};
+                if (!dp[nextToken][maxHops - hopsRemaining] || new BigNumber(nextAmount).isGreaterThan(dp[nextToken][maxHops - hopsRemaining])) {
+                    dp[nextToken][maxHops - hopsRemaining] = nextAmount;
+                    queue.push({ path: newPath, amount: nextAmount, hopsRemaining: hopsRemaining - 1 });
+                }
+
+                // Respect API rate limits
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        // Step 4: Extract and return top profitable routes
+        return Array.from(profitableRoutes)
+            .map(route => ({
+                route: route.split(","),
+                profit: new BigNumber(dp[route.split(",").slice(-1)]?.[0] || 0).minus(startAmount).toString(),
+            }))
+            .sort((a, b) => new BigNumber(b.profit).minus(a.profit))
+            .slice(0, 3); // Return top 3 routes
 
     } catch (error) {
         console.error("Error in generateRoutes:", error.message);
