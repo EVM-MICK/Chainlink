@@ -864,9 +864,9 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
 // Fetch a quote using the 1inch Quote API
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
 const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
-const includeTokensInfo = true;
- const includeProtocols = true;
-  const includeGas = true;
+const includeTokensInfo = "true";
+ const includeProtocols = "true";
+  const includeGas = "true";
  try {
         srcToken = web3.utils.toChecksumAddress(srcToken);
         dstToken = web3.utils.toChecksumAddress(dstToken);
