@@ -967,7 +967,7 @@ async function fetchMultipleQuotes(chainId, quoteRequests) {
 
 
 // Generate routes using a BFS approach and inferred liquidity
-async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 30000) {
+async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 300000000) {
     try {
         // Validate startToken
         if (!web3.utils.isAddress(startToken)) {
