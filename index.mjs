@@ -63,6 +63,7 @@ let cachedGasPrice = null; // Cached gas price value
 let lastGasPriceFetch = 0; // Timestamp of the last gas price fetch
 const cacheDuration = 5 * 60 * 1000; // 5 minutes
 const cache = new Map();
+const quoteCache = new Map();
 const priceCache = {
     data: null,
     timestamp: 0,
@@ -871,12 +872,20 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
  */
 
 
-// Fetch a single quote with retries and complexity level
-// Fetch a quote using the 1inch Quote API
+// Fetch a single quote with retries and complexity level Fetch a quote using the 1inch Quote API
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
-const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
+    const cacheKey = `${srcToken}_${dstToken}_${amount}`;
+    
+    // Check the cache for a previously fetched quote
+    if (quoteCache.has(cacheKey)) {
+        console.log(`Using cached quote for ${cacheKey}`);
+        return quoteCache.get(cacheKey);
+    }
 
- try {
+    const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
+
+    try {
+        // Validate input tokens
         srcToken = web3.utils.toChecksumAddress(srcToken);
         dstToken = web3.utils.toChecksumAddress(dstToken);
 
@@ -888,33 +897,38 @@ const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
         throw validationError;
     }
 
- const config = {
-    headers: HEADERS,
-    params: {
-        src: srcToken,
-        dst: dstToken,
-        amount: amount.toString(),
-        complexityLevel,
-        includeTokensInfo: true,  // Use booleans instead of strings
-        includeProtocols: true,
-        includeGas: true,
-    },
-};
+    const config = {
+        headers: HEADERS,
+        params: {
+            src: srcToken,
+            dst: dstToken,
+            amount: amount.toString(),
+            complexityLevel,
+            includeTokensInfo: true, // Use booleans instead of strings
+            includeProtocols: true,
+            includeGas: true,
+        },
+    };
 
-
+    // Attempt fetching the quote with retries
     for (let attempts = 0; attempts < 3; attempts++) {
         try {
             console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
             const response = await axios.get(url99, config);
+
             if (response.status === 200) {
                 console.log(`Received quote: ${response.data}`);
+
+                // Cache the result
+                quoteCache.set(cacheKey, response.data);
+
                 return response.data;
             }
         } catch (error) {
             if (error.response?.status === 429) {
                 const delay = (attempts + 1) * 1000; // Linear backoff
                 console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts + 1}/3)`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+                await new Promise((resolve) => setTimeout(resolve, delay));
             } else {
                 console.error(`Error fetching quote: ${error.message}`);
                 throw error;
@@ -924,31 +938,36 @@ const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
 
     throw new Error("Failed to fetch quote after 3 attempts.");
 }
-
 // Fetch multiple quotes sequentially
 async function fetchMultipleQuotes(chainId, quoteRequests) {
-    const results = [];
+    const results = await Promise.all(
+        quoteRequests.map(async ({ srcToken, dstToken, amount }) => {
+            try {
+                // Use estimateLiquidity to ensure proper liquidity for the trade
+                const estimatedLiquidity = await estimateLiquidity(chainId, srcToken, dstToken);
+                if (estimatedLiquidity.isLessThan(amount)) {
+                    console.warn(
+                        `Liquidity too low for ${srcToken} ➡️ ${dstToken}: Requested ${amount}, Available ${estimatedLiquidity}`
+                    );
+                    return null;
+                }
 
-    for (const { srcToken, dstToken, amount } of quoteRequests) {
-        try {
-            const quote = await fetchQuote(chainId, srcToken, dstToken, amount);
-            results.push({ srcToken, dstToken, amount, quote });
-            console.log(`Successfully fetched quote for ${srcToken} ➡️ ${dstToken}`);
-        } catch (error) {
-            console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
-        }
+                const quote = await fetchQuote(chainId, srcToken, dstToken, amount);
+                console.log(`Successfully fetched quote for ${srcToken} ➡️ ${dstToken}`);
+                return { srcToken, dstToken, amount, quote };
+            } catch (error) {
+                console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
+                return null; // Skip failed requests
+            }
+        })
+    );
 
-        // Respect 1 RPS limit
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    return results;
+    return results.filter(Boolean); // Remove null entries
 }
 
 
-// Generate routes for profitable swaps
 // Generate routes using a BFS approach and inferred liquidity
-async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, profitThreshold = 30000) {
+async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 30000) {
     try {
         // Validate startToken
         if (!web3.utils.isAddress(startToken)) {
@@ -957,15 +976,10 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
 
         // Step 1: Fetch stable tokens
         const stableTokens = await getStableTokenList(chainId);
-        if (stableTokens.length === 0) {
-            console.error("No stable tokens found for route generation.");
-            return [];
-        }
+        const validStableTokenAddresses = stableTokens
+            .map(token => token.address)
+            .filter(web3.utils.isAddress);
 
-        const stableTokenAddresses = stableTokens.map(token => token.address);
-
-        // Filter stable tokens to include only valid Ethereum addresses
-        const validStableTokenAddresses = stableTokenAddresses.filter(web3.utils.isAddress);
         if (validStableTokenAddresses.length === 0) {
             throw new Error("No valid stable token addresses available.");
         }
@@ -973,72 +987,71 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 3, pro
         // Step 2: Fetch token prices
         const tokenPrices = await fetchTokenPrices();
 
-        // Step 3: Infer token liquidity using progressive trade analysis
+        // Step 3: Infer token liquidity using smarter liquidity testing (binary search)
         const liquidityMap = {};
-        for (const token of validStableTokenAddresses) {
-            liquidityMap[token] = await estimateLiquidity(chainId, startToken, token);
-        }
+        await Promise.all(
+            validStableTokenAddresses.map(async token => {
+                liquidityMap[token] = await estimateLiquidity(chainId, startToken, token);
+            })
+        );
 
-        const dp = {}; // Dynamic programming table to store max outputs
+        // Dynamic programming table for tracking max outputs
+        const dp = {};
         const profitableRoutes = new Set();
 
+        // BFS queue initialization
         const queue = [{ path: [startToken], amount: startAmount, hopsRemaining: maxHops }];
+        dp[startToken] = { [0]: startAmount }; // Initialize DP table for the start token
 
-        dp[startToken] = { [0]: startAmount }; // Base case: Start with initial token and amount
-
-        // Step 4: BFS with DP
         while (queue.length > 0) {
             const { path, amount, hopsRemaining } = queue.shift();
             const currentToken = path[path.length - 1];
 
-            // Validate the current token
-            if (!web3.utils.isAddress(currentToken)) {
-                console.error(`Invalid address in current path: ${currentToken}`);
-                continue;
-            }
+            // Skip if max hops are reached
+            if (hopsRemaining === 0) continue;
 
-            if (hopsRemaining === 0) continue; // Max hops reached
+            // Filter tokens for the next hop
+            const nextTokens = validStableTokenAddresses.filter(nextToken => !path.includes(nextToken));
 
-            for (const nextToken of validStableTokenAddresses) {
-                if (path.includes(nextToken)) continue; // Avoid cycles
+            // Fetch multiple quotes in parallel for efficiency
+            const quotes = await fetchMultipleQuotes(chainId, nextTokens.map(nextToken => ({
+                srcToken: currentToken,
+                dstToken: nextToken,
+                amount,
+            })));
 
-                // Validate nextToken before making API calls
-                if (!web3.utils.isAddress(nextToken)) {
-                    console.error(`Invalid next token address: ${nextToken}`);
-                    continue;
-                }
-
-                console.log("Path:", path, "Current Token:", currentToken, "Next Token:", nextToken);
-
-                const quote = await fetchQuote(chainId, currentToken, nextToken, amount);
+            for (const { dstToken, quote } of quotes) {
                 if (!quote || !quote.toAmount) continue;
 
-                const fees = new BigNumber(quote.estimatedGas || 0).times(tokenPrices[currentToken] || 0); // Estimated fees
-                const slippageImpact = new BigNumber(quote.toAmount).times(0.01); // Example 1% slippage
+                // Calculate adjusted amount after fees and slippage
+                const fees = new BigNumber(quote.estimatedGas || 0).times(tokenPrices[currentToken] || 0);
+                const slippageImpact = new BigNumber(quote.toAmount).times(0.01); // Example: 1% slippage
                 const adjustedToAmount = new BigNumber(quote.toAmount).minus(fees).minus(slippageImpact);
 
                 if (adjustedToAmount.isLessThanOrEqualTo(0)) continue;
 
-                const newPath = [...path, nextToken];
+                const newPath = [...path, dstToken];
                 const profit = adjustedToAmount.minus(startAmount);
 
+                // Add profitable route
                 if (profit.isGreaterThan(profitThreshold)) {
                     console.log(`Profitable route: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
                     profitableRoutes.add(newPath.join(","));
                 }
 
-                if (!dp[nextToken]) dp[nextToken] = {};
-                if (!dp[nextToken][maxHops - hopsRemaining] || adjustedToAmount.isGreaterThan(dp[nextToken][maxHops - hopsRemaining])) {
-                    dp[nextToken][maxHops - hopsRemaining] = adjustedToAmount;
+                // Update DP table and enqueue next steps
+                if (!dp[dstToken]) dp[dstToken] = {};
+                if (
+                    !dp[dstToken][maxHops - hopsRemaining] || 
+                    adjustedToAmount.isGreaterThan(dp[dstToken][maxHops - hopsRemaining])
+                ) {
+                    dp[dstToken][maxHops - hopsRemaining] = adjustedToAmount;
                     queue.push({ path: newPath, amount: adjustedToAmount.toFixed(0), hopsRemaining: hopsRemaining - 1 });
                 }
-
-                // Respect API rate limit
-                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
 
-        // Step 5: Extract and return top profitable routes
+        // Step 4: Return top profitable routes
         return Array.from(profitableRoutes)
             .map(route => ({
                 route: route.split(","),
@@ -1060,33 +1073,33 @@ async function estimateLiquidity(chainId, srcToken, dstToken) {
         throw new Error(`Invalid token addresses: ${srcToken}, ${dstToken}`);
     }
 
-    let amount = new BigNumber(10).pow(18); // Start with a reasonable amount (1 token in decimals)
-    let prevToAmount = new BigNumber(0);
+    let low = new BigNumber(10).pow(18); // Start with 1 token
+    let high = new BigNumber(10).pow(24); // Arbitrary large value
+    let bestAmount = low;
 
-    while (true) {
+    while (low.isLessThanOrEqualTo(high)) {
+        const mid = low.plus(high).dividedBy(2).integerValue(BigNumber.ROUND_FLOOR);
+
         try {
-            // Fetch a quote to estimate liquidity
-            const quote = await fetchQuote(chainId, srcToken, dstToken, amount.toFixed(0));
+            const quote = await fetchQuote(chainId, srcToken, dstToken, mid.toFixed());
             const toAmount = new BigNumber(quote.toAmount);
 
-            if (toAmount.isLessThan(prevToAmount)) {
-                // Slippage threshold reached; return the last valid amount
-                return prevToAmount;
+            if (toAmount.isGreaterThan(0)) {
+                // Found valid liquidity, move the lower bound up
+                bestAmount = mid;
+                low = mid.plus(1);
+            } else {
+                // No liquidity, reduce the upper bound
+                high = mid.minus(1);
             }
-
-            // Update previous amount and double the test amount
-            prevToAmount = toAmount;
-            amount = amount.multipliedBy(2); // Double the amount to test larger liquidity
-
-            // Respect API rate limit
-            await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error) {
-            console.warn(`Liquidity estimation stopped for ${srcToken} ➡️ ${dstToken}:`, error.message);
-            return prevToAmount;
+            console.warn(`Liquidity estimation failed for ${srcToken} ➡️ ${dstToken} at amount: ${mid}`, error.message);
+            high = mid.minus(1); // Adjust upper bound
         }
     }
-}
 
+    return bestAmount; // Return the largest amount with valid liquidity
+}
 
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
