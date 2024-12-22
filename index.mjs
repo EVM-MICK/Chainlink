@@ -9,7 +9,7 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import qs from "qs";
-import pLimit from "p-limit"; // For concurrency control
+import pLimit from 'p-limit';
 import { getAddress } from "@ethersproject/address";
 import { gql, request } from "graphql-request";
 import cron from "node-cron";
