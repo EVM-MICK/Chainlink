@@ -1100,33 +1100,6 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
 
     throw new Error("Failed to fetch quote after 3 attempts.");
 }
-// Fetch multiple quotes sequentially
-async function fetchMultipleQuotes(chainId, quoteRequests) {
-    const results = await Promise.all(
-        quoteRequests.map(async ({ srcToken, dstToken, amount }) => {
-            try {
-                // Use estimateLiquidity to ensure proper liquidity for the trade
-                const estimatedLiquidity = await estimateLiquidity(chainId, srcToken, dstToken);
-                if (estimatedLiquidity.isLessThan(amount)) {
-                    console.warn(
-                        `Liquidity too low for ${srcToken} ➡️ ${dstToken}: Requested ${amount}, Available ${estimatedLiquidity}`
-                    );
-                    return null;
-                }
-
-                const quote = await fetchQuote(chainId, srcToken, dstToken, amount);
-                console.log(`Successfully fetched quote for ${srcToken} ➡️ ${dstToken}`);
-                return { srcToken, dstToken, amount, quote };
-            } catch (error) {
-                console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
-                return null; // Skip failed requests
-            }
-        })
-    );
-
-    return results.filter(Boolean); // Remove null entries
-}
-
 
 // Generate routes using a BFS approach and inferred liquidity
 async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 300000000) {
