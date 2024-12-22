@@ -9,7 +9,6 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import qs from "qs";
-import { FlashbotsBundleProvider } from "@flashbots/ethers-provider-bundle";
 import pLimit from "p-limit"; // For concurrency control
 import { getAddress } from "@ethersproject/address";
 import { gql, request } from "graphql-request";
@@ -17,6 +16,7 @@ import cron from "node-cron";
 
 dotenv.config();
 const { Telegraf } = pkg;
+const { FlashbotsBundleProvider } = await import('@flashbots/ethers-provider-bundle');
 const require = createRequire(import.meta.url);
 const UNISWAP_SUBGRAPH_URL = `https://gateway.thegraph.com/api/${process.env.UNISWAP_API_KEY}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV`;
 const ABI = require('./YourSmartContractABI.json');
