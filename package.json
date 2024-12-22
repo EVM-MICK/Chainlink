@@ -3,7 +3,7 @@
   "name": "polygon-arbitrage-bot",
   "version": "1.0.0",
   "description": "An arbitrage bot for Polygon mainnet that finds profitable swap routes and executes flash loans.",
-  "main": "index.js",
+  "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs"
   },
