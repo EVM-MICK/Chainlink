@@ -9,11 +9,16 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import qs from "qs"; 
+import { FlashbotsBundleProvider } from "@flashbots/ethers-provider-bundle";
+import pLimit from "p-limit"; // For concurrency control
 import { getAddress } from "@ethersproject/address";
+import { gql, request } from "graphql-request";
+import cron from "node-cron";
 
 dotenv.config();
 const { Telegraf } = pkg;
 const require = createRequire(import.meta.url);
+const UNISWAP_SUBGRAPH_URL = `https://gateway.thegraph.com/api/${process.env.UNISWAP_API_KEY}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV`;
 const ABI = require('./YourSmartContractABI.json');
 // const ABI = await import('./YourSmartContractABI.json', { assert: { type: 'json' } }).then(module => module.default);
 const web3 = new Web3(process.env.INFURA_URL);  // Ensure this is Polygon-compatible
@@ -69,6 +74,10 @@ const priceCache = {
     timestamp: 0,
 };
 const CACHE_DURATION = 15 * 1000; // 10 seconds
+const TARGET_CONTRACTS = [
+    "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Example: Uniswap V3
+    "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F", // Example: SushiSwap
+];
 
 // Hardcoded stable token addresses
 const HARDCODED_STABLE_ADDRESSES = [
@@ -189,6 +198,12 @@ async function delay(ms) {
     return nonce;
 }
 
+cron.schedule("0 * * * *", async () => {
+    console.log("Updating historical profit data...");
+    const updatedProfitData = await getHistoricalProfitData(HARDCODED_STABLE_ADDRESSES);
+    console.log("Updated Historical Profit Data:", updatedProfitData);
+});
+
 async function fetchCachedGasPrice() {
  const API_KEY1 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
     const url1 = "https://api.blocknative.com/gasprices/blockprices";
@@ -225,30 +240,139 @@ async function fetchCachedGasPrice() {
     }
 }
 
-async function fetchFromTokenAPI(endpoint, params = {}) {
-    const url = `${TOKEN_API_URL}`;
+/**
+ * Fetch historical volume for tokens.
+ * @param {string} tokenAddress - Token contract address.
+ * @returns {Promise<BigNumber>} - Historical volume in USD.
+ */
+async function fetchHistoricalVolume(tokenAddress) {
+    const query = gql`
+        query ($token: String!) {
+            token(id: $token) {
+                id
+                symbol
+                name
+                volumeUSD
+                poolCount
+            }
+        }
+    `;
+
     try {
-        const response = await apiQueue.add(() =>
-            axios.get(TOKEN_API_URL, { headers: HEADERS, params })
-        );
-        return response.data;
+        const response = await request(UNISWAP_SUBGRAPH_URL, query, { token: tokenAddress.toLowerCase() });
+        return new BigNumber(response.token.volumeUSD || 0);
     } catch (error) {
-        console.error(`Token API Error [${endpoint}]:`, error.response?.data || error.message);
-        throw error;
+        console.error(`Error fetching historical volume for ${tokenAddress}:`, error.message);
+        return new BigNumber(0);
     }
 }
 
-async function fetchFromSwapAPI(endpoint, params = {}) {
-    const url = `${SWAP_API_URL}/quote`;
+/**
+ * Fetch historical profit data from 1inch API.
+ * @param {string} tokenAddress - Token contract address.
+ * @returns {Promise<BigNumber>} - Historical profit estimation.
+ */
+async function fetchHistoricalProfit1Inch(tokenAddress) {
+    const url = `https://api.1inch.dev/history/v2.0/history/${process.env.WALLET_ADDRESS}/events`;
+
     try {
-        const response = await apiQueue.add(() =>
-            axios.get(url, { headers: HEADERS, params })
-        );
-        return response.data;
+        const response = await axios.get(url, {
+            headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+            params: { tokenAddress, chainId: 42161, limit: 100 },
+        });
+
+        const profits = response.data.events
+            .filter((event) => event.profit)
+            .map((event) => new BigNumber(event.profit));
+
+        return profits.reduce((acc, profit) => acc.plus(profit), new BigNumber(0));
     } catch (error) {
-        console.error(`Swap API Error [${endpoint}]:`, error.response?.data || error.message);
-        throw error;
+        console.error(`Error fetching historical profit for ${tokenAddress}:`, error.message);
+        return new BigNumber(0);
     }
+}
+
+/**
+ * Aggregate historical profit data for multiple tokens.
+ * @param {string[]} tokenAddresses - List of token contract addresses.
+ * @returns {Promise<Object>} - Historical profit data mapped by token address.
+ */
+async function getHistoricalProfitData(tokenAddresses) {
+    const profitData = {};
+
+    await Promise.all(
+        tokenAddresses.map(async (token) => {
+            try {
+                const volumeUSD = await fetchHistoricalVolume(token);
+                const profit1Inch = await fetchHistoricalProfit1Inch(token);
+
+                // Aggregate data (volume can act as a proxy for profitability)
+                profitData[token] = volumeUSD.plus(profit1Inch).toFixed();
+            } catch (error) {
+                console.error(`Error aggregating profit data for ${token}:`, error.message);
+            }
+        })
+    );
+
+    return profitData;
+}
+
+
+
+/**
+ * Fetch order book depth for a token pair.
+ * @param {string} srcToken - Source token address.
+ * @param {string} dstToken - Destination token address.
+ * @returns {Object} - Order book depth data.
+ */
+/**
+ * Fetches the order book depth for a given trading pair using the 1inch Orderbook API.
+ * @param {string} srcToken - Address of the source token.
+ * @param {string} dstToken - Address of the destination token.
+ * @param {number} chainId - The chain ID (e.g., 1 for Ethereum, 42161 for Arbitrum).
+ * @returns {Promise<Object|null>} - The order book data or null in case of failure.
+ */
+async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
+    const url = `https://api.1inch.dev/orderbook/v3.0/${chainId}`;
+    const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, // Use your 1inch API key
+    };
+
+    try {
+        // Prepare the request payload for querying the order book
+        const payload = {
+            limit: 50, // Max number of orders to fetch
+            makerAsset: srcToken.toLowerCase(),
+            takerAsset: dstToken.toLowerCase(),
+        };
+
+        console.log(`Fetching order book for ${srcToken} -> ${dstToken} on chain ${chainId}...`);
+
+        const response = await axios.post(url, payload, { headers });
+
+        if (response.status === 200 && response.data) {
+            console.log(`Order book fetched successfully for ${srcToken} -> ${dstToken}.`);
+            return response.data;
+        }
+
+        console.warn(`Unexpected response for ${srcToken} -> ${dstToken}:`, response.data);
+        return null;
+    } catch (error) {
+        console.error(`Error fetching order book depth for ${srcToken} -> ${dstToken}:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Adjust trade size based on slippage.
+ * @param {BigNumber} amountIn - Input trade amount.
+ * @param {BigNumber} liquidity - Available liquidity.
+ * @returns {BigNumber} - Adjusted amount after accounting for slippage.
+ */
+function adjustForSlippage(amountIn, liquidity) {
+    const slippage = amountIn.dividedBy(liquidity).multipliedBy(0.01); // Example: 1% slippage
+    return amountIn.minus(slippage);
 }
 
 async function fetchFromPriceAPI(endpoint, params = {}) {
@@ -265,6 +389,39 @@ async function fetchFromPriceAPI(endpoint, params = {}) {
 }
 
 
+/**
+ * Prioritize tokens based on historical profit data.
+ * @param {string[]} tokens - Array of token addresses.
+ * @param {Object} historicalProfitData - Mapping of token addresses to profit values.
+ * @returns {string[]} - Sorted array of token addresses by priority.
+ */
+function prioritizeTokens(tokens, historicalProfitData) {
+    return tokens.sort((a, b) => (historicalProfitData[b] || 0) - (historicalProfitData[a] || 0));
+}
+
+/**
+ * Fetch historical trade data for tokens.
+ * @param {string} address - Wallet address.
+ * @param {number} chainId - Chain ID.
+ * @param {number} [limit=100] - Number of events to fetch.
+ * @returns {Object} - Historical trade events.
+ */
+async function fetchHistoricalTradeData(address, chainId, limit = 100) {
+    const url = `https://api.1inch.dev/history/v2.0/history/${address}/events`;
+    const config = {
+        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+        params: { chainId, limit },
+    };
+
+    try {
+        const response = await axios.get(url, config);
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching historical trade data:`, error.message);
+        return [];
+    }
+}
+
  async function cachedGetLiquidityData(tokens) {
     const cacheKey = `liquidity:${tokens.join(",")}`;
 
@@ -277,11 +434,11 @@ async function fetchFromPriceAPI(endpoint, params = {}) {
     }
 
     // Fetch gas price before fetching liquidity data
-    const gasPrice = await fetchCachedGasPrice();
-    console.log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`);
+    // const gasPrice = await fetchCachedGasPrice();
+    // console.log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`);
 
     // Fetch liquidity data (assuming `getLiquidityData` is implemented)
-    const data = await getLiquidityData(tokens);
+    const data = estimateLiquidity();
     
     // Cache the fetched liquidity data along with a timestamp
     cache.set(cacheKey, { data, timestamp: Date.now() });
@@ -308,6 +465,35 @@ async function safeApiCall(apiCallFunction, ...args) {
     });
 }
 
+/**
+ * Fetch multiple quotes in parallel with rate limiting.
+ * @param {number} chainId - Chain ID.
+ * @param {Object[]} quoteRequests - Array of quote request objects { srcToken, dstToken, amount }.
+ * @returns {Object[]} - Array of fetched quotes.
+ */
+async function fetchMultipleQuotes(chainId, quoteRequests) {
+    const limit = pLimit(1); // 1 request per second for rate limiting
+    const results = await Promise.all(
+        quoteRequests.map(({ srcToken, dstToken, amount }) =>
+            limit(async () => {
+                try {
+                    const estimatedLiquidity = await estimateLiquidity(chainId, srcToken, dstToken);
+                    if (estimatedLiquidity.isLessThan(amount)) {
+                        console.warn(`Liquidity too low for ${srcToken} ➡️ ${dstToken}: ${estimatedLiquidity}`);
+                        return null;
+                    }
+                    const quote = await fetchQuote(chainId, srcToken, dstToken, amount);
+                    console.log(`Fetched quote for ${srcToken} ➡️ ${dstToken}`);
+                    return { srcToken, dstToken, amount, quote };
+                } catch (error) {
+                    console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
+                    return null;
+                }
+            })
+        )
+    );
+    return results.filter(Boolean); // Remove null entries
+}
 
 // Construct `params` with SwapDescription and Permit2 signature
 async function constructParams(route, amount, permitBatchSignature) {
@@ -447,28 +633,52 @@ async function getSwapData(fromToken, toToken, amount, slippage) {
 }
 
 
-// Primary function to run the arbitrage bot with automated monitoring
- export async function runArbitrageBot() {
-    console.log("Starting arbitrage bot... Monitoring for profitable swaps...");
 
+/**
+ * Main arbitrage bot function.
+ * Runs the monitoring loop for both mempool-based and periodic profitable route discovery.
+ */
+export async function runArbitrageBot() {
+    console.log("Starting arbitrage bot...");
+
+    // Mempool Monitoring for Arbitrage Opportunities
+    monitorMempool(TARGET_CONTRACTS, process.env.CHAIN_ID, async ({ txHash, profit, srcToken, dstToken, amountIn }) => {
+        console.log(`Mempool Arbitrage Opportunity Detected!`);
+        console.log(`Transaction Hash: ${txHash}, Profit: ${profit.toFixed()} USDT`);
+        console.log(`Route: ${srcToken} ➡️ ${dstToken}, Amount In: ${amountIn.toFixed()}`);
+
+        try {
+            const route = [srcToken, dstToken];
+            await executeRouteWithRetry(route, CAPITAL); // Use retry logic for mempool opportunities
+        } catch (error) {
+            console.error("Error executing mempool arbitrage:", error.message);
+        }
+    });
+
+    // Periodic Monitoring for Profitable Routes
     setInterval(async () => {
         try {
-            // Step 1: Fetch gas price (cache this every 5 minutes)
-            const gasPrice = await fetchGasPrice();
+            console.log("Running periodic profitable route discovery...");
 
-            // Step 2: Get liquidity data (refresh every 15 minutes)
+            const gasPrice = await fetchGasPrice();
+            console.log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`);
+
+            // Refresh liquidity data every 15 minutes
             if (Date.now() % (15 * 60 * 1000) === 0) {
+                console.log("Refreshing liquidity data...");
                 await cachedGetLiquidityData(STABLE_TOKENS);
             }
 
-            // Step 3: Find profitable routes (limit to top 3-5 tokens)
             const profitableRoutes = await findProfitableRoutes();
             if (profitableRoutes.length > 0) {
                 const bestRoute = profitableRoutes[0];
-                await executeRoute(bestRoute.route, bestRoute.profit);
+                console.log(`Executing best route: ${bestRoute.route.join(" ➡️ ")}, Profit: ${bestRoute.profit.toFixed()}`);
+                await executeRouteWithRetry(bestRoute.route, bestRoute.profit);
+            } else {
+                console.log("No profitable routes found in this cycle.");
             }
         } catch (error) {
-            console.error("Error in monitoring loop:", error);
+            console.error("Error in periodic monitoring loop:", error.message);
         }
     }, 5 * 60 * 1000); // Run every 5 minutes
 }
@@ -506,7 +716,7 @@ async function findProfitableRoutes() {
         // Step 4: Evaluate routes and their profitability
         const profitableRoutes = [];
         for (const route of routes) {
-            const profit = estimateRoutePotential(route, CAPITAL, tokenPrices);
+            const profit = await evaluateRouteProfit(route);
 
             if (profit > 0) {
                 console.log(`Profitable route found: ${route.join(" ➡️ ")} with estimated profit: $${profit.toFixed(2)}`);
@@ -545,77 +755,6 @@ class PriorityQueue {
     }
 }
 
-// Utility: Estimate route potential (placeholder logic)
-
-async function estimateRoutePotential(route, capital, priceData, gasPrice, estimatedGasPerSwap) {
-    try {
-        const protocolFeePercent = 0.003; // 0.3% fee
-        let amountIn = capital; // Start with the full capital for trading
-
-        for (let i = 0; i < route.length - 1; i++) {
-            const fromToken = route[i];
-            const toToken = route[i + 1];
-
-            // Retrieve token prices
-            const fromPrice = priceData[fromToken]?.price;
-            const toPrice = priceData[toToken]?.price;
-
-            if (!fromPrice || !toPrice) {
-                console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}. Skipping route.`);
-                return -1; // Invalid route
-            }
-
-            // Validate liquidity for the fromToken
-            const liquidity = priceData[fromToken]?.liquidity || 0;
-            if (new BigNumber(liquidity).isLessThan(amountIn)) {
-                console.warn(`Insufficient liquidity for token ${fromToken}. Skipping route.`);
-                return -1; // Invalid route due to low liquidity
-            }
-
-            // Calculate slippage based on liquidity
-            const slippage = liquidity < amountIn.toNumber() ? 0.01 : 0.005; // Higher slippage for low liquidity
-
-            // Calculate next hop output
-            const amountOut = amountIn
-                .multipliedBy(new BigNumber(toPrice))
-                .dividedBy(new BigNumber(fromPrice))
-                .multipliedBy(1 - slippage); // Adjust for slippage
-
-            // Subtract protocol fees
-            const fee = amountOut.multipliedBy(protocolFeePercent);
-            amountIn = amountOut.minus(fee); // Update amount for the next hop
-
-            // Validate intermediate output
-            if (amountIn.isLessThanOrEqualTo(0)) {
-                console.error(`Zero or negative output during route calculation: ${fromToken} -> ${toToken}`);
-                return -1; // Invalid route
-            }
-        }
-
-        // Subtract gas costs
-        const gasCost = gasPrice.multipliedBy(estimatedGasPerSwap).multipliedBy(route.length - 1);
-        const profit = amountIn.minus(capital).minus(gasCost);
-
-        // Return profit if positive, otherwise -1 for invalid/unprofitable routes
-        return profit.isGreaterThan(0) ? profit.toNumber() : -1;
-
-    } catch (error) {
-        console.error("Error in estimateRoutePotential:", error.message);
-        return -1; // Return a base fallback for errors
-    }
-}
-
-function expandStableTokens(unmatchedTokens) {
-    // Example logic to include dynamically determined stable tokens
-    const additionalStableTokens = unmatchedTokens.filter((token) => {
-        // Criteria: Could include high liquidity or frequent usage in routes
-        return token.liquidity > 1_000_000; // Example threshold
-    });
-
-    STABLE_TOKENS.push(...additionalStableTokens);
-    console.log("Updated STABLE_TOKENS list:", STABLE_TOKENS);
-}
-
 /**
  * Retrieve a list of stable tokens dynamically from the 1inch Token API.
  * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
@@ -637,33 +776,6 @@ const STABLE_TOKENS_ADD = {
 /**
  * Fetch token data with enhanced error handling and rate-limiting logic.
  */
-async function fetchTokenData(address, headers, baseUrl) {
-    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
-        console.warn("No token addresses provided to fetchTokenDataBatch.");
-        return {};
-    }
-
-    try {
-        const response = await apiQueue.add(() =>
-            axios.get(`${baseUrl}/custom`, {
-                headers,
-                params: { addresses: tokenAddresses },
-            })
-        );
-
-        if (response.data) {
-            console.log("Fetched batch token data successfully.");
-            return response.data.tokens || {}; // Assuming tokens are returned in a "tokens" field
-        } else {
-            console.warn("No data received in fetchTokenDataBatch.");
-            return {};
-        }
-    } catch (error) {
-        console.error("Error in fetchTokenDataBatch:", error.message);
-        throw error;
-    }
-}
-
 
 /**
  * Fetch stable token details from 1inch Token API with fallback logic.
@@ -795,12 +907,21 @@ async function retryRequest(requestFn, retries = 3, delay = 1000) {
     }
 }
 
+/**
+ * Fetch token prices using 1inch API with fallback to Uniswap Subgraph.
+ * @param {string[]} tokenAddresses - Array of token contract addresses.
+ * @param {Object} historicalProfitData - Historical profit data for prioritization.
+ * @returns {Promise<Object>} - Token prices mapped by token address.
+ */
 
-async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
+async function fetchTokenPrices(tokenAddresses = [], historicalProfitData = {}) {
     if (!tokenAddresses || tokenAddresses.length === 0) {
         console.warn("No token addresses provided to fetchTokenPrices.");
         return {};
     }
+
+    // Prioritize tokens based on historical profit data
+    const prioritizedTokens = prioritizeTokens(tokenAddresses, historicalProfitData);
 
     const batchSize = 4; // Number of tokens per batch to avoid rate limits
     const now = Date.now();
@@ -816,42 +937,41 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
     }
 
     const tokenBatches = [];
-    for (let i = 0; i < tokenAddresses.length; i += batchSize) {
-        tokenBatches.push(tokenAddresses.slice(i, i + batchSize));
+    for (let i = 0; i < prioritizedTokens.length; i += batchSize) {
+        tokenBatches.push(prioritizedTokens.slice(i, i + batchSize));
     }
 
     const prices = {};
 
     for (const batch of tokenBatches) {
-        const url = `${PRICE_API_URL}/${CHAIN_ID}/${batch.join(",")}`;
-        let attempts = 0;
+        try {
+            const url = `${PRICE_API_URL}/${CHAIN_ID}/${batch.join(",")}`;
+            console.log(`Fetching token prices from 1inch URL: ${url}`);
 
-        while (attempts < 3) {
-            try {
-                console.log(`Fetching token prices from URL: ${url}`);
-                const response = await axios.get(url, {
-                    headers: {
-                        Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
-                        Accept: "application/json",
-                    },
-                    params: { currency: "USD" },
-                });
+            const response = await axios.get(url, {
+                headers: {
+                    Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+                    Accept: "application/json",
+                },
+                params: { currency: "USD" },
+            });
 
-                if (response.status === 200 && response.data) {
-                    Object.assign(prices, response.data);
-                    break;
-                } else {
-                    console.warn(`Unexpected response: ${response.statusText}`);
-                }
-            } catch (error) {
-                if (error.response?.status === 429) {
-                    attempts++;
-                    const delay = Math.pow(2, attempts) * 1000; // Exponential backoff
-                    console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts}/3)`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    console.error(`Error fetching token prices: ${error.message}`);
-                    break;
+            if (response.status === 200 && response.data) {
+                Object.assign(prices, response.data);
+            }
+        } catch (error) {
+            console.warn("1inch API failed for token prices. Falling back to alternative APIs.");
+
+            // Fallback to an alternative API (e.g., Uniswap Subgraph)
+            for (const token of batch) {
+                try {
+                    const alternativeResponse = await fetchTokenPriceAlternativeAPI(token);
+                    if (alternativeResponse) {
+                        prices[token] = new BigNumber(alternativeResponse);
+                        console.log(`Fallback: Fetched price for ${token}: ${prices[token].toFixed(4)}`);
+                    }
+                } catch (fallbackError) {
+                    console.error(`Error fetching price for token ${token}:`, fallbackError.message);
                 }
             }
         }
@@ -860,6 +980,48 @@ async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
     // Cache the fetched prices
     cache.set(cacheKey, { data: prices, timestamp: now });
     return prices;
+}
+
+/**
+ * Fetches the token price using the Uniswap Subgraph API.
+ * @param {string} tokenAddress - The token's contract address.
+ * @returns {Promise<BigNumber>} - The token price in USD.
+ */
+async function fetchTokenPriceAlternativeAPI(tokenAddress) {
+    try {
+        // GraphQL Query to fetch token and ETH price
+        const query = gql`
+            {
+                token(id: "${tokenAddress.toLowerCase()}") {
+                    derivedETH
+                    symbol
+                    name
+                    decimals
+                }
+                bundles(first: 1) {
+                    ethPriceUSD
+                }
+            }
+        `;
+
+        const data = await request(UNISWAP_SUBGRAPH_URL, query);
+
+        // Extract token and ETH price data
+        const tokenData = data.token;
+        const ethPriceUSD = data.bundles[0].ethPriceUSD;
+
+        if (!tokenData || !ethPriceUSD) {
+            throw new Error(`Failed to fetch price for token: ${tokenAddress}`);
+        }
+
+        // Calculate token price in USD
+        const tokenPriceUSD = new BigNumber(tokenData.derivedETH).multipliedBy(new BigNumber(ethPriceUSD));
+        console.log(`Fetched price for ${tokenData.symbol}: $${tokenPriceUSD.toFixed(4)}`);
+        return tokenPriceUSD;
+    } catch (error) {
+        console.error(`Error fetching token price from Uniswap Subgraph: ${error.message}`);
+        throw error;
+    }
 }
 
 // Function to generate all possible routes within a max hop limit using stable, liquid tokens
@@ -969,7 +1131,7 @@ async function fetchMultipleQuotes(chainId, quoteRequests) {
 // Generate routes using a BFS approach and inferred liquidity
 async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 300000000) {
     try {
-        // Validate startToken
+        // Validate the start token address
         if (!web3.utils.isAddress(startToken)) {
             throw new Error(`Invalid start token address: ${startToken}`);
         }
@@ -984,81 +1146,46 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, pro
             throw new Error("No valid stable token addresses available.");
         }
 
-        // Step 2: Fetch token prices
-        const tokenPrices = await fetchTokenPrices();
-
-        // Step 3: Infer token liquidity using smarter liquidity testing (binary search)
-        const liquidityMap = {};
-        await Promise.all(
-            validStableTokenAddresses.map(async token => {
-                liquidityMap[token] = await estimateLiquidity(chainId, startToken, token);
-            })
-        );
-
-        // Dynamic programming table for tracking max outputs
-        const dp = {};
-        const profitableRoutes = new Set();
-
-        // BFS queue initialization
-        const queue = [{ path: [startToken], amount: startAmount, hopsRemaining: maxHops }];
-        dp[startToken] = { [0]: startAmount }; // Initialize DP table for the start token
-
-        while (queue.length > 0) {
-            const { path, amount, hopsRemaining } = queue.shift();
-            const currentToken = path[path.length - 1];
-
-            // Skip if max hops are reached
-            if (hopsRemaining === 0) continue;
-
-            // Filter tokens for the next hop
-            const nextTokens = validStableTokenAddresses.filter(nextToken => !path.includes(nextToken));
-
-            // Fetch multiple quotes in parallel for efficiency
-            const quotes = await fetchMultipleQuotes(chainId, nextTokens.map(nextToken => ({
-                srcToken: currentToken,
-                dstToken: nextToken,
-                amount,
-            })));
-
-            for (const { dstToken, quote } of quotes) {
-                if (!quote || !quote.toAmount) continue;
-
-                // Calculate adjusted amount after fees and slippage
-                const fees = new BigNumber(quote.estimatedGas || 0).times(tokenPrices[currentToken] || 0);
-                const slippageImpact = new BigNumber(quote.toAmount).times(0.01); // Example: 1% slippage
-                const adjustedToAmount = new BigNumber(quote.toAmount).minus(fees).minus(slippageImpact);
-
-                if (adjustedToAmount.isLessThanOrEqualTo(0)) continue;
-
-                const newPath = [...path, dstToken];
-                const profit = adjustedToAmount.minus(startAmount);
-
-                // Add profitable route
-                if (profit.isGreaterThan(profitThreshold)) {
-                    console.log(`Profitable route: ${newPath.join(" ➡️ ")} with profit: ${profit}`);
-                    profitableRoutes.add(newPath.join(","));
-                }
-
-                // Update DP table and enqueue next steps
-                if (!dp[dstToken]) dp[dstToken] = {};
-                if (
-                    !dp[dstToken][maxHops - hopsRemaining] || 
-                    adjustedToAmount.isGreaterThan(dp[dstToken][maxHops - hopsRemaining])
-                ) {
-                    dp[dstToken][maxHops - hopsRemaining] = adjustedToAmount;
-                    queue.push({ path: newPath, amount: adjustedToAmount.toFixed(0), hopsRemaining: hopsRemaining - 1 });
+        // Step 2: Construct token pairs for graph building
+        const tokenPairs = [];
+        for (const srcToken of validStableTokenAddresses) {
+            for (const dstToken of validStableTokenAddresses) {
+                if (srcToken !== dstToken) {
+                    tokenPairs.push({ srcToken, dstToken });
                 }
             }
         }
 
-        // Step 4: Return top profitable routes
-        return Array.from(profitableRoutes)
-            .map(route => ({
-                route: route.split(","),
-                profit: new BigNumber(dp[route.split(",").slice(-1)[0]][0] || 0).minus(startAmount).toString(),
-            }))
+        // Step 3: Build the weighted graph using fees and slippage
+        console.log("Building graph with token pairs...");
+        const graph = await buildGraph(tokenPairs, chainId);
+
+        // Step 4: Dynamic Hop Limitation
+        const averageLiquidity = await calculateAverageLiquidity(validStableTokenAddresses, chainId, startToken);
+        maxHops = adjustMaxHops(maxHops, averageLiquidity);
+
+        console.log(`Dynamic maxHops adjusted to: ${maxHops}`);
+
+        // Step 5: Use Dijkstra's algorithm to find the optimal route
+        const profitableRoutes = [];
+        for (const endToken of validStableTokenAddresses) {
+            if (endToken !== startToken) {
+                const { path, cost } = findOptimalRoute(graph, startToken, endToken);
+
+                if (path.length > 1) {
+                    const profit = startAmount.minus(cost);
+                    if (profit.isGreaterThan(profitThreshold)) {
+                        profitableRoutes.push({ path, profit });
+                        console.log(`Profitable route found: ${path.join(" ➡️ ")} with profit: ${profit}`);
+                    }
+                }
+            }
+        }
+
+        // Step 6: Sort and return the top profitable routes
+        return profitableRoutes
             .sort((a, b) => new BigNumber(b.profit).minus(a.profit))
-            .slice(0, 3); // Return top 3 routes
+            .slice(0, 3); // Limit to top 3 routes
 
     } catch (error) {
         console.error("Error in generateRoutes:", error.message);
@@ -1066,41 +1193,117 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, pro
     }
 }
 
+/**
+ * Adjust maxHops dynamically based on average liquidity.
+ *
+ * @param {number} initialMaxHops - Initial maxHops value.
+ * @param {BigNumber} averageLiquidity - Average liquidity of tokens in the current graph.
+ * @returns {number} - Adjusted maxHops value.
+ */
+function adjustMaxHops(initialMaxHops, averageLiquidity) {
+    if (averageLiquidity.isGreaterThan(CAPITAL.multipliedBy(10))) {
+        return Math.min(initialMaxHops + 1, 4); // Increase hops if liquidity is very high
+    } else if (averageLiquidity.isLessThan(CAPITAL.dividedBy(2))) {
+        return Math.max(initialMaxHops - 1, 1); // Decrease hops if liquidity is low
+    }
+    return initialMaxHops; // Keep maxHops unchanged
+}
+
+/**
+ * Calculate the average liquidity for a list of tokens.
+ *
+ * @param {string[]} tokens - Array of token addresses.
+ * @param {number} chainId - Chain ID.
+ * @param {string} startToken - Starting token for the calculation.
+ * @returns {BigNumber} - Average liquidity of the tokens.
+ */
+async function calculateAverageLiquidity(tokens, chainId, startToken) {
+    let totalLiquidity = new BigNumber(0);
+    let count = 0;
+
+    await Promise.all(
+        tokens.map(async (token) => {
+            try {
+                const liquidity = await estimateLiquidity(chainId, startToken, token);
+                if (liquidity.isGreaterThan(0)) {
+                    totalLiquidity = totalLiquidity.plus(liquidity);
+                    count++;
+                }
+            } catch (error) {
+                console.warn(`Failed to estimate liquidity for token: ${token}`, error.message);
+            }
+        })
+    );
+
+    return count > 0 ? totalLiquidity.dividedBy(count) : new BigNumber(0);
+}
+
+/**
+ * Build the weighted graph for tokens based on fees and slippage.
+ *
+ * @param {Object[]} tokenPairs - Array of token pair objects { srcToken, dstToken }.
+ * @param {number} chainId - Chain ID.
+ * @returns {Object} - The graph object representing weights for each token pair.
+ */
+async function buildGraph(tokenPairs, chainId) {
+    const graph = {};
+
+    await Promise.all(
+        tokenPairs.map(async ({ srcToken, dstToken }) => {
+            try {
+                const quote = await fetchQuote(chainId, srcToken, dstToken, CAPITAL.toFixed());
+                if (quote && quote.toAmount) {
+                    const fee = new BigNumber(quote.estimatedGas || 0).times(await fetchGasPrice());
+                    const slippage = new BigNumber(quote.toAmount).times(0.01); // Example: 1% slippage
+                    const weight = fee.plus(slippage);
+
+                    if (!graph[srcToken]) graph[srcToken] = {};
+                    graph[srcToken][dstToken] = weight;
+                }
+            } catch (error) {
+                console.warn(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
+            }
+        })
+    );
+
+    return graph;
+}
+
 // Estimate liquidity by progressive trade analysis
+/**
+ * Estimate token pair liquidity using dynamic trade analysis.
+ * @param {number} chainId - Chain ID.
+ * @param {string} srcToken - Source token address.
+ * @param {string} dstToken - Destination token address.
+ * @returns {BigNumber} - Estimated liquidity.
+ */
 async function estimateLiquidity(chainId, srcToken, dstToken) {
-    // Validate tokens before proceeding
-    if (!web3.utils.isAddress(srcToken) || !web3.utils.isAddress(dstToken)) {
-        throw new Error(`Invalid token addresses: ${srcToken}, ${dstToken}`);
+    const orderBook = await fetchOrderBookDepth(srcToken, dstToken);
+    if (!orderBook || !orderBook.liquidity) {
+        throw new Error(`Liquidity data unavailable for ${srcToken} ➡️ ${dstToken}`);
     }
 
-    let low = new BigNumber(10).pow(18); // Start with 1 token
-    let high = new BigNumber(10).pow(24); // Arbitrary large value
+    let low = new BigNumber(10).pow(18);
+    let high = new BigNumber(10).pow(24);
     let bestAmount = low;
 
     while (low.isLessThanOrEqualTo(high)) {
         const mid = low.plus(high).dividedBy(2).integerValue(BigNumber.ROUND_FLOOR);
-
         try {
-            const quote = await fetchQuote(chainId, srcToken, dstToken, mid.toFixed());
-            const toAmount = new BigNumber(quote.toAmount);
-
-            if (toAmount.isGreaterThan(0)) {
-                // Found valid liquidity, move the lower bound up
+            const adjustedAmount = adjustForSlippage(mid, new BigNumber(orderBook.liquidity));
+            if (adjustedAmount.isGreaterThan(0)) {
                 bestAmount = mid;
                 low = mid.plus(1);
             } else {
-                // No liquidity, reduce the upper bound
                 high = mid.minus(1);
             }
         } catch (error) {
-            console.warn(`Liquidity estimation failed for ${srcToken} ➡️ ${dstToken} at amount: ${mid}`, error.message);
-            high = mid.minus(1); // Adjust upper bound
+            console.warn(`Liquidity estimation failed: ${error.message}`);
+            high = mid.minus(1);
         }
     }
-
-    return bestAmount; // Return the largest amount with valid liquidity
+    return bestAmount;
 }
-
 /**
  * Fetch token prices and critical data across protocols using the 1inch Price API.
  * @param {string[]} tokens - Array of token symbols (e.g., ["USDT", "USDC", ...]).
@@ -1203,29 +1406,6 @@ async function calculateDynamicProfitThreshold() {
     return dynamicThreshold;
 }
 
-
-// Helper: Get the best price from protocol data
-function getBestPrice(protocolPrices) {
-    return protocolPrices
-        ? protocolPrices.reduce((best, current) => {
-              const currentPrice = new BigNumber(current.price);
-              return currentPrice.isGreaterThan(best) ? currentPrice : best;
-          }, new BigNumber(0))
-        : null;
-}
-
-// Helper Function: Fetch Liquidity Data (1inch API Example)
- async function getLiquidityData(tokens) {
-    const cacheKey = `liquidityData:${tokens.join(",")}`;
-    return cachedGet(cacheKey, async () => {
-        const response = await fetchFrom1Inch(`/tokens`, { tokens });
-        return tokens.reduce((acc, token) => {
-            acc[token] = response.tokens[token]?.liquidity || 0;
-            return acc;
-        }, {});
-    }, "liquidityData");
-}
-
 async function safeExecute(fn, ...args) {
     try {
         return await fn(...args);
@@ -1255,27 +1435,28 @@ async function fetchGasPrice() {
                 () =>
                     axios.get("https://api.blocknative.com/gasprices/blockprices", {
                         headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` },
-                        params: { chainId: 42161 },
+                        params: { chainId: 42161 }, // Arbitrum network
                     }),
                 3, // Retry up to 3 times
                 1000 // Start with a 1-second delay
             );
 
-            const gasPrice = response.data.blockPrices?.[0]?.baseFeePerGas;
-            if (gasPrice) {
-                const weiGasPrice = new BigNumber(gasPrice).shiftedBy(9); // Convert Gwei to Wei
+            const gasPriceGwei = response.data.blockPrices?.[0]?.baseFeePerGas;
+            if (gasPriceGwei) {
+                const weiGasPrice = new BigNumber(gasPriceGwei).shiftedBy(9); // Convert Gwei to Wei
                 cache.set(cacheKey, { data: weiGasPrice, timestamp: now });
                 return weiGasPrice;
             }
 
             console.warn("Gas price not found in API response. Using fallback value: 50 Gwei.");
-            return new BigNumber(50).shiftedBy(9);
+            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei
         } catch (error) {
             console.error("Error fetching gas price. Using fallback value:", error.message);
-            return new BigNumber(50).shiftedBy(9);
+            return new BigNumber(50).shiftedBy(9); // Fallback to 50 Gwei
         }
     });
 }
+
 
 async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
     const results = await Promise.all(
@@ -1299,197 +1480,168 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
     }, {});
 }
 
-
-// Calculate dynamic minimum profit threshold based on gas fees and flash loan repayment
- async function calculateDynamicMinimumProfit() {
-    const gasPrice = await fetchGasPrice();
-    const estimatedGas = await estimateGas(800000); // Example estimated gas; adjust based on actual route complexity
-    const gasCost = gasPrice.multipliedBy(estimatedGas);
-
-    // Flash loan fee (0.05% of CAPITAL)
-    const flashLoanFee = CAPITAL.multipliedBy(0.0005);
-
-    // Total dynamic minimum profit required
-    return MINIMUM_PROFIT_THRESHOLD.plus(gasCost).plus(flashLoanFee);
-}
-
-// Evaluate the profitability of a given route with dynamic profit adjustment
- async function evaluateRouteProfit(route) {
+/**
+ * Monitors the Ethereum mempool for pending transactions.
+ * Detects arbitrage opportunities by analyzing swaps and price changes.
+ * 
+ * @param {string[]} targetContracts - List of smart contract addresses to monitor (e.g., Uniswap, Sushiswap).
+ * @param {number} chainId - The chain ID of the network (e.g., 42161 for Arbitrum).
+ * @param {function} onArbitrage - Callback function to execute when an opportunity is detected.
+ */
+async function monitorMempool(targetContracts, chainId, onArbitrage) {
     try {
-        // Fetch real-time token prices across protocols
-        const priceData = await fetchTokenPrices();
-        if (!priceData || Object.keys(priceData).length === 0) {
-            console.error("Failed to fetch price data for route evaluation.");
-            return new BigNumber(0);
-        }
+        // Initialize Ethereum provider
+        const provider = new ethers.providers.WebSocketProvider(process.env.INFURA_WS_URL);
 
-        // Merge cache with fetched data
-        const mergedPriceData = { ...priceCache.data, ...priceData };
+        // Subscribe to the mempool
+        provider.on("pending", async (txHash) => {
+            try {
+                // Get transaction details
+                const tx = await provider.getTransaction(txHash);
+                if (!tx || !tx.to) return;
 
-        // Calculate dynamic minimum profit threshold
-        const minimumProfitThreshold = await calculateDynamicMinimumProfit();
+                // Filter transactions for target contracts
+                if (targetContracts.includes(tx.to.toLowerCase())) {
+                    console.log(`Detected relevant transaction: ${txHash}`);
 
-        // Initial input amount (CAPITAL in USDT, assumed 6 decimals)
-        let amountIn = CAPITAL;
+                    // Analyze transaction data (e.g., method, params)
+                    const decodedData = decodeTransactionData(tx.data);
 
-        // Estimate gas cost
-        const gasEstimate = await estimateGas(route, amountIn);
-        const gasPrice = await fetchGasPrice();
-        const gasCost = gasPrice.multipliedBy(gasEstimate);
+                    // Check for arbitrage opportunities
+                    const { srcToken, dstToken } = decodedData;
 
-        // Process each step in the route
-        for (let i = 0; i < route.length - 1; i++) {
-            const fromToken = route[i];
-            const toToken = route[i + 1];
+                    // Use the fixed capital amount for all evaluations
+                    const quote = await fetchQuote(chainId, srcToken, dstToken, CAPITAL.toFixed());
 
-            // Fetch prices for the tokens in the current step
-            const fromTokenPrices = mergedPriceData[fromToken];
-            const toTokenPrices = mergedPriceData[toToken];
+                    if (quote && quote.toAmount) {
+                        // Evaluate profitability using the fixed capital
+                        const profit = await evaluateRouteProfit([srcToken, dstToken]);
 
-            // Log missing price data
-            if (!fromTokenPrices) {
-                console.warn(
-                    `Missing price data for fromToken: ${fromToken}. Using cached price if available.`
-                );
+                        if (profit.isGreaterThan(0)) {
+                            console.log(`Arbitrage opportunity detected: Profit = ${profit.toFixed()} USDC`);
+                            await onArbitrage({
+                                txHash,
+                                profit,
+                                srcToken,
+                                dstToken,
+                                amountIn: CAPITAL,
+                            });
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(`Error processing transaction ${txHash}:`, error.message);
             }
-            if (!toTokenPrices) {
-                console.warn(
-                    `Missing price data for toToken: ${toToken}. Using cached price if available.`
-                );
-            }
+        });
 
-            // If either price is missing, skip the route
-            if (!fromTokenPrices || !toTokenPrices) {
-                console.warn(`Skipping route due to missing prices for tokens: ${JSON.stringify(fromToken)}, ${JSON.stringify(toToken)}.` );
-                return new BigNumber(0); // Abort evaluation
-            }
-
-            // Use the best price for each protocol
-            const fromPrice = getBestPrice(fromTokenPrices);
-            const toPrice = getBestPrice(toTokenPrices);
-
-            // Log invalid price data
-            if (!fromPrice || !toPrice) {
-                console.error(`Invalid price data for ${JSON.stringify(fromToken)} or ${JSON.stringify(toToken)}`);
-                return new BigNumber(0); // Abort if price data is invalid
-            }
-
-            // Adjust amount based on slippage
-            const slippage = calculateSlippage([fromToken, toToken], mergedPriceData);
-            const adjustedAmount = amountIn.multipliedBy(1 - slippage / 100);
-            amountIn = adjustedAmount.multipliedBy(toPrice).dividedBy(fromPrice);
-
-            if (amountIn.isZero()) {
-                console.error(`Received zero amount during hop from ${fromToken} to ${toToken}`);
-                return new BigNumber(0); // Abort evaluation if a zero amount occurs
-            }
-        }
-
-        // Calculate profit by deducting initial capital and gas cost
-        const profit = amountIn.minus(CAPITAL).minus(gasCost);
-
-        // Return profit only if it meets the minimum profit threshold
-        if (profit.isGreaterThanOrEqualTo(minimumProfitThreshold)) {
-            console.log(
-                `Profitable route found: Profit = ${profit.dividedBy(1e6).toFixed(2)} USDT`
-            );
-            return profit;
-        } else {
-            console.log("Route did not meet the minimum profit threshold.");
-            return new BigNumber(0);
-        }
+        console.log("Mempool monitoring started...");
     } catch (error) {
-        console.error("Unexpected error in evaluateRouteProfit:", error.message);
-        return new BigNumber(0); // Return zero profit on unexpected error
+        console.error("Error initializing mempool monitoring:", error.message);
     }
 }
 
 /**
- * Fetch a swap quote using the 1inch Swap API.
- * Retrieves the transaction data required to execute a token swap.
- *
- * @param {string} fromToken - The address of the token to swap from.
- * @param {string} toToken - The address of the token to swap to.
- * @param {BigNumber} amount - The amount of the `fromToken` to swap (in the smallest unit).
- * @param {number} slippage - The slippage tolerance percentage (default: 1).
- * @param {number} chainId - Blockchain network chain ID (default: CHAIN_ID).
- * @returns {Promise<Object>} - The transaction data required to execute the swap.
+ * Decodes transaction input data to extract trade details.
+ * 
+ * @param {string} data - The input data of the transaction.
+ * @returns {Object} - Decoded trade details (e.g., srcToken, dstToken, amountIn).
  */
- async function getSwapQuote(fromToken, toToken, amount, slippage = 1, CHAIN_ID) {
-    if (!fromToken || !toToken || !amount || amount.lte(0)) {
-        throw new Error("Invalid parameters provided for getSwapQuote.");
-    }
+function decodeTransactionData(data) {
+    // Replace with ABI and decoding logic for the target smart contracts
+    const decoded = ethers.utils.defaultAbiCoder.decode(
+        ["address", "address", "uint256"],
+        data
+    );
 
-    // Generate a unique cache key for the swap quote
-    const cacheKey = `swapQuote:${CHAIN_ID}:${fromToken}-${toToken}-${amount.toFixed()}-${slippage}`;
-    const cacheDuration = 1 * 60 * 1000; // Cache duration: 1 minute
-    const now = Date.now();
+    return {
+        srcToken: decoded[0],
+        dstToken: decoded[1],
+        amountIn: new BigNumber(decoded[2].toString()),
+    };
+}
 
-    // Check if cached data exists and is still valid
-    if (cache.has(cacheKey)) {
-        const { data, timestamp } = cache.get(cacheKey);
-        if (now - timestamp < cacheDuration) {
-            console.log("Returning cached swap quote.");
-            return data;
-        }
-    }
-
+ /**
+ * Evaluate the profitability of a given route with dynamic profit adjustment
+ * Evaluate route profitability with dynamic slippage and gas cost.
+ * @param {string[]} route - Array of token addresses representing the route.
+ * @returns {BigNumber} - Calculated profit.
+ */
+ async function evaluateRouteProfit(route) {
     try {
-        // Prepare the request parameters for the 1inch Swap API
-        const Params = {
-            fromTokenAddress: fromToken,
-            toTokenAddress: toToken,
-            amount: amount.toFixed(0), // Convert BigNumber to string in the smallest unit
-            slippage: slippage.toFixed(2), // Format slippage as a percentage
-            disableEstimate: false, // Enable price estimation
-            allowPartialFill: false, // Ensure full swaps only
-            includeProtocols: true, // Include protocol details in the response
-        };
-
-        // Make an API request to the 1inch Swap API
-        const response = await axios.get(`${SWAP_API_URL}/quote`, {
-            headers: HEADERS,
-            params: Params
-        });
-
-        // Validate the API response and extract transaction data
-        const swapData = response.data;
-        if (!swapData || !swapData.tx || !swapData.tx.data) {
-            throw new Error("Invalid or incomplete swap data received from 1inch API.");
+        // Fetch token prices across protocols
+        const priceData = await fetchTokenPrices();
+        if (!priceData || Object.keys(priceData).length === 0) {
+            console.error("Failed to fetch price data.");
+            return new BigNumber(0);
         }
 
-        // Cache the response data along with a timestamp
-        cache.set(cacheKey, { data: swapData.tx, timestamp: now });
+        let amountIn = CAPITAL; // Start with the full trading capital
+        const gasPrice = await fetchGasPrice();
 
-        console.log("Fetched and cached swap quote:", swapData.tx);
-        return swapData.tx;
+        // Evaluate profitability across the route
+        for (let i = 0; i < route.length - 1; i++) {
+            const fromToken = route[i];
+            const toToken = route[i + 1];
+
+            // Get prices for current tokens in the route
+            const fromPrice = priceData[fromToken]?.price || 0;
+            const toPrice = priceData[toToken]?.price || 0;
+            const fromLiquidity = priceData[fromToken]?.liquidity || 0;
+
+            // Ensure price data is available
+            if (!fromPrice || !toPrice) {
+                console.warn(`Missing price data for tokens: ${fromToken}, ${toToken}`);
+                return new BigNumber(0); // Abort evaluation
+            }
+
+            // Adjust trade size for slippage
+            const adjustedAmount = adjustForSlippage(amountIn, new BigNumber(fromLiquidity));
+            amountIn = adjustedAmount.multipliedBy(toPrice).dividedBy(fromPrice);
+
+            // Ensure positive amount remains after each hop
+            if (amountIn.isZero() || amountIn.isNegative()) {
+                console.error(`Trade resulted in zero or negative output: ${fromToken} ➡️ ${toToken}`);
+                return new BigNumber(0);
+            }
+        }
+
+        // Calculate total gas cost for the route
+        const gasCost = gasPrice.multipliedBy(new BigNumber(route.length).multipliedBy(800000)); // Adjust gas per hop if needed
+
+        // Calculate profit by deducting capital and gas costs
+        const profit = amountIn.minus(CAPITAL).minus(gasCost);
+
+        // Ensure profit is positive
+        if (profit.isGreaterThan(0)) {
+            console.log(`Profitable route: ${route.join(" ➡️ ")} with profit: $${profit.dividedBy(1e6).toFixed(2)}`);
+            return profit;
+        } else {
+            console.log(`Route ${route.join(" ➡️ ")} did not meet the profit threshold.`);
+            return new BigNumber(0);
+        }
     } catch (error) {
-        console.error("Error fetching swap quote:", {
-            message: error.message,
-            status: error.response?.status,
-            data: error.response?.data,
-        });
-
-        // Use stale cached data if available during an API error
-        if (cache.has(cacheKey)) {
-            console.warn("Using stale cached swap quote due to errors.");
-            return cache.get(cacheKey).data;
-        }
-
-        throw error; // Re-throw the error if no cached data is available
+        console.error(`Error evaluating route profit: ${error.message}`);
+        return new BigNumber(0); // Return zero on error
     }
 }
 
 // Function to execute the profitable route using flash loan and swap
- async function executeRoute(route, amount) {
-    const assets = [process.env.USDC_ADDRESS]; // Always start with USDC as the first asset
-    const amounts = [CAPITAL.toFixed()]; // Flash loan amount in USDC
+ /**
+ * Executes a profitable arbitrage route with optimized gas management and front-running protection.
+ * @param {string[]} route - Array of token addresses representing the arbitrage route.
+ * @param {BigNumber} amount - Initial capital amount for the trade.
+ */
+export async function executeRoute(route, amount) {
+    const assets = USDC_ADDRESS; // Start with USDC as the primary asset
+    const gasPrice = await fetchGasPrice(); // Fetch the current gas price
+    const scaledAmount = await adjustTradeSizeForGas(amount, gasPrice); // Adjust trade size based on gas cost
+    const amounts = [scaledAmount.toFixed()]; // Scaled trade size
 
     try {
         // Step 1: Approve tokens using Permit2
-        const tokens = route.map((token) => ({ address: token, amount: CAPITAL.toFixed() }));
+        const tokens = route.map((token) => ({ address: token, amount: scaledAmount.toFixed() }));
         await approveTokensWithPermit2(tokens);
-        console.log("Tokens approved successfully");
+        console.log("Tokens approved successfully.");
 
         // Step 2: Generate PermitBatch signature
         const { signature } = await generatePermitBatchSignatures(tokens, process.env.CONTRACT_ADDRESS);
@@ -1497,49 +1649,127 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
         // Step 3: Construct calldata with route and signature
         const params = await constructParams(route, amounts, signature);
 
-        // Step 4: Encode calldata and send transaction to the smart contract
-        const txData = contract.methods.fn_RequestFlashLoan(assets, amounts, params).encodeABI();
-
-        const gasEstimate = await estimateGas(route, CAPITAL);
-        const gasPrice = await fetchGasPrice();
+        // Step 4: Estimate gas and prepare the transaction
+        const gasEstimate = await estimateGas(route, scaledAmount);
 
         const tx = {
             from: process.env.WALLET_ADDRESS,
             to: process.env.CONTRACT_ADDRESS,
-            data: txData,
+            data: contract.methods.fn_RequestFlashLoan(assets, amounts, params).encodeABI(),
             gas: gasEstimate.toFixed(),
             gasPrice: gasPrice.toFixed(),
         };
 
-        const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
-        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        // Step 5: Use Flashbots or private RPC to send the transaction securely
+        const receipt = await sendTransactionPrivately(tx);
 
         console.log("Flash loan and swap executed successfully. Transaction Hash:", receipt.transactionHash);
 
-        // Step 5: Send Telegram notification for success
+        // Step 6: Notify success via Telegram
         const successMessage = `
             ✅ *Flash Loan and Swap Executed Successfully!*
             - Transaction Hash: [${receipt.transactionHash}](https://arbiscan.io/tx/${receipt.transactionHash})
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${assets[0]})
+            - Amount: ${scaledAmount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(successMessage);
     } catch (error) {
         console.error("Error executing route:", error);
 
-        // Send Telegram notification for failure
+        // Notify failure via Telegram
         const errorMessage = `
             ❌ *Error Executing Flash Loan and Swap!*
             - Error: ${error.message}
-            - Stack: ${error.stack}
             - Route: ${route.join(" ➡️ ")}
-            - Amount: ${amount.toFixed()} (${assets[0]})
+            - Amount: ${scaledAmount.toFixed()} (${assets[0]})
         `;
         await sendTelegramMessage(errorMessage);
 
+        throw error; // Rethrow the error to trigger any retry logic
+    }
+}
+async function executeRouteWithRetry(route, amount) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            console.log(`Attempt ${attempt} to execute route.`);
+            await executeRoute(route, amount);
+            return; // Exit loop on success
+        } catch (error) {
+            console.error(`Attempt ${attempt} failed. Error: ${error.message}`);
+            if (attempt === 3) throw new Error("Max retries reached");
+            await new Promise((resolve) => setTimeout(resolve, attempt * 2000)); // Exponential backoff
+        }
+    }
+}
+
+async function adjustTradeSizeForGas(amount, gasPrice) {
+    const estimatedGasCost = gasPrice.multipliedBy(new BigNumber(800000)); // Estimate gas cost
+    const maxGasCostRatio = new BigNumber(0.005); // 0.5% of trade amount
+    if (estimatedGasCost.isGreaterThan(amount.multipliedBy(maxGasCostRatio))) {
+        console.warn(`Gas cost (${estimatedGasCost.toFixed()}) exceeds profit margin (${amount.multipliedBy(maxGasCostRatio).toFixed()}). Scaling down trade size.`);
+        return amount.multipliedBy(0.8); // Scale down trade size to 80% of the original
+    }
+    return amount;
+}
+
+/**
+ * Sends a transaction privately using Flashbots on the Arbitrum network.
+ * 
+ * @param {Object} tx - The transaction object (to, from, data, gas, gasPrice, etc.).
+ * @returns {Object} - Transaction receipt.
+ */
+export async function sendTransactionPrivately(tx) {
+    try {
+        // Step 1: Set up providers
+        const publicProvider = new ethers.providers.JsonRpcProvider(process.env.INFURA_URL); // Standard RPC provider
+        const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, publicProvider); // Wallet connected to the provider
+
+        // Flashbots Provider for Arbitrum (custom URL required for Arbitrum compatibility)
+        const flashbotsProvider = await FlashbotsBundleProvider.create(
+            publicProvider,
+            wallet,
+            "https://relay.flashbots.net", // Flashbots relay URL
+            "arbitrum" // Network override
+        );
+
+        // Step 2: Sign transaction
+        const txRequest = {
+            ...tx,
+            nonce: await publicProvider.getTransactionCount(tx.from), // Fetch nonce
+        };
+
+        const signedTx = await wallet.signTransaction(txRequest);
+
+        // Step 3: Create bundle and send it via Flashbots
+        const bundleResponse = await flashbotsProvider.sendBundle(
+            [
+                {
+                    signedTransaction: signedTx, // Pre-signed transaction
+                },
+            ],
+            Math.floor(Date.now() / 1000) + 60 // Expiry time (60 seconds)
+        );
+
+        if ("error" in bundleResponse) {
+            throw new Error(`Flashbots bundle submission error: ${bundleResponse.error.message}`);
+        }
+
+        // Wait for inclusion
+        const waitResponse = await bundleResponse.wait();
+        if (waitResponse === 0) {
+            console.log("Bundle included in the next block.");
+            return bundleResponse;
+        } else {
+            console.warn("Bundle not included. Reverting to public transaction submission.");
+            throw new Error("Bundle not included.");
+        }
+    } catch (error) {
+        console.error("Error sending transaction privately via Flashbots:", error.message);
         throw error;
     }
 }
+
+
 
 // Helper function to encode calldata for a multi-hop route using 1inch API
  async function encodeSwapData(route, amount, slippagePercent) {
@@ -1582,58 +1812,32 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
     }
 }
 
- async function fetchTokenDecimals(tokenAddress) {
-    try {
-        const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
-        return await contract.methods.decimals().call();
-    } catch (error) {
-        console.warn(`Error fetching decimals for ${tokenAddress}. Defaulting to known stablecoin decimals.`);
-        return STABLE_TOKENS.includes(tokenAddress.toLowerCase()) ? 6 : 18; // Default based on token type
-    }
-}
+
 
  async function estimateGas(route, amount) {
     try {
+        // Fetch the latest gas price
+        const gasPrice = await fetchGasPrice();
+
+        // Adjust trade size based on gas price
+        const adjustedAmount = await adjustTradeSizeForGas(amount, gasPrice);
+
+        // Estimate gas cost for the adjusted trade size
         const gasEstimate = await web3.eth.estimateGas({
             from: process.env.WALLET_ADDRESS,
             to: process.env.CONTRACT_ADDRESS,
-            data: await constructParams(route, CAPITAL, null), // Ensure params are encoded correctly
+            data: await constructParams(route, adjustedAmount, null), // Ensure params are encoded correctly
         });
+
+        console.log(`Gas estimate: ${gasEstimate}, Adjusted trade size: ${adjustedAmount.toFixed()}`);
         return new BigNumber(gasEstimate);
     } catch (error) {
         console.error("Error estimating gas:", error.message);
-        return new BigNumber(800000); // Fallback to default
+        return new BigNumber(800000); // Fallback to a default estimate
     }
 }
 
-// Fetch current gas price with a maximum threshold
-async function fetchOptimalGasPrice() {
-const API_KEY2 = "40236ca9-813e-4808-b992-cb28421aba86"; // Blocknative API Key
-    const url3 = "https://api.blocknative.com/gasprices/blockprices";
-    try {
-        // Fetch gas price from Arbitrum Gas Station or similar API
-        const response = await axios.get(url3, {
-            headers: { Authorization: `Bearer ${API_KEY2}` },
-            params: {
-                chainId: 42161, // Arbitrum Mainnet Chain ID
-            },
-        });
-        const gasPriceInGwei = response.data.fast.maxFee; // Fast gas price in Gwei
-        const networkCongestion = gasPriceInGwei > 100 ? 1 : gasPriceInGwei / 100; // Normalize to 0-1 range
 
-        // Dynamically adjust max gas price based on network congestion
-        const maxGasPrice = networkCongestion > 0.8 ? 100e9 : 50e9; // In wei
-
-        // Convert gas price from Gwei to Wei
-        const gasPriceInWei = new BigNumber(web3.utils.toWei(gasPriceInGwei.toString(), 'gwei'));
-
-        // Return gas price if it is within the acceptable threshold
-        return gasPriceInWei.isLessThanOrEqualTo(maxGasPrice) ? gasPriceInWei : null;
-    } catch (error) {
-        console.error("Error fetching gas price:", error);
-        return null; // Fallback or indicate failure
-    }
-}
 
 function getCacheDuration(type) {
     switch (type) {
