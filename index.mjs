@@ -9,7 +9,7 @@ import { AllowanceTransfer, PERMIT2_ADDRESS } from '@uniswap/permit2-sdk'; // Co
 import { ethers } from 'ethers';
 import PQueue from 'p-queue';
 import qs from "qs"; 
-import { FlashbotsBundleProvider } from "@flashbots/ethers-provider-bundle";
+import { FlashbotsBundleProvider } from '@flashbots/ethers-provider-bundle';
 import pLimit from "p-limit"; // For concurrency control
 import { getAddress } from "@ethersproject/address";
 import { gql, request } from "graphql-request";
