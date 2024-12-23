@@ -37,8 +37,8 @@ const apiQueue = new PQueue({
     interval: 1200, // 1 second interval
     intervalCap: 1, // 1 request per second
 });
-// Define the CAPITAL as $100,000 USDC with 6 decimals (to match USDC decimal places)
-const CAPITAL = new BigNumber(100000).shiftedBy(6);  // $100,000 in USDC (6 decimals)
+
+const CAPITAL = new BigNumber(100000).shiftedBy(6);  // $100,000 in USDC (6 decimals), Define the CAPITAL as $100,000 USDC with 6 decimals (to match USDC decimal places)
 const PATHFINDER_API_URL = "https://api.1inch.dev/swap/v6.0/42161";
 const PROFIT_THRESHOLD = CAPITAL.multipliedBy(0.005);  // Equivalent to 0.5% profit
 const MINIMUM_PROFIT_THRESHOLD = new BigNumber(500).shiftedBy(6);  // Minimum profit threshold $500 (6 decimals)
