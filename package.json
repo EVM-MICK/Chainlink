@@ -27,7 +27,7 @@
     "graphql": "^16.6.0",
     "graphql-request": "^5.2.0",
     "node-cron": "^3.0.2",
-    "@flashbots/ethers-provider-bundle": "^0.7.0",
+    "@flashbots/ethers-provider-bundle": "^1.0.0",
     "p-queue": "^8.0.1",
     "@esm2cjs/p-limit": "^4.0.0",
     "node-cache": "^5.1.2"
