@@ -1462,7 +1462,7 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
 async function monitorMempool(targetContracts, chainId, onArbitrage) {
     try {
         // Initialize Ethereum provider
-        const provider = new ethers.providers.WebSocketProvider(process.env.INFURA_WS_URL);
+        const provider = new ethers.WebSocketProvider(process.env.INFURA_WS_URL);
 
         // Subscribe to the mempool
         provider.on("pending", async (txHash) => {
