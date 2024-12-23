@@ -296,7 +296,7 @@ async function fetchHistoricalProfit1Inch(tokenAddress) {
  * @param {string[]} tokenAddresses - List of token contract addresses.
  * @returns {Promise<Object>} - Historical profit data mapped by token address.
  */
-async function getHistoricalProfitData(tokenAddresses) {
+async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
     const profitData = {};
 
     await Promise.all(
@@ -912,10 +912,20 @@ async function retryRequest(requestFn, retries = 3, delay = 1000) {
  * @returns {Promise<Object>} - Token prices mapped by token address.
  */
 
-async function fetchTokenPrices(tokenAddresses = [], historicalProfitData = {}) {
+async function fetchTokenPrices(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
     if (!tokenAddresses || tokenAddresses.length === 0) {
         console.warn("No token addresses provided to fetchTokenPrices.");
         return {};
+    }
+
+    // Fetch historical profit data for tokens
+    let historicalProfitData = {};
+    try {
+        console.log("Fetching historical profit data...");
+        historicalProfitData = await getHistoricalProfitData(tokenAddresses);
+    } catch (error) {
+        console.error("Error fetching historical profit data:", error.message);
+        historicalProfitData = {}; // Fallback to empty data if the fetch fails
     }
 
     // Prioritize tokens based on historical profit data
