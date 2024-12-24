@@ -343,24 +343,37 @@ async function fetchHistoricalVolume(tokenAddress) {
  * @returns {Promise<BigNumber>} - Historical profit estimation.
  */
 async function fetchHistoricalProfit1Inch(tokenAddress) {
+    const cacheKey = `historicalProfit1Inch-${tokenAddress}`;
+    const cachedData = getFromCache(cacheKey);
+    if (cachedData) {
+        console.log(`Using cached historical profit for token: ${tokenAddress}`);
+        return cachedData;
+    }
+
     const url = `https://api.1inch.dev/history/v2.0/history/${process.env.WALLET_ADDRESS}/events`;
 
     try {
-        const response = await axios.get(url, {
-            headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-            params: { tokenAddress, chainId: 42161, limit: 100 },
-        });
+        const response = await fetchWithRetries(
+            url,
+            {
+                headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+                params: { tokenAddress, chainId: 42161, limit: 100 },
+            }
+        );
 
-        const profits = response.data.events
+        const profits = response.events
             .filter((event) => event.profit)
-            .map((event) => new BigNumber(event.profit));
+            .map((event) => new BigNumber(event.profit || 0));
 
-        return profits.reduce((acc, profit) => acc.plus(profit), new BigNumber(0));
+        const totalProfit = profits.reduce((acc, profit) => acc.plus(profit), new BigNumber(0));
+        setToCache(cacheKey, totalProfit, 600000); // Cache for 10 minutes
+        return totalProfit;
     } catch (error) {
         console.error(`Error fetching historical profit for ${tokenAddress}:`, error.message);
-        return new BigNumber(0);
+        return new BigNumber(0); // Return zero on error
     }
 }
+
 
 /**
  * Aggregate historical profit data for multiple tokens.
@@ -376,18 +389,17 @@ async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESS
                 const volumeUSD = await fetchHistoricalVolume(token);
                 const profit1Inch = await fetchHistoricalProfit1Inch(token);
 
-                // Aggregate data (volume can act as a proxy for profitability)
+                // Aggregate data: Sum volumeUSD and profit1Inch
                 profitData[token] = volumeUSD.plus(profit1Inch).toFixed();
             } catch (error) {
                 console.error(`Error aggregating profit data for ${token}:`, error.message);
+                profitData[token] = "0"; // Default to "0" on error
             }
         })
     );
 
     return profitData;
 }
-
-
 
 /**
  * Fetch order book depth for a token pair.
