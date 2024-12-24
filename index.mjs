@@ -1473,7 +1473,7 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
 async function monitorMempool(targetContracts, chainId, onArbitrage) {
     try {
         // Initialize Ethereum provider
-        const provider = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL);
+        const provider = new ethers.JsonRpcProvider(process.env.INFURA_WS_URL);
 
         console.log("Starting mempool monitoring using polling...");
 
