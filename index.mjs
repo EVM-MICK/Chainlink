@@ -29,6 +29,10 @@ const HEADERS = {
 };
 const RETRY_LIMIT = 5;
 const RETRY_BASE_DELAY_MS = 1000; // Start with a 1-second delay
+const pLimit = require("p-limit");
+const limit = pLimit(5); // Limit to 5 concurrent requests
+
+
 // Rate limiter state
 let isRateLimited = false;
 // Configurable parameters
@@ -244,6 +248,29 @@ async function fetchCachedGasPrice() {
  * @param {string} tokenAddress - Token contract address.
  * @returns {Promise<BigNumber>} - Historical volume in USD.
  */
+const fetchHistoricalData = async (tokens) => {
+    const results = await Promise.all(
+        tokens.map((token) => limit(() => fetchHistoricalVolume(token)))
+    );
+    return results;
+};
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const fetchWithRetry = async (url, options, retries = 3, backoff = 1000) => {
+    try {
+        const response = await axios.get(url, options);
+        return response.data;
+    } catch (error) {
+        if (retries > 0 && error.response?.status === 429) {
+            console.log(`Rate limit hit. Retrying in ${backoff}ms...`);
+            await delay(backoff);
+            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+        throw error;
+    }
+};
+
+
 async function fetchHistoricalVolume(tokenAddress) {
     const query = gql`
         query ($token: String!) {
@@ -331,37 +358,54 @@ async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESS
  * @returns {Promise<Object|null>} - The order book data or null in case of failure.
  */
 async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
-    const url = `https://api.1inch.dev/orderbook/v3.0/${chainId}`;
+    const url = `https://api.1inch.dev/orderbook/v4.0/${chainId}/all`;
     const headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, // Use your 1inch API key
     };
 
-    try {
-        // Prepare the request payload for querying the order book
-        const payload = {
-            limit: 50, // Max number of orders to fetch
-            makerAsset: srcToken.toLowerCase(),
-            takerAsset: dstToken.toLowerCase(),
-        };
+    const params = {
+        makerAsset: srcToken.toLowerCase(),
+        takerAsset: dstToken.toLowerCase(),
+        limit: 50, // Max number of orders to fetch
+    };
 
-        console.log(`Fetching order book for ${srcToken} -> ${dstToken} on chain ${chainId}...`);
+    // Retry logic with exponential backoff
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`Fetching order book for ${srcToken} -> ${dstToken} on chain ${chainId}, Attempt ${attempt}...`);
 
-        const response = await axios.post(url, payload, { headers });
+            const response = await axios.get(url, { headers, params });
 
-        if (response.status === 200 && response.data) {
-            console.log(`Order book fetched successfully for ${srcToken} -> ${dstToken}.`);
-            return response.data;
+            if (response.status === 200 && response.data) {
+                console.log(`Order book fetched successfully for ${srcToken} -> ${dstToken}.`);
+                return response.data;
+            }
+
+            console.warn(`Unexpected response for ${srcToken} -> ${dstToken}:`, response.data);
+            return null;
+        } catch (error) {
+            if (attempt < maxRetries && error.response?.status === 429) {
+                const delay = attempt * 1000; // Linear backoff: 1s, 2s, 3s...
+                console.warn(
+                    `Rate limit hit while fetching order book for ${srcToken} -> ${dstToken}. Retrying in ${delay}ms...`
+                );
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            } else {
+                console.error(
+                    `Error fetching order book depth for ${srcToken} -> ${dstToken} on attempt ${attempt}:`,
+                    error.message
+                );
+                if (attempt === maxRetries) {
+                    console.error(`Max retries reached for ${srcToken} -> ${dstToken}. Returning null.`);
+                }
+            }
         }
-
-        console.warn(`Unexpected response for ${srcToken} -> ${dstToken}:`, response.data);
-        return null;
-    } catch (error) {
-        console.error(`Error fetching order book depth for ${srcToken} -> ${dstToken}:`, error.message);
-        return null;
     }
-}
 
+    return null;
+}
 /**
  * Adjust trade size based on slippage.
  * @param {BigNumber} amountIn - Input trade amount.
@@ -1041,11 +1085,19 @@ async function fetchTokenPriceAlternativeAPI(tokenAddress) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 
+async function fetchQuotes(chainId, tokenPairs, amount, complexityLevel = 2, slippage = 1) {
+    // Fetch quotes for all token pairs with rate limiting
+    const results = await Promise.all(
+        tokenPairs.map(([srcToken, dstToken]) =>
+            limit(() => fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel, slippage))
+        )
+    );
+    return results.filter(Boolean); // Filter out failed results
+}
 
-// Fetch a single quote with retries and complexity level Fetch a quote using the 1inch Quote API
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
     const cacheKey = `${srcToken}_${dstToken}_${amount}`;
-    
+
     // Check the cache for a previously fetched quote
     if (quoteCache.has(cacheKey)) {
         console.log(`Using cached quote for ${cacheKey}`);
@@ -1109,15 +1161,100 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
     throw new Error("Failed to fetch quote after 3 attempts.");
 }
 
+
+/**
+ * Find the optimal route between two tokens in a weighted graph.
+ * Uses Dijkstra's algorithm for shortest path based on weights (e.g., slippage, fees).
+ *
+ * @param {Object} graph - Weighted graph where keys are token addresses and values are neighbors.
+ * @param {string} startToken - Address of the starting token.
+ * @param {string} endToken - Address of the ending token.
+ * @returns {Object} - An object containing the optimal path and total cost.
+ */
+function findOptimalRoute(graph, startToken, endToken) {
+    if (!graph[startToken]) {
+        throw new Error(`Start token ${startToken} not found in the graph.`);
+    }
+    if (!graph[endToken]) {
+        throw new Error(`End token ${endToken} not found in the graph.`);
+    }
+
+    const distances = {}; // Stores the shortest distance to each token
+    const previous = {}; // Stores the previous token for path reconstruction
+    const visited = new Set(); // Tracks visited nodes
+    const priorityQueue = new PriorityQueue(); // Custom priority queue for Dijkstra's algorithm
+
+    // Initialize distances with Infinity, and starting token with 0
+    for (const token in graph) {
+        distances[token] = Infinity;
+    }
+    distances[startToken] = 0;
+
+    // Add the starting token to the priority queue
+    priorityQueue.enqueue(startToken, 0);
+
+    while (!priorityQueue.isEmpty()) {
+        const { element: currentToken } = priorityQueue.dequeue();
+
+        if (visited.has(currentToken)) continue;
+        visited.add(currentToken);
+
+        // If we reached the end token, construct the path
+        if (currentToken === endToken) {
+            const path = [];
+            let token = endToken;
+
+            while (token) {
+                path.unshift(token);
+                token = previous[token];
+            }
+
+            return { path, cost: distances[endToken] };
+        }
+
+        // Explore neighbors
+        for (const neighbor of Object.keys(graph[currentToken])) {
+            const edgeWeight = graph[currentToken][neighbor];
+            const newDistance = distances[currentToken] + edgeWeight;
+
+            if (newDistance < distances[neighbor]) {
+                distances[neighbor] = newDistance;
+                previous[neighbor] = currentToken;
+                priorityQueue.enqueue(neighbor, newDistance);
+            }
+        }
+    }
+
+    // If no path is found, return empty path and Infinity cost
+    return { path: [], cost: Infinity };
+}
+
+class PriorityQueue {
+    constructor() {
+        this.items = [];
+    }
+
+    enqueue(element, priority) {
+        this.items.push({ element, priority });
+        this.items.sort((a, b) => a.priority - b.priority); // Sort by priority
+    }
+
+    dequeue() {
+        return this.items.shift(); // Remove the element with the highest priority
+    }
+
+    isEmpty() {
+        return this.items.length === 0;
+    }
+}
+
 // Generate routes using a BFS approach and inferred liquidity
 async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, profitThreshold = 300000000) {
     try {
-        // Validate the start token address
         if (!web3.utils.isAddress(startToken)) {
             throw new Error(`Invalid start token address: ${startToken}`);
         }
 
-        // Step 1: Fetch stable tokens
         const stableTokens = await getStableTokenList(chainId);
         const validStableTokenAddresses = stableTokens
             .map(token => token.address)
@@ -1127,7 +1264,6 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, pro
             throw new Error("No valid stable token addresses available.");
         }
 
-        // Step 2: Construct token pairs for graph building
         const tokenPairs = [];
         for (const srcToken of validStableTokenAddresses) {
             for (const dstToken of validStableTokenAddresses) {
@@ -1137,17 +1273,14 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, pro
             }
         }
 
-        // Step 3: Build the weighted graph using fees and slippage
         console.log("Building graph with token pairs...");
         const graph = await buildGraph(tokenPairs, chainId);
 
-        // Step 4: Dynamic Hop Limitation
         const averageLiquidity = await calculateAverageLiquidity(validStableTokenAddresses, chainId, startToken);
         maxHops = adjustMaxHops(maxHops, averageLiquidity);
 
         console.log(`Dynamic maxHops adjusted to: ${maxHops}`);
 
-        // Step 5: Use Dijkstra's algorithm to find the optimal route
         const profitableRoutes = [];
         for (const endToken of validStableTokenAddresses) {
             if (endToken !== startToken) {
@@ -1163,16 +1296,16 @@ async function generateRoutes(chainId, startToken, startAmount, maxHops = 2, pro
             }
         }
 
-        // Step 6: Sort and return the top profitable routes
         return profitableRoutes
             .sort((a, b) => new BigNumber(b.profit).minus(a.profit))
-            .slice(0, 3); // Limit to top 3 routes
+            .slice(0, 3);
 
     } catch (error) {
         console.error("Error in generateRoutes:", error.message);
         return [];
     }
 }
+
 
 /**
  * Adjust maxHops dynamically based on average liquidity.
