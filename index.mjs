@@ -1470,14 +1470,34 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
  * @param {function} onArbitrage - Callback function to execute when an opportunity is detected.
  */
 
+async function createProviderWithRetry(rpcUrl, maxRetries = 5, retryDelay = 1000) {
+    let retries = 0;
+    while (retries < maxRetries) {
+        try {
+            const provider = new ethers.JsonRpcProvider(rpcUrl);
+            await provider.getNetwork(); // Trigger network detection
+            console.log("Connected to network:", await provider.getNetwork());
+            return provider;
+        } catch (error) {
+            retries++;
+            console.error(`Retrying to connect (${retries}/${maxRetries}):`, error.message);
+            if (retries >= maxRetries) {
+                throw new Error("Failed to connect to the network after maximum retries.");
+            }
+            await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+    }
+}
+
+
 async function monitorMempool(targetContracts, chainId, onArbitrage) {
     try {
-        // Initialize Ethereum provider
-        const provider = new ethers.JsonRpcProvider(process.env.INFURA_WS_URL);
+        // Initialize provider with retry logic
+        const provider = await createProviderWithRetry(process.env.INFURA_WS_URL);
 
         console.log("Starting mempool monitoring using polling...");
 
-        // Polling mechanism to fetch pending transactions
+        // Polling mechanism for pending transactions
         setInterval(async () => {
             try {
                 const block = await provider.getBlock("pending");
