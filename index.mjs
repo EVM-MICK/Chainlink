@@ -255,8 +255,8 @@ const fetchHistoricalData = async (tokens) => {
     return results;
 };
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const fetchWithRetry = async (url, options, retries = 3, backoff = 1000) => {
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     try {
         const response = await axios.get(url, options);
         return response.data;
