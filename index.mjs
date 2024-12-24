@@ -271,25 +271,75 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 };
 
 
+/**
+ * Fetch both token-specific volume and total factory volume.
+ * @param {string} tokenAddress - The token address to fetch volume data for.
+ * @returns {Object} - An object containing tokenVolumeUSD and totalVolumeUSD.
+ */
 async function fetchHistoricalVolume(tokenAddress) {
-    const query = gql`
-        query ($token: String!) {
-            token(id: $token) {
-                id
-                symbol
-                name
-                volumeUSD
-                poolCount
+    const queries = {
+        tokenQuery: gql`
+            query ($token: String!) {
+                token(id: $token) {
+                    id
+                    symbol
+                    name
+                    volumeUSD
+                    derivedETH
+                    decimals
+                }
             }
-        }
-    `;
+        `,
+        factoryQuery: gql`
+            {
+                factories(first: 1) {
+                    totalVolumeUSD
+                }
+            }
+        `,
+    };
 
     try {
-        const response = await request(UNISWAP_SUBGRAPH_URL, query, { token: tokenAddress.toLowerCase() });
-        return new BigNumber(response.token.volumeUSD || 0);
+        // Parallel requests for token-specific and factory-wide volumes
+        const [tokenResponse, factoryResponse] = await Promise.all([
+            request(UNISWAP_SUBGRAPH_URL, queries.tokenQuery, {
+                token: tokenAddress.toLowerCase(),
+            }),
+            request(UNISWAP_SUBGRAPH_URL, queries.factoryQuery),
+        ]);
+
+        // Validate and process token-specific volume
+        let tokenVolumeUSD = new BigNumber(0);
+        if (tokenResponse && tokenResponse.token && tokenResponse.token.volumeUSD) {
+            tokenVolumeUSD = new BigNumber(tokenResponse.token.volumeUSD);
+        } else {
+            console.warn(`Invalid or missing data for token ${tokenAddress}:`, tokenResponse);
+        }
+
+        // Validate and process total factory volume
+        let totalVolumeUSD = 0;
+        if (
+            factoryResponse &&
+            factoryResponse.factories &&
+            factoryResponse.factories[0] &&
+            factoryResponse.factories[0].totalVolumeUSD
+        ) {
+            totalVolumeUSD = parseFloat(factoryResponse.factories[0].totalVolumeUSD);
+            if (isNaN(totalVolumeUSD)) {
+                console.warn(`Invalid totalVolumeUSD value:`, factoryResponse.factories[0].totalVolumeUSD);
+                totalVolumeUSD = 0;
+            }
+        } else {
+            console.warn(`Invalid or missing data for factories:`, factoryResponse);
+        }
+
+        return { tokenVolumeUSD, totalVolumeUSD };
     } catch (error) {
-        console.error(`Error fetching historical volume for ${tokenAddress}:`, error.message);
-        return new BigNumber(0);
+        console.error(`Error fetching volume data for token ${tokenAddress}:`, error.message);
+        return {
+            tokenVolumeUSD: new BigNumber(0), // Default for token-specific volume
+            totalVolumeUSD: 0, // Default for total factory volume
+        };
     }
 }
 
