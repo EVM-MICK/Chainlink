@@ -407,7 +407,27 @@ async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESS
  * @param {number} chainId - The chain ID (e.g., 1 for Ethereum, 42161 for Arbitrum).
  * @returns {Promise<Object|null>} - The order book data or null in case of failure.
  */
+function getFromCache(key) {
+    const cached = cache.get(key);
+    if (cached && cached.expiry > Date.now()) {
+        return cached.data;
+    }
+    return null;
+}
+
+function setToCache(key, data, ttl = 600000) { // Default TTL: 10 minutes
+    cache.set(key, { data, expiry: Date.now() + ttl });
+}
+
 async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
+    const cacheKey = `orderBook-${srcToken}-${dstToken}-${chainId}`;
+    const cachedData = getFromCache(cacheKey);
+
+    if (cachedData) {
+        console.log(`Using cached order book for ${srcToken} -> ${dstToken}`);
+        return cachedData;
+    }
+
     const url = `https://api.1inch.dev/orderbook/v4.0/${chainId}/all`;
     const headers = {
         "Content-Type": "application/json",
@@ -422,14 +442,19 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
 
     // Retry logic with exponential backoff
     const maxRetries = 3;
+    let backoff = 1000; // Initial delay in milliseconds
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`Fetching order book for ${srcToken} -> ${dstToken} on chain ${chainId}, Attempt ${attempt}...`);
+            console.log(
+                `Fetching order book for ${srcToken} -> ${dstToken} on chain ${chainId}, Attempt ${attempt}...`
+            );
 
             const response = await axios.get(url, { headers, params });
 
             if (response.status === 200 && response.data) {
                 console.log(`Order book fetched successfully for ${srcToken} -> ${dstToken}.`);
+                setToCache(cacheKey, response.data); // Cache the data
                 return response.data;
             }
 
@@ -437,11 +462,11 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
             return null;
         } catch (error) {
             if (attempt < maxRetries && error.response?.status === 429) {
-                const delay = attempt * 1000; // Linear backoff: 1s, 2s, 3s...
                 console.warn(
-                    `Rate limit hit while fetching order book for ${srcToken} -> ${dstToken}. Retrying in ${delay}ms...`
+                    `Rate limit hit while fetching order book for ${srcToken} -> ${dstToken}. Retrying in ${backoff}ms...`
                 );
-                await new Promise((resolve) => setTimeout(resolve, delay));
+                await new Promise((resolve) => setTimeout(resolve, backoff));
+                backoff *= 2; // Exponential backoff
             } else {
                 console.error(
                     `Error fetching order book depth for ${srcToken} -> ${dstToken} on attempt ${attempt}:`,
@@ -456,6 +481,7 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
 
     return null;
 }
+
 /**
  * Adjust trade size based on slippage.
  * @param {BigNumber} amountIn - Input trade amount.
@@ -1114,26 +1140,38 @@ async function fetchTokenPriceAlternativeAPI(tokenAddress) {
  * @returns {Promise<string[][]>} - Array of profitable routes.
  */
 
-async function fetchQuotes(chainId, tokenPairs, amount, complexityLevel = 2, slippage = 1) {
-    // Fetch quotes for all token pairs with rate limiting
-    const results = await Promise.all(
-        tokenPairs.map(([srcToken, dstToken]) =>
-            limit(() => fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel, slippage))
-        )
-    );
-    return results.filter(Boolean); // Filter out failed results
+// Unified fetch with retries for handling rate limits
+async function fetchWithRetries(url, config, maxRetries = 3, backoff = 1000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await axios.get(url, config);
+            return response.data;
+        } catch (error) {
+            if (error.response?.status === 429 && attempt < maxRetries) {
+                console.warn(`Rate limit hit. Retrying in ${backoff}ms... (Attempt ${attempt}/${maxRetries})`);
+                await new Promise((resolve) => setTimeout(resolve, backoff));
+                backoff *= 2; // Exponential backoff
+            } else {
+                console.error(`Error fetching data: ${error.message}`);
+                throw error;
+            }
+        }
+    }
+    throw new Error(`Failed to fetch data after ${maxRetries} attempts.`);
 }
 
+// Fetch quote with caching and retries
 async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel = 2, slippage = 1) {
     const cacheKey = `${srcToken}_${dstToken}_${amount}`;
 
     // Check the cache for a previously fetched quote
-    if (quoteCache.has(cacheKey)) {
+    const cachedQuote = getFromCache(cacheKey);
+    if (cachedQuote) {
         console.log(`Using cached quote for ${cacheKey}`);
-        return quoteCache.get(cacheKey);
+        return cachedQuote;
     }
 
-    const url99 = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
+    const url = `https://api.1inch.dev/swap/v6.0/${chainId}/quote`;
 
     try {
         // Validate input tokens
@@ -1149,7 +1187,7 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
     }
 
     const config = {
-        headers: HEADERS,
+        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
         params: {
             src: srcToken,
             dst: dstToken,
@@ -1161,35 +1199,34 @@ async function fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel =
         },
     };
 
-    // Attempt fetching the quote with retries
-    for (let attempts = 0; attempts < 3; attempts++) {
-        try {
-            console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
-            const response = await axios.get(url99, config);
+    try {
+        console.log(`Fetching quote for ${srcToken} ➡️ ${dstToken}, amount: ${amount}`);
+        const quote = await fetchWithRetries(url, config);
+        console.log(`Received quote:`, quote);
 
-            if (response.status === 200) {
-                console.log(`Received quote: ${response.data}`);
-
-                // Cache the result
-                quoteCache.set(cacheKey, response.data);
-
-                return response.data;
-            }
-        } catch (error) {
-            if (error.response?.status === 429) {
-                const delay = (attempts + 1) * 1000; // Linear backoff
-                console.warn(`Rate limit hit. Retrying in ${delay}ms... (Attempt ${attempts + 1}/3)`);
-                await new Promise((resolve) => setTimeout(resolve, delay));
-            } else {
-                console.error(`Error fetching quote: ${error.message}`);
-                throw error;
-            }
-        }
+        // Cache the result
+        setToCache(cacheKey, quote);
+        return quote;
+    } catch (error) {
+        console.error(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}: ${error.message}`);
+        throw error;
     }
-
-    throw new Error("Failed to fetch quote after 3 attempts.");
 }
 
+// Fetch multiple quotes with rate-limiting and caching
+async function fetchQuotes(chainId, tokenPairs, amount, complexityLevel = 2, slippage = 1) {
+    const pLimit = require("p-limit");
+    const limit = pLimit(5); // Limit concurrent requests to avoid rate limits
+
+    // Fetch quotes for all token pairs
+    const results = await Promise.all(
+        tokenPairs.map(([srcToken, dstToken]) =>
+            limit(() => fetchQuote(chainId, srcToken, dstToken, amount, complexityLevel, slippage))
+        )
+    );
+
+    return results.filter(Boolean); // Filter out failed results
+}
 
 /**
  * Find the optimal route between two tokens in a weighted graph.
