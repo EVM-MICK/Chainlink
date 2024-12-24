@@ -64,7 +64,7 @@ const USDC_ADDRESS = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const CHAIN_ID = 42161;  // Arbitrum Mainnet
 const Executor_ADDRESS = "0xE37e799D5077682FA0a244D46E5649F71457BD09";
 // Stable, high-liquidity tokens to include in route evaluations
-const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC", "AAVE", "LINK", "ARB"];
+const STABLE_TOKENS = ["USDT", "USDC", "DAI", "WETH", "WBTC"];
 const highLiquidityTokens = ["USDT", "USDC", "DAI", "WETH"];
 const MAX_HOPS = 3;
 let cachedGasPrice = null; // Cached gas price value
@@ -97,9 +97,6 @@ const FALLBACK_TOKENS = [
   { address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", symbol: "DAI"},
   { address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", symbol: "WETH"},
   { address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", symbol: "WBTC"},
-  { address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", symbol: "AAVE"},
-  { address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", symbol: "LINK"},
-  { address: "0x912CE59144191C1204E64559FE8253a0e49E6548", symbol: "ARB"},
 ];
 // Contract configuration
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;  // Your deployed contract address
