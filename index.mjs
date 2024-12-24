@@ -776,27 +776,6 @@ async function findProfitableRoutes() {
 }
 
 
-// Utility: Priority queue implementation
-class PriorityQueue {
-    constructor(comparator) {
-        this.queue = [];
-        this.comparator = comparator;
-    }
-
-    enqueue(item) {
-        this.queue.push(item);
-        this.queue.sort(this.comparator);
-    }
-
-    dequeue() {
-        return this.queue.shift();
-    }
-
-    isEmpty() {
-        return this.queue.length === 0;
-    }
-}
-
 /**
  * Retrieve a list of stable tokens dynamically from the 1inch Token API.
  * This function prioritizes tokens listed in the STABLE_TOKENS array and uses caching for efficiency.
