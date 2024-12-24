@@ -29,8 +29,8 @@ const HEADERS = {
 };
 const RETRY_LIMIT = 5;
 const RETRY_BASE_DELAY_MS = 1000; // Start with a 1-second delay
-const pLimit = require("p-limit");
-const limit = pLimit(5); // Limit to 5 concurrent requests
+// const pLimit = require("p-limit");
+// const limit = pLimit(5); // Limit to 5 concurrent requests
 
 
 // Rate limiter state
