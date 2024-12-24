@@ -1469,57 +1469,63 @@ async function fetchTokenDataParallel(tokenAddresses, headers, baseUrl) {
  * @param {number} chainId - The chain ID of the network (e.g., 42161 for Arbitrum).
  * @param {function} onArbitrage - Callback function to execute when an opportunity is detected.
  */
+
 async function monitorMempool(targetContracts, chainId, onArbitrage) {
     try {
         // Initialize Ethereum provider
-        const provider = new ethers.WebSocketProvider(process.env.INFURA_WS_URL);
+        const provider = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC_URL);
 
-        // Subscribe to the mempool
-        provider.on("pending", async (txHash) => {
+        console.log("Starting mempool monitoring using polling...");
+
+        // Polling mechanism to fetch pending transactions
+        setInterval(async () => {
             try {
-                // Get transaction details
-                const tx = await provider.getTransaction(txHash);
-                if (!tx || !tx.to) return;
+                const block = await provider.getBlock("pending");
+                if (block && block.transactions) {
+                    for (const txHash of block.transactions) {
+                        const tx = await provider.getTransaction(txHash);
+                        if (!tx || !tx.to) continue;
 
-                // Filter transactions for target contracts
-                if (targetContracts.includes(tx.to.toLowerCase())) {
-                    console.log(`Detected relevant transaction: ${txHash}`);
+                        // Filter transactions for target contracts
+                        if (targetContracts.includes(tx.to.toLowerCase())) {
+                            console.log(`Detected relevant transaction: ${txHash}`);
 
-                    // Analyze transaction data (e.g., method, params)
-                    const decodedData = decodeTransactionData(tx.data);
+                            // Analyze transaction data (e.g., method, params)
+                            const decodedData = decodeTransactionData(tx.data);
 
-                    // Check for arbitrage opportunities
-                    const { srcToken, dstToken } = decodedData;
+                            // Check for arbitrage opportunities
+                            const { srcToken, dstToken } = decodedData;
 
-                    // Use the fixed capital amount for all evaluations
-                    const quote = await fetchQuote(chainId, srcToken, dstToken, CAPITAL.toFixed());
+                            // Use the fixed capital amount for all evaluations
+                            const quote = await fetchQuote(chainId, srcToken, dstToken, CAPITAL.toFixed());
 
-                    if (quote && quote.toAmount) {
-                        // Evaluate profitability using the fixed capital
-                        const profit = await evaluateRouteProfit([srcToken, dstToken]);
+                            if (quote && quote.toAmount) {
+                                // Evaluate profitability using the fixed capital
+                                const profit = await evaluateRouteProfit([srcToken, dstToken]);
 
-                        if (profit.isGreaterThan(0)) {
-                            console.log(`Arbitrage opportunity detected: Profit = ${profit.toFixed()} USDC`);
-                            await onArbitrage({
-                                txHash,
-                                profit,
-                                srcToken,
-                                dstToken,
-                                amountIn: CAPITAL,
-                            });
+                                if (profit.isGreaterThan(0)) {
+                                    console.log(`Arbitrage opportunity detected: Profit = ${profit.toFixed()} USDC`);
+                                    await onArbitrage({
+                                        txHash,
+                                        profit,
+                                        srcToken,
+                                        dstToken,
+                                        amountIn: CAPITAL,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
-            } catch (error) {
-                console.error(`Error processing transaction ${txHash}:`, error.message);
+            } catch (pollingError) {
+                console.error("Error polling pending transactions:", pollingError.message);
             }
-        });
-
-        console.log("Mempool monitoring started...");
+        }, 5000); // Poll every 5 seconds
     } catch (error) {
         console.error("Error initializing mempool monitoring:", error.message);
     }
 }
+
 
 /**
  * Decodes transaction input data to extract trade details.
