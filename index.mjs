@@ -446,9 +446,8 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
         limit: 50, // Max number of orders to fetch
     };
 
-    // Retry logic with exponential backoff
     const maxRetries = 3;
-    let backoff = 1000; // Initial delay in milliseconds
+    let backoff = 1000; // Initial backoff time in milliseconds
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -460,8 +459,17 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
 
             if (response.status === 200 && response.data) {
                 console.log(`Order book fetched successfully for ${srcToken} -> ${dstToken}.`);
-                setToCache(cacheKey, response.data); // Cache the data
-                return response.data;
+                
+                // Validate and extract data
+                const orders = response.data?.orders || [];
+                if (orders.length === 0) {
+                    console.warn(`No orders found for ${srcToken} -> ${dstToken}.`);
+                    return null;
+                }
+
+                // Cache the response
+                setToCache(cacheKey, orders, 600000); // Cache for 10 minutes
+                return orders;
             }
 
             console.warn(`Unexpected response for ${srcToken} -> ${dstToken}:`, response.data);
@@ -487,7 +495,6 @@ async function fetchOrderBookDepth(srcToken, dstToken, chainId) {
 
     return null;
 }
-
 /**
  * Adjust trade size based on slippage.
  * @param {BigNumber} amountIn - Input trade amount.
@@ -1431,29 +1438,61 @@ async function calculateAverageLiquidity(tokens, chainId, startToken) {
  * @param {number} chainId - Chain ID.
  * @returns {Object} - The graph object representing weights for each token pair.
  */
+
 async function buildGraph(tokenPairs, chainId) {
-    const graph = {};
+    const graph = new Map();
+    const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // Starting token for the graph
 
     await Promise.all(
         tokenPairs.map(async ({ srcToken, dstToken }) => {
             try {
-                const quote = await fetchQuote(chainId, srcToken, dstToken, CAPITAL.toFixed());
-                if (quote && quote.toAmount) {
-                    const fee = new BigNumber(quote.estimatedGas || 0).times(await fetchGasPrice());
-                    const slippage = new BigNumber(quote.toAmount).times(0.01); // Example: 1% slippage
-                    const weight = fee.plus(slippage);
+                // Fetch order book depth
+                const orders = await fetchOrderBookDepth(srcToken, dstToken, chainId);
 
-                    if (!graph[srcToken]) graph[srcToken] = {};
-                    graph[srcToken][dstToken] = weight;
+                if (orders && orders.length > 0) {
+                    const bestOrder = findBestOrder(orders); // Logic to find the best order
+                    const makingAmount = new BigNumber(bestOrder.makingAmount);
+                    const takingAmount = new BigNumber(bestOrder.takingAmount);
+
+                    // Calculate weight (e.g., price or inverse liquidity)
+                    const weight = takingAmount.dividedBy(makingAmount);
+
+                    if (!graph.has(srcToken)) graph.set(srcToken, new Map());
+                    graph.get(srcToken).set(dstToken, weight);
+
+                    console.log(`Edge added: ${srcToken} -> ${dstToken}, weight: ${weight.toFixed()}`);
+                } else {
+                    console.warn(`No orders found for ${srcToken} -> ${dstToken}. Skipping.`);
                 }
             } catch (error) {
-                console.warn(`Failed to fetch quote for ${srcToken} ➡️ ${dstToken}:`, error.message);
+                console.warn(`Failed to process ${srcToken} -> ${dstToken}:`, error.message);
             }
         })
     );
 
+    // Ensure the graph contains the starting token
+    if (!graph.has(startToken)) {
+        console.warn(`Start token ${startToken} not found in the graph.`);
+        graph.set(startToken, new Map());
+    }
+
     return graph;
 }
+
+/**
+ * Finds the best order from the list of orders based on predefined criteria.
+ * @param {Array} orders - List of orders from the order book.
+ * @returns {Object} - The best order.
+ */
+function findBestOrder(orders) {
+    // Sort orders by the best price (lowest price) or other criteria
+    return orders.reduce((best, current) => {
+        const currentPrice = new BigNumber(current.takingAmount).dividedBy(new BigNumber(current.makingAmount));
+        const bestPrice = new BigNumber(best.takingAmount).dividedBy(new BigNumber(best.makingAmount));
+        return currentPrice.lt(bestPrice) ? current : best;
+    }, orders[0]);
+}
+
 
 // Estimate liquidity by progressive trade analysis
 /**
