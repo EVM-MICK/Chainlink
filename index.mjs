@@ -380,17 +380,19 @@ async function fetchHistoricalProfit1Inch(tokenAddress) {
  * @param {string[]} tokenAddresses - List of token contract addresses.
  * @returns {Promise<Object>} - Historical profit data mapped by token address.
  */
+
 async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESSES) {
     const profitData = {};
 
     await Promise.all(
         tokenAddresses.map(async (token) => {
             try {
-                const volumeUSD = await fetchHistoricalVolume(token);
-                const profit1Inch = await fetchHistoricalProfit1Inch(token);
+                // Fetch historical data
+                const volumeUSD = new BigNumber(await fetchHistoricalVolume(token)); // Convert to BigNumber
+                const profit1Inch = new BigNumber(await fetchHistoricalProfit1Inch(token)); // Convert to BigNumber
 
                 // Aggregate data: Sum volumeUSD and profit1Inch
-                profitData[token] = volumeUSD.plus(profit1Inch).toFixed();
+                profitData[token] = volumeUSD.plus(profit1Inch).toFixed(); // Ensure final result is string
             } catch (error) {
                 console.error(`Error aggregating profit data for ${token}:`, error.message);
                 profitData[token] = "0"; // Default to "0" on error
@@ -400,6 +402,7 @@ async function getHistoricalProfitData(tokenAddresses = HARDCODED_STABLE_ADDRESS
 
     return profitData;
 }
+
 
 /**
  * Fetch order book depth for a token pair.
