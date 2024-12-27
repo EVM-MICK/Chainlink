@@ -302,15 +302,15 @@ async function fetchHistoricalVolume(tokenAddress) {
             request(UNISWAP_SUBGRAPH_URL, queries.factoryQuery),
         ]);
 
-        // Validate and process token-specific volume
+        // Process token-specific volume
         let tokenVolumeUSD = new BigNumber(0);
         if (tokenResponse && tokenResponse.token && tokenResponse.token.volumeUSD) {
             tokenVolumeUSD = new BigNumber(tokenResponse.token.volumeUSD);
         } else {
-            console.warn(`Invalid or missing data for token ${tokenAddress}:`, tokenResponse);
+            console.warn(`No valid volumeUSD data for token ${tokenAddress}:`, tokenResponse);
         }
 
-        // Validate and process total factory volume
+        // Process factory-wide volume
         let totalVolumeUSD = 0;
         if (
             factoryResponse &&
@@ -318,13 +318,9 @@ async function fetchHistoricalVolume(tokenAddress) {
             factoryResponse.factories[0] &&
             factoryResponse.factories[0].totalVolumeUSD
         ) {
-            totalVolumeUSD = parseFloat(factoryResponse.factories[0].totalVolumeUSD);
-            if (isNaN(totalVolumeUSD)) {
-                console.warn(`Invalid totalVolumeUSD value:`, factoryResponse.factories[0].totalVolumeUSD);
-                totalVolumeUSD = 0;
-            }
+            totalVolumeUSD = parseFloat(factoryResponse.factories[0].totalVolumeUSD) || 0;
         } else {
-            console.warn(`Invalid or missing data for factories:`, factoryResponse);
+            console.warn("Invalid or missing factory data:", factoryResponse);
         }
 
         return { tokenVolumeUSD, totalVolumeUSD };
