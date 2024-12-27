@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+        "math/big"
+        "sync"
 	"net/http"
 	"os"
 	"strings"
@@ -31,6 +33,209 @@ var upgrader = websocket.Upgrader{
 		return true
 	},
 }
+
+
+type TokenPair struct {
+	SrcToken string `json:"srcToken"`
+	DstToken string `json:"dstToken"`
+}
+
+type Route struct {
+	Path   []string  `json:"path"`
+	Profit *big.Int  `json:"profit"`
+}
+
+type StableToken struct {
+	Address string `json:"address"`
+}
+
+type Graph struct {
+	AdjacencyList map[string]map[string]*big.Float
+}
+
+// REST API Handler for Route Generation
+func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ChainID       int64  `json:"chainId"`
+		StartToken    string `json:"startToken"`
+		StartAmount   string `json:"startAmount"`
+		MaxHops       int    `json:"maxHops"`
+		ProfitThreshold string `json:"profitThreshold"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	startAmount := new(big.Int)
+	startAmount.SetString(req.StartAmount, 10)
+
+	profitThreshold := new(big.Int)
+	profitThreshold.SetString(req.ProfitThreshold, 10)
+
+	routes, err := generateRoutes(req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(routes)
+}
+
+func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
+	if !common.IsHexAddress(startToken) {
+		return nil, fmt.Errorf("invalid start token address: %s", startToken)
+	}
+
+	stableTokens, err := getStableTokenList(chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stable tokens: %v", err)
+	}
+
+	validStableTokenAddresses := filterValidAddresses(stableTokens)
+	if len(validStableTokenAddresses) == 0 {
+		return nil, fmt.Errorf("no valid stable token addresses available")
+	}
+
+	tokenPairs := generateTokenPairs(validStableTokenAddresses)
+	graph, err := buildGraph(tokenPairs, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build graph: %v", err)
+	}
+
+	averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, chainID, startToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
+	}
+
+	maxHops = adjustMaxHops(maxHops, averageLiquidity)
+
+	var profitableRoutes []Route
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, endToken := range validStableTokenAddresses {
+		if strings.EqualFold(endToken, startToken) {
+			continue
+		}
+
+		wg.Add(1)
+		go func(endToken string) {
+			defer wg.Done()
+			path, cost, err := findOptimalRoute(graph, startToken, endToken)
+			if err != nil || len(path) <= 1 {
+				return
+			}
+
+			profit := new(big.Int).Sub(startAmount, cost)
+			if profit.Cmp(profitThreshold) > 0 {
+				mu.Lock()
+				profitableRoutes = append(profitableRoutes, Route{
+					Path:   path,
+					Profit: profit,
+				})
+				mu.Unlock()
+				log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
+			}
+		}(endToken)
+	}
+
+	wg.Wait()
+	return sortAndLimitRoutes(profitableRoutes, 3), nil
+}
+
+func getStableTokenList(chainID int64) ([]StableToken, error) {
+	// Replace with actual API call to fetch stable tokens
+	return []StableToken{
+		{"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"}, // Example USDT
+		{"0xaf88d065e77c8cC2239327C5EDb3A432268e5831"}, // Example USDC
+	}, nil
+}
+
+func filterValidAddresses(tokens []StableToken) []string {
+	var addresses []string
+	for _, token := range tokens {
+		if common.IsHexAddress(token.Address) {
+			addresses = append(addresses, token.Address)
+		}
+	}
+	return addresses
+}
+
+func generateTokenPairs(tokens []string) []TokenPair {
+	var pairs []TokenPair
+	for _, src := range tokens {
+		for _, dst := range tokens {
+			if src != dst {
+				pairs = append(pairs, TokenPair{SrcToken: src, DstToken: dst})
+			}
+		}
+	}
+	return pairs
+}
+
+func buildGraph(tokenPairs []TokenPair, chainID int64) (*Graph, error) {
+	// Mock implementation. Replace with logic to fetch graph data.
+	graph := &Graph{AdjacencyList: make(map[string]map[string]*big.Float)}
+	for _, pair := range tokenPairs {
+		if graph.AdjacencyList[pair.SrcToken] == nil {
+			graph.AdjacencyList[pair.SrcToken] = make(map[string]*big.Float)
+		}
+		graph.AdjacencyList[pair.SrcToken][pair.DstToken] = big.NewFloat(1.0) // Example weight
+	}
+	return graph, nil
+}
+
+func calculateAverageLiquidity(tokens []string, chainID int64, startToken string) (*big.Float, error) {
+	// Mock implementation. Replace with real API call.
+	return big.NewFloat(1000000), nil
+}
+
+func adjustMaxHops(maxHops int, avgLiquidity *big.Float) int {
+	if avgLiquidity.Cmp(big.NewFloat(10000000)) > 0 {
+		return min(maxHops+1, 4)
+	} else if avgLiquidity.Cmp(big.NewFloat(500000)) < 0 {
+		return max(maxHops-1, 1)
+	}
+	return maxHops
+}
+
+func findOptimalRoute(graph *Graph, startToken, endToken string) ([]string, *big.Int, error) {
+	// Mock implementation of graph traversal. Replace with real Dijkstra or BFS logic.
+	if _, exists := graph.AdjacencyList[startToken]; !exists {
+		return nil, nil, fmt.Errorf("start token not in graph")
+	}
+	path := []string{startToken, endToken}
+	cost := big.NewInt(1000000) // Mock cost
+	return path, cost, nil
+}
+
+func sortAndLimitRoutes(routes []Route, limit int) []Route {
+	sort.Slice(routes, func(i, j int) bool {
+		return routes[i].Profit.Cmp(routes[j].Profit) > 0
+	})
+	if len(routes) > limit {
+		return routes[:limit]
+	}
+	return routes
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 
 // WebSocket connection manager
 var wsClients = make(map[*websocket.Conn]bool)
@@ -175,6 +380,10 @@ func wsBroadcastManager() {
 }
 
 func main() {
+
+        http.HandleFunc("/generate-routes", generateRoutesHandler)
+	log.Println("Starting server on :8080...")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 	// Define the target contracts to monitor
 	targetContracts := map[string]bool{
 		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
