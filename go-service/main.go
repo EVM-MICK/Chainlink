@@ -26,6 +26,7 @@ import (
 	"github.com/gorilla/websocket"
         "github.com/patrickmn/go-cache"
 	"github.com/ethereum/go-ethereum/crypto"
+        "github.com/joho/godotenv"
 )
 
 type ArbitrageOpportunity struct {
