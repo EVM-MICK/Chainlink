@@ -1960,7 +1960,7 @@ func main() {
 
 	// Start the REST API server for route generation and dynamic graph building
 	http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
-		chainID := int64(1) // Ethereum Mainnet
+		chainID := int64(42161) // Ethereum Mainnet
 		startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
 
 		// Parse destination token and token pairs
