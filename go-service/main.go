@@ -37,6 +37,20 @@ type ArbitrageOpportunity struct {
 	AmountIn string  `json:"amountIn"`
 }
 
+type InputData struct {
+	TokenPairs   []string `json:"tokenPairs"`
+	ChainID      int      `json:"chainId"`
+	StartToken   string   `json:"startToken"`
+	StartAmount  float64  `json:"startAmount"`
+	MaxHops      int      `json:"maxHops"`
+	ProfitMargin float64  `json:"profitMargin"`
+}
+
+type OutputData struct {
+	ProfitableRoutes []string  `json:"profitableRoutes"`
+	ProfitValues     []float64 `json:"profitValues"`
+}
+
 type Transaction struct {
 	From     string   `json:"from"`
 	To       string   `json:"to"`
