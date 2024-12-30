@@ -37,6 +37,22 @@ type ArbitrageOpportunity struct {
 	AmountIn string  `json:"amountIn"`
 }
 
+var uniswapABI abi.ABI
+var sushiSwapABI abi.ABI
+
+const UniswapV3RouterABI = `[
+  {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
+  {"inputs":[{"components":[{"internalType":"bytes","name":"path","type":"bytes"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"}],"internalType":"struct ISwapRouter.ExactInputParams","name":"params","type":"tuple"}],"name":"exactInput","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"},
+  {"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"}
+]`
+
+const SushiSwapRouterABI = `[
+  {"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"amountADesired","type":"uint256"},{"internalType":"uint256","name":"amountBDesired","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
+]`
+
+
+
 type InputData struct {
 	TokenPairs   []string `json:"tokenPairs"`
 	ChainID      int      `json:"chainId"`
@@ -90,6 +106,8 @@ var hardcodedStableTokens = []Token{
 
 // Global cache instance for stable token data
 var stableTokenCache = cache.New(10*time.Minute, 15*time.Minute) // Default expiration and cleanup interval
+var tokenPriceCache = cache.New(10*time.Minute, 15*time.Minute)
+var orderBookCache = cache.New(10*time.Minute, 15*time.Minute)
 
 
 var (
@@ -138,9 +156,7 @@ type PriorityQueue []*Node
 // Graph represents a weighted graph
 type Graph map[string]map[string]float64
 
-var tokenPriceCache = TokenPriceCache{
-	cache: make(map[string]CacheEntry),
-}
+
 
 // OrderBook represents the liquidity and other details of a trading pair
 type OrderBook struct {
@@ -158,9 +174,7 @@ type CacheEntry struct {
 	timestamp time.Time
 }
 
-var orderBookCache = OrderBookCache{
-	cache: make(map[string]CacheEntry),
-}
+
 
 // Cache duration in seconds
 const cacheDuration = 600 // 10 minutes
@@ -562,18 +576,35 @@ func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 
 // Helper to set a value in the cache
 func setToCache(key string, value interface{}) {
-	quoteCache.mu.Lock()
-	defer quoteCache.mu.Unlock()
+	quoteCache.mu.Lock()         // Acquire the lock
+	defer quoteCache.mu.Unlock() // Release the lock after the operation
 	quoteCache.cache[key] = value
 }
 
 // Helper to get a value from the cache
 func getFromCache(key string) (interface{}, bool) {
-	quoteCache.mu.Lock()
-	defer quoteCache.mu.Unlock()
+	quoteCache.mu.Lock()         // Acquire the lock
+	defer quoteCache.mu.Unlock() // Ensure the lock is released, even if the function exits early
 	value, exists := quoteCache.cache[key]
 	return value, exists
 }
+
+func getFromOrderBookCache(key string) (interface{}, bool) {
+	orderBookCache.mu.Lock()
+	defer orderBookCache.mu.Unlock()
+	value, exists := orderBookCache.cache[key]
+	return value, exists
+}
+
+func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
+	orderBookCache.mu.Lock()
+	defer orderBookCache.mu.Unlock()
+	orderBookCache.cache[key] = CacheEntry{
+		data:      value,
+		timestamp: time.Now().Add(duration),
+	}
+}
+
 
 // Helper function for exponential backoff retries
 func fetchWithRetries(url string, headers map[string]string, maxRetries int, backoff time.Duration) ([]byte, error) {
@@ -634,6 +665,11 @@ func fetchQuote(chainID int, srcToken, dstToken string, amount string, complexit
 	data, err := fetchWithRetries(url, headers, 3, 1*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch quote for %s ➡️ %s: %v", srcToken, dstToken, err)
+	}
+
+	// Check response for non-200 status
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty response from quote API for %s ➡️ %s", srcToken, dstToken)
 	}
 
 	var quote map[string]interface{}
@@ -756,6 +792,11 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{},
 			continue
 		}
 
+		// Check for non-200 status or empty response
+		if len(responseData) == 0 {
+			return nil, fmt.Errorf("empty response received for order book API %s -> %s", srcToken, dstToken)
+		}
+
 		// Parse response
 		var result struct {
 			Orders []interface{} `json:"orders"`
@@ -824,10 +865,10 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string, back
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ChainID       int64  `json:"chainId"`
-		StartToken    string `json:"startToken"`
-		StartAmount   string `json:"startAmount"`
-		MaxHops       int    `json:"maxHops"`
+		ChainID        int64  `json:"chainId"`
+		StartToken     string `json:"startToken"`
+		StartAmount    string `json:"startAmount"`
+		MaxHops        int    `json:"maxHops"`
 		ProfitThreshold string `json:"profitThreshold"`
 	}
 
@@ -837,18 +878,33 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	startAmount := new(big.Int)
-	startAmount.SetString(req.StartAmount, 10)
-
-	profitThreshold := new(big.Int)
-	profitThreshold.SetString(req.ProfitThreshold, 10)
-
-	routes, err := generateRoutes(req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Input validation
+	if !common.IsHexAddress(req.StartToken) || req.ChainID == 0 || req.MaxHops <= 0 {
+		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
 		return
 	}
 
+	startAmount := new(big.Int)
+	if _, success := startAmount.SetString(req.StartAmount, 10); !success {
+		http.Error(w, "Invalid startAmount format", http.StatusBadRequest)
+		return
+	}
+
+	profitThreshold := new(big.Int)
+	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success {
+		http.Error(w, "Invalid profitThreshold format", http.StatusBadRequest)
+		return
+	}
+
+	// Generate routes
+	routes, err := generateRoutes(req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error generating routes: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the generated routes
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(routes)
 }
 
@@ -1363,16 +1419,28 @@ func generateTokenPairs(tokens []string) []TokenPair {
 }
 
 func buildGraph(tokenPairs []TokenPair, chainID int64) (*Graph, error) {
-	// Mock implementation. Replace with logic to fetch graph data.
-	graph := &Graph{AdjacencyList: make(map[string]map[string]*big.Float)}
-	for _, pair := range tokenPairs {
-		if graph.AdjacencyList[pair.SrcToken] == nil {
-			graph.AdjacencyList[pair.SrcToken] = make(map[string]*big.Float)
-		}
-		graph.AdjacencyList[pair.SrcToken][pair.DstToken] = big.NewFloat(1.0) // Example weight
-	}
-	return graph, nil
+    graph := &Graph{AdjacencyList: make(map[string]map[string]*big.Float)}
+
+    for _, pair := range tokenPairs {
+        // Validate source and destination token addresses
+        if !common.IsHexAddress(pair.SrcToken) || !common.IsHexAddress(pair.DstToken) {
+            log.Printf("Skipping invalid token pair: %s -> %s", pair.SrcToken, pair.DstToken)
+            continue
+        }
+
+        // Ensure the adjacency list exists for the source token
+        if graph.AdjacencyList[pair.SrcToken] == nil {
+            graph.AdjacencyList[pair.SrcToken] = make(map[string]*big.Float)
+        }
+
+        // Add edge to the graph with a default weight (replace with real weight logic)
+        graph.AdjacencyList[pair.SrcToken][pair.DstToken] = big.NewFloat(1.0) // Example weight
+        log.Printf("Added edge: %s -> %s with weight: %f", pair.SrcToken, pair.DstToken, 1.0)
+    }
+
+    return graph, nil
 }
+
 
 func calculateAverageLiquidity(tokens []string, chainID int, startToken string) (*big.Float, error) {
 	totalLiquidity := big.NewFloat(0)
@@ -1642,26 +1710,35 @@ func BuildGraph(tokenPairs []TokenPair, chainID int64) (Graph, error) {
 
 
 // Decode transaction data (replace this ABI decoding logic with your contract's ABI)
-func decodeTransactionData(data string) (string, string, *big.Int, error) {
-	// Example ABI for decoding (replace with your contract ABI)
-	parsedABI, err := abi.JSON(strings.NewReader(`[{
-		"name":"swap",
-		"inputs":[
-			{"name":"srcToken","type":"address"},
-			{"name":"dstToken","type":"address"},
-			{"name":"amountIn","type":"uint256"}
-		],
-		"type":"function"
-	}]`))
+func decodeTransactionData(data string, routerType string) (string, string, *big.Int, error) {
+	var parsedABI abi.ABI
+	var err error
+
+	// Choose the ABI based on the router type
+	switch routerType {
+	case "uniswap":
+		parsedABI, err = abi.JSON(strings.NewReader(`[{"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[],"name":"WETH9","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"components":[{"internalType":"bytes","name":"path","type":"bytes"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"}],"internalType":"struct ISwapRouter.ExactInputParams","name":"params","type":"tuple"}],"name":"exactInput","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"},{"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"}]`)) // Replace with actual Uniswap ABI
+	case "sushiswap":
+		parsedABI, err = abi.JSON(strings.NewReader(`[{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}]`)) // Replace with actual SushiSwap ABI
+	default:
+		return "", "", nil, fmt.Errorf("unsupported router type: %s", routerType)
+	}
+
 	if err != nil {
 		return "", "", nil, fmt.Errorf("failed to parse ABI: %v", err)
 	}
 
-	methodSig := data[:10] // First 4 bytes represent the function signature
+	// Ensure data is long enough for method signature
+	if len(data) < 10 {
+		return "", "", nil, fmt.Errorf("invalid data length")
+	}
+
+	// Extract method signature and input data
+	methodSig := common.FromHex(data[:10]) // First 4 bytes are the method signature
 	inputData := common.FromHex(data)
 
 	// Decode the transaction data using the ABI
-	method, err := parsedABI.MethodById([]byte(methodSig))
+	method, err := parsedABI.MethodById(methodSig)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("failed to decode method ID: %v", err)
 	}
@@ -1672,23 +1749,27 @@ func decodeTransactionData(data string) (string, string, *big.Int, error) {
 		return "", "", nil, fmt.Errorf("failed to unpack inputs: %v", err)
 	}
 
-	srcToken, ok := args["srcToken"].(common.Address)
-	if !ok {
-		return "", "", nil, fmt.Errorf("invalid srcToken type")
+	// Extract and validate `tokenIn`
+	tokenIn, ok := args["tokenIn"].(common.Address)
+	if !ok || !common.IsHexAddress(tokenIn.Hex()) {
+		return "", "", nil, fmt.Errorf("invalid or missing tokenIn")
 	}
 
-	dstToken, ok := args["dstToken"].(common.Address)
-	if !ok {
-		return "", "", nil, fmt.Errorf("invalid dstToken type")
+	// Extract and validate `tokenOut`
+	tokenOut, ok := args["tokenOut"].(common.Address)
+	if !ok || !common.IsHexAddress(tokenOut.Hex()) {
+		return "", "", nil, fmt.Errorf("invalid or missing tokenOut")
 	}
 
+	// Extract and validate `amountIn`
 	amountIn, ok := args["amountIn"].(*big.Int)
 	if !ok {
-		return "", "", nil, fmt.Errorf("invalid amountIn type")
+		return "", "", nil, fmt.Errorf("invalid or missing amountIn")
 	}
 
-	return srcToken.Hex(), dstToken.Hex(), amountIn, nil
+	return tokenIn.Hex(), tokenOut.Hex(), amountIn, nil
 }
+
 
 // Process a transaction to identify arbitrage opportunities
 func processTransaction(client *ethclient.Client, tx *types.Transaction, targetContracts map[string]bool) {
@@ -1702,59 +1783,156 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 		return
 	}
 
-	// Decode transaction data
-	srcToken, dstToken, err := decodeTransactionData(tx.Data())
-	if err != nil {
-		log.Printf("Failed to decode transaction data: %v", err)
+	// Extract transaction input data
+	inputData := tx.Data()
+	if len(inputData) < 4 {
+		log.Println("Transaction data too short to decode")
 		return
 	}
 
-	log.Printf("Detected relevant transaction: %s", tx.Hash().Hex())
+	methodSig := inputData[:4] // First 4 bytes are the method ID
 
-	// Simulate fetching quote and profit evaluation (replace with actual API calls)
-	quoteAmount := "1000000000000000000" // Example quote amount (replace with real API call)
-	profit := "5000000"                  // Example profit (replace with evaluation logic)
-
-	if profit != "" {
-		// Broadcast arbitrage opportunity via WebSocket
-		wsBroadcast <- ArbitrageOpportunity{
-			TxHash:   tx.Hash().Hex(),
-			Profit:   profit,
-			SrcToken: srcToken,
-			DstToken: dstToken,
-			AmountIn: quoteAmount,
+	// Attempt decoding with Uniswap ABI
+	if method, err := uniswapABI.MethodById(methodSig); err == nil {
+		args := make(map[string]interface{})
+		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
+			log.Printf("Failed to decode Uniswap transaction: %v", err)
+			return
 		}
+
+		log.Printf("Decoded Uniswap transaction: Method=%s, Args=%v", method.Name, args)
+		processUniswapTransaction(method.Name, args)
+		return
+	}
+
+	// Attempt decoding with SushiSwap ABI
+	if method, err := sushiSwapABI.MethodById(methodSig); err == nil {
+		args := make(map[string]interface{})
+		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
+			log.Printf("Failed to decode SushiSwap transaction: %v", err)
+			return
+		}
+
+		log.Printf("Decoded SushiSwap transaction: Method=%s, Args=%v", method.Name, args)
+		processSushiSwapTransaction(method.Name, args)
+		return
+	}
+
+	// Log unknown transaction
+	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex())
+}
+
+// Process Uniswap-specific transactions
+func processUniswapTransaction(methodName string, args map[string]interface{}) {
+	switch methodName {
+	case "exactInput":
+		params := args["params"].(map[string]interface{})
+		path := params["path"].([]byte) // Multi-hop path as a byte array
+		decodedPath := decodePath(path) // Decode path to token addresses
+		amountIn := params["amountIn"].(*big.Int)
+		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+
+		log.Printf("Uniswap exactInput: Path=%v, AmountIn=%s, AmountOutMin=%s",
+			decodedPath, amountIn.String(), amountOutMinimum.String())
+
+	case "exactInputSingle":
+		params := args["params"].(map[string]interface{})
+		tokenIn := params["tokenIn"].(common.Address)
+		tokenOut := params["tokenOut"].(common.Address)
+		amountIn := params["amountIn"].(*big.Int)
+		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+
+		log.Printf("Uniswap exactInputSingle: TokenIn=%s, TokenOut=%s, AmountIn=%s, AmountOutMin=%s",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), amountOutMinimum.String())
+
+	default:
+		log.Printf("Unhandled Uniswap method: %s", methodName)
 	}
 }
 
+// Helper function to decode Uniswap V3 path
+func decodePath(path []byte) []string {
+	// Each token address is 20 bytes
+	const addressLength = 20
+	decodedPath := []string{}
+
+	for i := 0; i+addressLength <= len(path); i += addressLength {
+		token := common.BytesToAddress(path[i : i+addressLength])
+		decodedPath = append(decodedPath, token.Hex())
+	}
+
+	return decodedPath
+}
+
+
+// Process SushiSwap-specific transactions
+func processSushiSwapTransaction(methodName string, args map[string]interface{}) {
+	switch methodName {
+	case "swapExactTokensForTokens":
+		amountIn := args["amountIn"].(*big.Int)
+		amountOutMin := args["amountOutMin"].(*big.Int)
+		path := args["path"].([]common.Address)
+
+		decodedPath := decodePathSushi(path) // Decode path to token addresses
+
+		log.Printf("SushiSwap swapExactTokensForTokens: AmountIn=%s, AmountOutMin=%s, Path=%v",
+			amountIn.String(), amountOutMin.String(), decodedPath)
+
+	case "swapTokensForExactTokens":
+		amountOut := args["amountOut"].(*big.Int)
+		amountInMax := args["amountInMax"].(*big.Int)
+		path := args["path"].([]common.Address)
+
+		decodedPath := decodePathSushi(path) // Decode path to token addresses
+
+		log.Printf("SushiSwap swapTokensForExactTokens: AmountOut=%s, AmountInMax=%s, Path=%v",
+			amountOut.String(), amountInMax.String(), decodedPath)
+
+	default:
+		log.Printf("Unhandled SushiSwap method: %s", methodName)
+	}
+}
+
+// Helper function to decode SushiSwap path
+func decodePathSushi(path []common.Address) []string {
+	decodedPath := []string{}
+	for _, token := range path {
+		decodedPath = append(decodedPath, token.Hex())
+	}
+	return decodedPath
+}
+
+
 // Monitor mempool for pending transactions
-func monitorMempool(targetContracts map[string]bool, rpcURL string) {
-	client, err := ethclient.Dial(rpcURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to Ethereum client: %v", err)
-	}
+func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) {
+    client, err := ethclient.Dial(rpcURL)
+    if err != nil {
+        log.Fatalf("Failed to connect to Ethereum client: %v", err)
+    }
 
-	log.Println("Connected to Ethereum client. Monitoring mempool...")
+    log.Println("Connected to Ethereum client. Monitoring mempool...")
 
-	// Subscribe to pending transactions
-	pendingTxs := make(chan *types.Transaction)
-	sub, err := client.SubscribePendingTransactions(context.Background(), pendingTxs)
-	if err != nil {
-		log.Fatalf("Failed to subscribe to pending transactions: %v", err)
-	}
+    // Subscribe to pending transactions
+    pendingTxs := make(chan *types.Transaction)
+    sub, err := client.SubscribePendingTransactions(ctx, pendingTxs)
+    if err != nil {
+        log.Fatalf("Failed to subscribe to pending transactions: %v", err)
+    }
+    defer sub.Unsubscribe()
 
-	defer sub.Unsubscribe()
-
-	// Process transactions as they arrive
-	for {
-		select {
-		case err := <-sub.Err():
-			log.Printf("Subscription error: %v", err)
-			time.Sleep(time.Second) // Retry with a delay
-		case tx := <-pendingTxs:
-			go processTransaction(client, tx, targetContracts) // Process each transaction in a goroutine
-		}
-	}
+    // Process transactions as they arrive
+    for {
+        select {
+        case err := <-sub.Err():
+            log.Printf("Subscription error: %v", err)
+            time.Sleep(time.Second) // Retry with a delay
+        case tx := <-pendingTxs:
+            go processTransaction(client, tx, targetContracts)
+        case <-ctx.Done():
+            log.Println("Shutting down mempool monitoring...")
+            return
+        }
+    }
 }
 
 func approveTokensNode(route []string, amount *big.Int) error {
@@ -1769,14 +1947,33 @@ func approveTokensNode(route []string, amount *big.Int) error {
 		return fmt.Errorf("failed to create payload: %v", err)
 	}
 
-	resp, err := http.Post(apiURL, "application/json", strings.NewReader(string(jsonPayload)))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("token approval API failed: %v", err)
-	}
-	defer resp.Body.Close()
+	// Retry logic with exponential backoff
+	const maxRetries = 3
+	backoff := time.Second
 
-	log.Println("Token approval completed successfully via Node.js API.")
-	return nil
+	for i := 1; i <= maxRetries; i++ {
+		resp, err := http.Post(apiURL, "application/json", strings.NewReader(string(jsonPayload)))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			log.Println("Token approval completed successfully via Node.js API.")
+			return nil
+		}
+
+		if err != nil {
+			log.Printf("HTTP request failed (attempt %d/%d): %v", i, maxRetries, err)
+		} else {
+			defer resp.Body.Close()
+			body, _ := ioutil.ReadAll(resp.Body)
+			log.Printf("Non-200 response: %d, Body: %s", resp.StatusCode, string(body))
+		}
+
+		// Apply backoff before the next retry
+		log.Printf("Retrying in %v... (%d/%d)", backoff, i, maxRetries)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+
+	return fmt.Errorf("token approval API failed after %d attempts", maxRetries)
 }
 
 func notifyNode(eventType, message string) {
@@ -1792,14 +1989,33 @@ func notifyNode(eventType, message string) {
 		return
 	}
 
-	resp, err := http.Post(apiURL, "application/json", strings.NewReader(string(jsonPayload)))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Notification API failed: %v", err)
-		return
-	}
-	defer resp.Body.Close()
+	// Retry logic with exponential backoff
+	const maxRetries = 3
+	backoff := time.Second
 
-	log.Println("Notification sent successfully.")
+	for i := 1; i <= maxRetries; i++ {
+		resp, err := http.Post(apiURL, "application/json", strings.NewReader(string(jsonPayload)))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			log.Println("Notification sent successfully.")
+			return
+		}
+
+		if err != nil {
+			log.Printf("HTTP request failed (attempt %d/%d): %v", i, maxRetries, err)
+		} else {
+			defer resp.Body.Close()
+			body, _ := ioutil.ReadAll(resp.Body)
+			log.Printf("Non-200 response: %d, Body: %s", resp.StatusCode, string(body))
+		}
+
+		// Apply backoff before the next retry
+		log.Printf("Retrying in %v... (%d/%d)", backoff, i, maxRetries)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+
+	log.Printf("Failed to notify Node.js after %d attempts", maxRetries)
 }
 
 func estimateGas(route []string, CAPITAL *big.Int) (*big.Int, error) {
@@ -1852,195 +2068,217 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 		return nil, fmt.Errorf("failed to create request body: %v", err)
 	}
 
-	// Send the HTTP request
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to send HTTP request: %v", err)
-	}
-	defer resp.Body.Close()
+	// Retry logic with exponential backoff
+	const maxRetries = 3
+	backoff := time.Second
 
-	// Check the HTTP response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body
-		bodyBytes, readErr := ioutil.ReadAll(resp.Body)
-		if readErr != nil {
-			log.Printf("Failed to read response body for non-200 status: %v", readErr)
+	for i := 1; i <= maxRetries; i++ {
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
+		if err != nil {
+			log.Printf("HTTP request failed (attempt %d/%d): %v", i, maxRetries, err)
 		} else {
-			log.Printf("Received non-200 response: %d, Body: %s", resp.StatusCode, string(bodyBytes))
+			defer resp.Body.Close()
+
+			// Check the HTTP response status
+			if resp.StatusCode == http.StatusOK {
+				// Decode the JSON response
+				var permitDetails PermitDetails
+				if err := json.NewDecoder(resp.Body).Decode(&permitDetails); err != nil {
+					return nil, fmt.Errorf("failed to decode response: %v", err)
+				}
+				return &permitDetails, nil
+			}
+
+			// Log non-200 responses
+			bodyBytes, _ := ioutil.ReadAll(resp.Body)
+			log.Printf("Non-200 response: %d, Body: %s", resp.StatusCode, string(bodyBytes))
 		}
-		return nil, fmt.Errorf("received non-200 response: %d", resp.StatusCode)
+
+		// Apply backoff before the next retry
+		log.Printf("Retrying in %v... (%d/%d)", backoff, i, maxRetries)
+		time.Sleep(backoff)
+		backoff *= 2
 	}
 
-	// Decode the JSON response
-	var permitDetails PermitDetails
-	if err := json.NewDecoder(resp.Body).Decode(&permitDetails); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
-	}
-
-	return &permitDetails, nil
+	return nil, fmt.Errorf("failed to fetch Permit2 signature after %d attempts", maxRetries)
 }
+
 
 // Handle WebSocket connections
 func wsHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Failed to upgrade to WebSocket: %v", err)
-		return
-	}
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        log.Printf("Failed to upgrade to WebSocket: %v", err)
+        return
+    }
 
-	// Register client
-	wsClients[conn] = true
-	defer func() {
-		delete(wsClients, conn)
-		conn.Close()
-	}()
+    // Register the WebSocket client
+    wsClients[conn] = true
 
-	// Listen for messages from the WebSocket (optional)
-	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("WebSocket error: %v", err)
-			break
-		}
-	}
+    // Cleanup logic for disconnected clients
+    defer func() {
+        delete(wsClients, conn)
+        conn.Close()
+    }()
+
+    // Listen for messages from the WebSocket
+    for {
+        _, _, err := conn.ReadMessage()
+        if err != nil {
+            log.Printf("WebSocket error: %v", err)
+            break
+        }
+    }
 }
+
 
 // Broadcast opportunities to WebSocket clients
 func wsBroadcastManager() {
-	for opportunity := range wsBroadcast {
-		data, _ := json.Marshal(opportunity)
-		for client := range wsClients {
-			func(client *websocket.Conn) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("Recovered from panic while sending WebSocket message: %v", r)
-						client.Close()
-						delete(wsClients, client)
-					}
-				}()
+    for opportunity := range wsBroadcast {
+        data, err := json.Marshal(opportunity)
+        if err != nil {
+            log.Printf("Error marshaling broadcast data: %v", err)
+            continue
+        }
 
-				err := client.WriteMessage(websocket.TextMessage, data)
-				if err != nil {
-					log.Printf("WebSocket send error: %v", err)
-					client.Close()
-					delete(wsClients, client)
-				}
-			}(client)
-		}
-	}
+        for client := range wsClients {
+            func(client *websocket.Conn) {
+                defer func() {
+                    if r := recover(); r != nil {
+                        log.Printf("Recovered from panic while sending WebSocket message: %v", r)
+                        client.Close()
+                        delete(wsClients, client)
+                    }
+                }()
+
+                // Attempt to send the message to the WebSocket client
+                err := client.WriteMessage(websocket.TextMessage, data)
+                if err != nil {
+                    log.Printf("WebSocket send error: %v", err)
+                    client.Close()
+                    delete(wsClients, client)
+                }
+            }(client)
+        }
+    }
 }
 
 
 // Main function
 func main() {
-	// Define the target contracts to monitor
-	targetContracts := map[string]bool{
-		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
-		"0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
-	}
+    // Parse Uniswap V3 Router ABI
+    uniswapABI, err := abi.JSON(strings.NewReader(UniswapV3RouterABI))
+    if err != nil {
+        log.Fatalf("Failed to parse Uniswap V3 Router ABI: %v", err)
+    }
 
-	// Fetch the RPC URL from environment variables
-	rpcURL := os.Getenv("INFURA_WS_URL")
-	if rpcURL == "" {
-		log.Fatal("INFURA_WS_URL is not set")
-	}
+    // Parse SushiSwap Router ABI
+    sushiSwapABI, err := abi.JSON(strings.NewReader(SushiSwapRouterABI))
+    if err != nil {
+        log.Fatalf("Failed to parse SushiSwap Router ABI: %v", err)
+    }
 
-	// Create a context with cancel for shutdown handling
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+    // Define the target contracts to monitor
+    targetContracts := map[string]bool{
+        "0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
+        "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
+    }
 
-	// Listen for interrupt signals to gracefully shut down
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-		log.Println("Received shutdown signal, cleaning up...")
-		cancel() // Cancel the context to signal all goroutines to terminate
-	}()
+    // Fetch the RPC URL from environment variables
+    rpcURL := os.Getenv("INFURA_WS_URL")
+    if rpcURL == "" {
+        log.Fatal("INFURA_WS_URL is not set")
+    }
 
-	// Start WebSocket broadcast manager in a separate goroutine
-	go wsBroadcastManager()
+    // Create a context with cancel for shutdown handling
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
 
-	// Start the WebSocket server
-	http.HandleFunc("/ws", wsHandler)
-	go func() {
-		log.Println("WebSocket server listening on :8080/ws")
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
+    // Listen for interrupt signals to gracefully shut down
+    go func() {
+        c := make(chan os.Signal, 1)
+        signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+        <-c
+        log.Println("Received shutdown signal, cleaning up...")
+        cancel() // Signal all goroutines to terminate
+    }()
 
-	// Start monitoring the mempool in a separate goroutine
-	go func() {
-		monitorMempool(ctx, targetContracts, rpcURL)
-	}()
+    // Start WebSocket broadcast manager in a separate goroutine
+    go wsBroadcastManager()
 
-	// Start the REST API server for route generation and dynamic graph building
-	http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
-		chainID := int64(42161) // Ethereum Mainnet
-		startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+    // Start the WebSocket server
+    http.HandleFunc("/ws", wsHandler)
+    go func() {
+        log.Println("WebSocket server listening on :8080/ws")
+        log.Fatal(http.ListenAndServe(":8080", nil))
+    }()
 
-		// Parse destination token and token pairs
-		dstToken := r.URL.Query().Get("dstToken")
-		if !isValidTokenAddress(dstToken) {
-			http.Error(w, "Invalid destination token address", http.StatusBadRequest)
-			return
-		}
+    // Start monitoring the mempool in a separate goroutine
+    go func() {
+        monitorMempool(ctx, targetContracts, rpcURL)
+    }()
 
-		// Example token pairs (in practice, this could be dynamically fetched or provided)
-		tokenPairs := []TokenPair{
-			{SrcToken: startToken, DstToken: dstToken},
-			// Add other token pairs dynamically based on market data
-		}
+    // Start the REST API server for route generation and dynamic graph building
+    http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
+        chainID := int64(42161) // Ethereum Mainnet
+        startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
 
-		// Build the graph dynamically using live market data
-		graph, err := BuildGraph(tokenPairs, chainID)
-		if err != nil {
-			log.Printf("Error building graph: %v", err)
-			http.Error(w, "Failed to build graph", http.StatusInternalServerError)
-			return
-		}
+        dstToken := r.URL.Query().Get("dstToken")
+        if !isValidTokenAddress(dstToken) {
+            http.Error(w, "Invalid destination token address", http.StatusBadRequest)
+            return
+        }
 
-		// Compute the optimal route
-		path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
-		if err != nil {
-			log.Printf("Error computing optimal route: %v", err)
-			http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
-			return
-		}
+        tokenPairs := []TokenPair{
+            {SrcToken: startToken, DstToken: dstToken},
+        }
 
-		// Log and return the optimal route and cost
-		log.Printf("Optimal route: %v, Total cost: %f", path, cost)
-		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{
-			"path": path,
-			"cost": cost,
-		}
-		json.NewEncoder(w).Encode(response)
-	})
+        graph, err := BuildGraph(tokenPairs, chainID)
+        if err != nil {
+            log.Printf("Error building graph: %v", err)
+            http.Error(w, "Failed to build graph", http.StatusInternalServerError)
+            return
+        }
 
-	// Example usage of decodeTransactionData
-	go func() {
-		data := "0x12345678abcdef..." // Replace with actual data
-		srcToken, dstToken, amountIn, err := decodeTransactionData(data)
-		if err != nil {
-			log.Fatalf("Error decoding transaction data: %v", err)
-		}
-		log.Printf("Decoded transaction: srcToken=%s, dstToken=%s, amountIn=%s", srcToken, dstToken, amountIn.String())
-	}()
+        path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
+        if err != nil {
+            log.Printf("Error computing optimal route: %v", err)
+            http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
+            return
+        }
 
-	// Example usage of fetchGasPrice
-	go func() {
-		gasPrice, err := fetchGasPrice()
-		if err != nil {
-			log.Fatalf("Error fetching gas price: %v", err)
-		}
-		log.Printf("Current gas price: %s Wei", gasPrice.String())
-	}()
+        log.Printf("Optimal route: %v, Total cost: %f", path, cost)
+        w.Header().Set("Content-Type", "application/json")
+        response := map[string]interface{}{
+            "path": path,
+            "cost": cost,
+        }
+        json.NewEncoder(w).Encode(response)
+    })
 
-	// Final log before starting HTTP server
-	log.Println("Starting HTTP server on :8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+    // Example usage of decodeTransactionData
+    go func() {
+        data := "0x12345678abcdef..." // Replace with actual data
+        srcToken, dstToken, amountIn, err := decodeTransactionData(data)
+        if err != nil {
+            log.Fatalf("Error decoding transaction data: %v", err)
+        }
+        log.Printf("Decoded transaction: srcToken=%s, dstToken=%s, amountIn=%s", srcToken, dstToken, amountIn.String())
+    }()
+
+    // Example usage of fetchGasPrice
+    go func() {
+        gasPrice, err := fetchGasPrice()
+        if err != nil {
+            log.Fatalf("Error fetching gas price: %v", err)
+        }
+        log.Printf("Current gas price: %s Wei", gasPrice.String())
+    }()
+
+    // Final log before starting HTTP server
+    log.Println("Starting HTTP server on :8080...")
+    log.Fatal(http.ListenAndServe(":8080", nil))
 }
-
 
 // Helper function to validate token address
 func isValidTokenAddress(address string) bool {
