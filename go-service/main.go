@@ -86,6 +86,21 @@ type Receipt struct {
 	TransactionHash string `json:"transactionHash"`
 }
 
+type WebSocketClient struct {
+	Conn          *websocket.Conn
+	RateLimiter   *RateLimiter
+	Disconnected  chan bool
+}
+
+// RateLimiter controls the rate of messages for a client.
+type RateLimiter struct {
+	mu       sync.Mutex
+	capacity int           // Max number of messages allowed
+	tokens   int           // Current number of available tokens
+	interval time.Duration // Time to refill one token
+	stop     chan bool     // Stop the refill goroutine
+}
+
 
 // WebSocket connection manager
 var wsClients = make(map[*websocket.Conn]bool)
@@ -94,6 +109,9 @@ var sharedClient *ethclient.Client
 var clientOnce sync.Once
 // Global WebSocket Broadcast Channel
 var wsBroadcast = make(chan ArbitrageOpportunity)
+// BroadcastChannel for messages
+var broadcastChannel = make(chan string)
+
 // Hardcoded stable token addresses
 var hardcodedStableTokens = []Token{
 	{"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "USDT", 6, "Tether USD"},
@@ -102,6 +120,17 @@ var hardcodedStableTokens = []Token{
 	{"0x82af49447d8a07e3bd95bd0d56f35241523fbab1", "WETH", 18, "Wrapped Ether"},
 	{"0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", "WBTC", 8, "Wrapped Bitcoin"},
 }
+
+// WebSocket clients map and lock
+var (
+	wsClients    = make(map[*WebSocketClient]bool)
+	clientsMutex sync.Mutex
+	upgrader     = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+)
 
 
 // Global cache instance for stable token data
@@ -272,6 +301,56 @@ func (pq *PriorityQueue) Pop() interface{} {
 func (pq *PriorityQueue) Update(node *Node, priority float64) {
 	node.Priority = priority // Update the priority of the node.
 	heap.Fix(pq, node.Index) // Reorder the heap to maintain the heap property.
+}
+
+// NewRateLimiter initializes a new rate limiter with 1 message per second.
+func NewRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
+	rl := &RateLimiter{
+		capacity: capacity,
+		tokens:   capacity,
+		interval: refillInterval,
+		stop:     make(chan bool),
+	}
+
+	// Start the refill process in a separate Goroutine
+	go rl.refill()
+	return rl
+}
+
+// Allow checks if a message can be processed and decrements tokens if allowed.
+func (rl *RateLimiter) Allow() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if rl.tokens > 0 {
+		rl.tokens-- // Decrement a token
+		return true
+	}
+	return false
+}
+
+// refill adds tokens at regular intervals, up to the capacity.
+func (rl *RateLimiter) refill() {
+	ticker := time.NewTicker(rl.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			if rl.tokens < rl.capacity {
+				rl.tokens++ // Refill a token
+			}
+			rl.mu.Unlock()
+		case <-rl.stop:
+			return // Stop the refill process
+		}
+	}
+}
+
+// Stop terminates the refill process for the rate limiter.
+func (rl *RateLimiter) Stop() {
+	close(rl.stop)
 }
 
 // getStableTokenList fetches the stable token list or falls back to hardcoded tokens
@@ -1768,7 +1847,7 @@ func decodeTransactionData(data string, routerType string) (string, string, *big
 	}
 
 	return tokenIn.Hex(), tokenOut.Hex(), amountIn, nil
-}
+ }
 
 
 // Process a transaction to identify arbitrage opportunities
@@ -2105,32 +2184,72 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 
 
 // Handle WebSocket connections
+// WebSocket handler
 func wsHandler(w http.ResponseWriter, r *http.Request) {
-    conn, err := upgrader.Upgrade(w, r, nil)
-    if err != nil {
-        log.Printf("Failed to upgrade to WebSocket: %v", err)
-        return
-    }
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade to WebSocket: %v", err)
+		return
+	}
 
-    // Register the WebSocket client
-    wsClients[conn] = true
+	client := &WebSocketClient{
+		Conn:         conn,
+		RateLimiter:  NewRateLimiter(1, time.Second), // Limit to 1 message per second
+		Disconnected: make(chan bool),
+	}
 
-    // Cleanup logic for disconnected clients
-    defer func() {
-        delete(wsClients, conn)
-        conn.Close()
-    }()
+	clientsMutex.Lock()
+	wsClients[client] = true
+	clientsMutex.Unlock()
 
-    // Listen for messages from the WebSocket
-    for {
-        _, _, err := conn.ReadMessage()
-        if err != nil {
-            log.Printf("WebSocket error: %v", err)
-            break
-        }
-    }
+	log.Println("New WebSocket client connected.")
+
+	go handleMessages(client)
 }
 
+
+// Handle messages from a WebSocket client
+func handleMessages(client *WebSocketClient) {
+	defer func() {
+		clientsMutex.Lock()
+		delete(wsClients, client)
+		clientsMutex.Unlock()
+		client.RateLimiter.Stop() // Stop rate limiter for this client
+		client.Conn.Close()
+		log.Println("WebSocket client disconnected.")
+	}()
+
+	for {
+		_, message, err := client.Conn.ReadMessage()
+		if err != nil {
+			log.Printf("Error reading message: %v", err)
+			client.Disconnected <- true
+			return
+		}
+
+		if !client.RateLimiter.Allow() {
+			log.Println("Rate limit exceeded. Dropping message.")
+			continue
+		}
+
+		// Broadcast the received message to the channel
+		broadcastChannel <- string(message)
+	}
+}
+
+// Broadcast messages to all WebSocket clients
+func broadcastMessages() {
+	for message := range broadcastChannel {
+		clientsMutex.Lock()
+		for client := range wsClients {
+			if err := client.Conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+				log.Printf("Error broadcasting message: %v", err)
+				client.Disconnected <- true
+			}
+		}
+		clientsMutex.Unlock()
+	}
+}
 
 // Broadcast opportunities to WebSocket clients
 func wsBroadcastManager() {
@@ -2202,6 +2321,9 @@ func main() {
         log.Println("Received shutdown signal, cleaning up...")
         cancel() // Signal all goroutines to terminate
     }()
+     
+        http.HandleFunc("/ws", wsHandler)
+	go broadcastMessages()
 
     // Start WebSocket broadcast manager in a separate goroutine
     go wsBroadcastManager()
@@ -2276,6 +2398,7 @@ func main() {
     }()
 
     // Final log before starting HTTP server
+    log.Println("WebSocket server started on :8080/ws")
     log.Println("Starting HTTP server on :8080...")
     log.Fatal(http.ListenAndServe(":8080", nil))
 }
