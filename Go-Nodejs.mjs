@@ -8,7 +8,7 @@ import Redis from 'ioredis';
 import { ethers } from 'ethers';
 import cron from 'node-cron';
 import { Telegraf } from 'telegraf';
-import { abi as UNISWAP_ROUTER_ABI } from './UniswapV2Router.json'; // Replace with your contract's ABI
+//import { abi as UNISWAP_ROUTER_ABI } from './UniswapV2Router.json'; // Replace with your contract's ABI
 
 dotenv.config();
 
@@ -119,39 +119,65 @@ async function fetchGasPrice() {
 
 function extractTokensFromTransaction(tx) {
   try {
-    // Decode the transaction input data using the Uniswap Router ABI
-    const iface = new ethers.utils.Interface(UNISWAP_ROUTER_ABI); // Use appropriate ABI for decoding
+    // Define the ABI for the 1inch Aggregation Router
+    const AGGREGATION_ROUTER_ABI = [
+      "function swap(address executor, (address srcToken, address dstToken, address payable srcReceiver, address payable dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags) desc, bytes permit, bytes data)",
+      "function unoswap(address srcToken, uint256 amount, uint256 minReturn, bytes32[] pools)",
+      "function ethUnoswap(address srcToken, uint256 minReturn, bytes32[] pools)",
+      "function unoswapTo(address to, address srcToken, uint256 amount, uint256 minReturn, bytes32[] pools)",
+      "function ethUnoswapTo(address to, address srcToken, uint256 minReturn, bytes32[] pools)",
+      "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)",
+    ];
+
+    // Use ethers.js Interface to parse the ABI
+    const iface = new ethers.utils.Interface(AGGREGATION_ROUTER_ABI);
+
+    // Decode the transaction input data
     const decodedData = iface.parseTransaction({ data: tx.data });
 
     const tokenAddresses = [];
 
-    // Check the method name and extract tokens based on method signature
+    // Handle decoding based on the function name
     switch (decodedData.name) {
-      case 'swapExactTokensForTokens':
-      case 'swapTokensForExactTokens':
-        tokenAddresses.push(...decodedData.args.path);
+      case "swap": {
+        // Extract srcToken and dstToken from SwapDescription
+        const { srcToken, dstToken } = decodedData.args.desc;
+        tokenAddresses.push(srcToken, dstToken);
         break;
+      }
 
-      case 'addLiquidity':
-      case 'removeLiquidity':
-        tokenAddresses.push(decodedData.args.tokenA, decodedData.args.tokenB);
+      case "unoswap":
+      case "ethUnoswap": {
+        // Extract the source token
+        const { srcToken } = decodedData.args;
+        tokenAddresses.push(srcToken);
         break;
+      }
 
-      case 'addLiquidityETH':
-      case 'removeLiquidityETH':
-        tokenAddresses.push(decodedData.args.token);
+      case "unoswapTo":
+      case "ethUnoswapTo": {
+        // Extract the source token
+        const { srcToken } = decodedData.args;
+        tokenAddresses.push(srcToken);
         break;
+      }
 
-      // Add more cases if your transactions use additional methods
+      case "swapExactTokensForTokens": {
+        // Extract tokens from the `path` array
+        const { path } = decodedData.args;
+        tokenAddresses.push(...path);
+        break;
+      }
+
       default:
-        log(`Unhandled method in extractTokensFromTransaction: ${decodedData.name}`, 'warn');
+        log(`Unhandled method in extractTokensFromTransaction: ${decodedData.name}`, "warn");
     }
 
-    // Remove duplicates and format token addresses for output
+    // Remove duplicate addresses and return them in lowercase
     const uniqueTokens = [...new Set(tokenAddresses.map((address) => address.toLowerCase()))];
     return uniqueTokens;
   } catch (err) {
-    log(`Error extracting tokens from transaction: ${err.message}`, 'error');
+    log(`Error extracting tokens from transaction: ${err.message}`, "error");
     return []; // Return an empty array if extraction fails
   }
 }
