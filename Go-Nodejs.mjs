@@ -229,42 +229,59 @@ function extractTokensFromTransaction(tx) {
   }
 }
 
-async function fetchTokenPrices(tokens) {
-  if (tokens.length === 0) {
-    log('No tokens provided for price fetch.', 'warn');
-    return {};
-  }
 
-  // Remove duplicates and sort tokens for consistent caching
-  const uniqueTokens = [...new Set(tokens)].sort();
-  const cacheKey = `prices:${uniqueTokens.join(',')}`;
+// Caching Helper
+async function cachedFetchPrices(tokenAddresses) {
+    const cacheKey = `prices:${tokenAddresses.join(',')}`;
+    const cachedPrices = await redis.get(cacheKey);
 
-  return cachedFetch(cacheKey, async () => {
-    const url = `https://api.1inch.dev/price/v1.1/1/${uniqueTokens.join(',')}`;
-
-    try {
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`, // Ensure this is set in .env
-        },
-      });
-
-      if (response.ok) {
-        const prices = await response.json();
-        log(`Fetched token prices: ${JSON.stringify(prices)}`);
-        return prices; // Return the prices directly
-      } else {
-        log(`Failed to fetch token prices. Status: ${response.status}`, 'error');
-        throw new Error(`Status: ${response.status}, Message: ${response.statusText}`);
-      }
-    } catch (err) {
-      log(`Failed to fetch token prices for ${uniqueTokens.join(',')}: ${err.message}`, 'error');
-      addErrorToSummary(err, `Token Prices Fetch: ${uniqueTokens.join(',')}`);
-      throw err;
+    if (cachedPrices) {
+        log(`Cache hit for token prices: ${tokenAddresses.join(',')}`);
+        return JSON.parse(cachedPrices);
     }
-  });
+
+    // Fetch prices from 1inch API
+    const url = `https://api.1inch.dev/price/v1.1/1/${tokenAddresses.join(',')}`;
+    try {
+        const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+        });
+
+        if (!response.ok) {
+            log(`1inch API request failed with status: ${response.statusText}`, 'error');
+            throw new Error(`Failed to fetch prices: ${response.statusText}`);
+        }
+
+        const prices = await response.json();
+        await redis.setex(cacheKey, 60, JSON.stringify(prices)); // Cache for 1 minute
+        log(`Fetched token prices and updated cache: ${JSON.stringify(prices)}`);
+        return prices;
+    } catch (error) {
+        log(`Error fetching token prices from 1inch API: ${error.message}`, 'error');
+        throw error;
+    }
 }
 
+
+async function fetchTokenPrices(tokens) {
+    if (tokens.length === 0) {
+        log('No tokens provided for price fetch.', 'warn');
+        return {};
+    }
+
+    // Remove duplicates and sort tokens for consistent caching
+    const uniqueTokens = [...new Set(tokens)].sort();
+
+    try {
+        const prices = await cachedFetchPrices(uniqueTokens);
+        log(`Successfully fetched prices for tokens: ${uniqueTokens.join(', ')}`);
+        return prices;
+    } catch (error) {
+        log(`Failed to fetch prices for tokens: ${uniqueTokens.join(',')}. Error: ${error.message}`, 'error');
+        addErrorToSummary(error, `Token Prices Fetch: ${uniqueTokens.join(',')}`);
+        throw error;
+    }
+}
 
 // Error Handling and Notifications
 function sendTelegramMessage(message, isCritical = false) {
@@ -359,81 +376,87 @@ async function executeRoute(route, amount) {
 
 // Mempool Monitoring and Live Data Retrieval
 async function monitorMempool(targetContracts) {
-  const connectWebSocket = () => {
-    const provider = new ethers.WebSocketProvider(process.env.INFURA_WS_URL);
-    log('WebSocket connection established.');
+    const connectWebSocket = () => {
+        const provider = new ethers.WebSocketProvider(process.env.INFURA_WS_URL);
+        log('WebSocket connection established.');
 
-    provider.on('pending', async (txHash) => {
-      try {
-        // Fetch transaction details using txHash
-        const tx = await provider.getTransaction(txHash); 
-        if (!tx) return; // Ignore if transaction is null
+        provider.on('pending', async (txHash) => {
+            try {
+                // Fetch transaction details using txHash
+                const tx = await provider.getTransaction(txHash);
+                if (!tx) {
+                    log(`Transaction ${txHash} not found or null. Skipping...`, 'warn');
+                    return;
+                }
 
-        // Ensure the transaction involves a target contract
-        if (targetContracts.includes(tx.to?.toLowerCase())) {
-          log(`Detected transaction targeting monitored contract: ${txHash}`);
+                // Ensure the transaction involves a target contract
+                if (tx.to && targetContracts.includes(tx.to.toLowerCase())) {
+                    log(`Transaction detected targeting monitored contract: ${txHash}`);
 
-          // Extract tokens from the transaction
-          const detectedTokens = extractTokensFromTransaction(tx);
+                    // Extract tokens from the transaction
+                    const detectedTokens = extractTokensFromTransaction(tx);
 
-          // Filter tokens to focus only on HARDCODED_STABLE_ADDRESSES
-          const relevantTokens = detectedTokens.filter((token) =>
-            HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
-          );
+                    // Filter tokens to HARDCODED_STABLE_ADDRESSES
+                    const relevantTokens = detectedTokens.filter((token) =>
+                        HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
+                    );
 
-          if (relevantTokens.length > 0) {
-            log(`Relevant tokens detected in transaction: ${relevantTokens.join(', ')}`);
+                    if (relevantTokens.length > 0) {
+                        log(`Relevant tokens detected: ${relevantTokens.join(', ')}`);
 
-            // Fetch live prices for the relevant tokens
-            const tokenPrices = await fetchTokenPrices(relevantTokens);
-            log(`Dynamic token prices fetched: ${JSON.stringify(tokenPrices)}`);
+                        // Fetch live prices for the relevant tokens using shared caching
+                        const tokenPrices = await fetchTokenPrices(relevantTokens);
+                        log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`);
 
-            // Call Go backend to evaluate profitability
-            const response = await retryRequest(() =>
-              axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash, tokenPrices })
-            );
+                        // Call Go backend to evaluate profitability
+                        const response = await retryRequest(() =>
+                            axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash, tokenPrices })
+                        );
 
-            if (response.status === 200 && response.data.profit > 0) {
-              log(`Profitable transaction detected: ${txHash}`);
-              await executeRoute(response.data.route, response.data.amount);
-              await sendTelegramMessage(`🚀 Executed profitable transaction from mempool! Profit: ${response.data.profit} USDT`);
-            } else {
-              log(`Unprofitable transaction detected: ${txHash}`);
+                        if (response.status === 200 && response.data.profit > 0) {
+                            log(`Profitable transaction detected: ${txHash}`);
+                            await executeRoute(response.data.route, response.data.amount);
+                            await sendTelegramMessage(
+                                `🚀 Profitable transaction executed from mempool!\nProfit: ${response.data.profit} USDT`
+                            );
+                        } else {
+                            log(`Unprofitable transaction detected: ${txHash}`);
+                        }
+                    } else {
+                        log(`No relevant tokens detected in transaction: ${txHash}`);
+                    }
+                }
+            } catch (err) {
+                log(`Error processing transaction ${txHash}: ${err.message}`, 'error');
+                consecutiveFailures++;
+                checkCircuitBreaker();
+                addErrorToSummary(err, `Transaction: ${txHash}`);
             }
-          } else {
-            log(`No relevant tokens detected in transaction: ${txHash}`);
-          }
-        }
-      } catch (err) {
-        log(`Error processing transaction ${txHash}: ${err.message}`, 'error');
-        consecutiveFailures++;
-        checkCircuitBreaker();
-        addErrorToSummary(err, `Transaction: ${txHash}`);
-      }
-    });
+        });
 
-    // Handle WebSocket closure and errors
-    provider._websocket.on('close', () => {
-      log('WebSocket connection closed. Attempting to reconnect...', 'warn');
-      setTimeout(connectWebSocket, 5000); // Retry after 5 seconds
-    });
+        // Handle WebSocket closure and errors
+        provider._websocket.on('close', () => {
+            log('WebSocket connection closed. Reconnecting...', 'warn');
+            setTimeout(connectWebSocket, 5000); // Retry after 5 seconds
+        });
 
-    provider._websocket.on('error', (err) => {
-      log(`WebSocket error: ${err.message}`, 'error');
-      addErrorToSummary(err, 'WebSocket Error');
-    });
+        provider._websocket.on('error', (err) => {
+            log(`WebSocket error: ${err.message}`, 'error');
+            addErrorToSummary(err, 'WebSocket Error');
+        });
 
-    // Send heartbeat pings to keep WebSocket alive
-    setInterval(() => {
-      provider.send('ping', []).catch((err) => {
-        log(`Failed to send WebSocket ping: ${err.message}`, 'error');
-        addErrorToSummary(err, 'WebSocket Ping');
-      });
-    }, 30000);
-  };
+        // Send heartbeat pings to keep WebSocket alive
+        setInterval(() => {
+            provider.send('ping', []).catch((err) => {
+                log(`Failed to send WebSocket ping: ${err.message}`, 'error');
+                addErrorToSummary(err, 'WebSocket Ping');
+            });
+        }, 30000);
+    };
 
-  connectWebSocket();
+    connectWebSocket();
 }
+
 
 // Main Function
 async function runArbitrageBot() {
