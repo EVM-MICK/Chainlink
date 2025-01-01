@@ -29,6 +29,8 @@ import (
         "github.com/joho/godotenv"
 )
 
+type RetryFunction func() (interface{}, error)
+
 type ArbitrageOpportunity struct {
 	TxHash   string  `json:"txHash"`
 	Profit   string  `json:"profit"`
@@ -82,6 +84,16 @@ type PermitDetails struct {
 	PermitBatch string `json:"permitBatch"`
 }
 
+type WeightedGraph struct {
+	AdjacencyList map[string]map[string]EdgeWeight // Nested maps for graph edges
+}
+
+type EdgeWeight struct {
+	Weight    *big.Float // Weight of the edge (e.g., price or inverse liquidity)
+	Liquidity *big.Float // Liquidity available for the edge
+}
+
+
 type Receipt struct {
 	TransactionHash string `json:"transactionHash"`
 }
@@ -90,17 +102,18 @@ type WebSocketClient struct {
 	Conn          *websocket.Conn
 	RateLimiter   *RateLimiter
 	Disconnected  chan bool
+	Context       context.Context
+	CancelFunc    context.CancelFunc
 }
 
 // RateLimiter controls the rate of messages for a client.
 type RateLimiter struct {
 	mu       sync.Mutex
-	capacity int           // Max number of messages allowed
-	tokens   int           // Current number of available tokens
-	interval time.Duration // Time to refill one token
-	stop     chan bool     // Stop the refill goroutine
+	capacity int           // Maximum tokens allowed
+	tokens   int           // Current token count
+	interval time.Duration // Time interval for refilling tokens
+	stop     chan bool     // Stop channel for refill loop
 }
-
 
 // WebSocket connection manager
 var wsClients = make(map[*websocket.Conn]bool)
@@ -110,7 +123,7 @@ var clientOnce sync.Once
 // Global WebSocket Broadcast Channel
 var wsBroadcast = make(chan ArbitrageOpportunity)
 // BroadcastChannel for messages
-var broadcastChannel = make(chan string)
+var broadcastChannel = make(chan []byte)
 
 // Hardcoded stable token addresses
 var hardcodedStableTokens = []Token{
@@ -303,6 +316,16 @@ func (pq *PriorityQueue) Update(node *Node, priority float64) {
 	heap.Fix(pq, node.Index) // Reorder the heap to maintain the heap property.
 }
 
+// Adjust updates the capacity and refill interval dynamically.
+func (rl *RateLimiter) Adjust(newCapacity int, newInterval time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	rl.capacity = newCapacity
+	rl.interval = newInterval
+	rl.tokens = min(rl.tokens, rl.capacity) // Ensure tokens do not exceed capacity
+}
+
 // NewRateLimiter initializes a new rate limiter with 1 message per second.
 func NewRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
 	rl := &RateLimiter{
@@ -317,19 +340,33 @@ func NewRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
 	return rl
 }
 
-// Allow checks if a message can be processed and decrements tokens if allowed.
+// NewDynamicRateLimiter creates a rate limiter with dynamic capacity and refill interval.
+func NewDynamicRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
+	rl := &RateLimiter{
+		capacity: capacity,
+		tokens:   capacity,
+		interval: refillInterval,
+		stop:     make(chan bool),
+	}
+
+	go rl.refill()
+	return rl
+}
+
+
+// Allow checks if the request can proceed, decrementing tokens if allowed.
 func (rl *RateLimiter) Allow() bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	if rl.tokens > 0 {
-		rl.tokens-- // Decrement a token
+		rl.tokens--
 		return true
 	}
 	return false
 }
 
-// refill adds tokens at regular intervals, up to the capacity.
+// refill adds tokens periodically up to the current capacity.
 func (rl *RateLimiter) refill() {
 	ticker := time.NewTicker(rl.interval)
 	defer ticker.Stop()
@@ -339,18 +376,38 @@ func (rl *RateLimiter) refill() {
 		case <-ticker.C:
 			rl.mu.Lock()
 			if rl.tokens < rl.capacity {
-				rl.tokens++ // Refill a token
+				rl.tokens++
 			}
 			rl.mu.Unlock()
 		case <-rl.stop:
-			return // Stop the refill process
+			return
 		}
 	}
 }
 
-// Stop terminates the refill process for the rate limiter.
+// Stop terminates the refill goroutine.
 func (rl *RateLimiter) Stop() {
 	close(rl.stop)
+}
+
+// Retry retries a function with exponential backoff.
+func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration) (interface{}, error) {
+	backoff := initialBackoff
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+
+		log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
+		lastErr = err
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+
+	return nil, fmt.Errorf("operation failed after %d retries: %w", maxRetries, lastErr)
 }
 
 // getStableTokenList fetches the stable token list or falls back to hardcoded tokens
@@ -489,30 +546,26 @@ func (pq *PriorityQueue) Update(node *Node, priority float64) {
 }
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
-func ComputeOptimalRoute(graph Graph, startToken, endToken string) ([]string, float64, error) {
-	if _, exists := graph[startToken]; !exists {
-		return nil, math.Inf(1), fmt.Errorf("start token %s not found in the graph", startToken)
-	}
-	if _, exists := graph[endToken]; !exists {
-		return nil, math.Inf(1), fmt.Errorf("end token %s not found in the graph", endToken)
+func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string) ([]string, *big.Float, error) {
+	if _, exists := graph.AdjacencyList[startToken]; !exists {
+		return nil, nil, fmt.Errorf("start token not in graph")
 	}
 
-	// Initialize distances and previous nodes
-	distances := make(map[string]float64)
+	// Initialize distances and paths
+	distances := make(map[string]*big.Float)
 	previous := make(map[string]string)
-	for token := range graph {
-		distances[token] = math.Inf(1)
+	for token := range graph.AdjacencyList {
+		distances[token] = big.NewFloat(math.Inf(1)) // Infinity
 	}
-	distances[startToken] = 0
+	distances[startToken] = big.NewFloat(0)
 
-	// Initialize the priority queue
+	// Priority queue for Dijkstra's algorithm
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 	heap.Push(&pq, &Node{Token: startToken, Priority: 0})
 
 	visited := make(map[string]bool)
 
-	// Dijkstra's algorithm
 	for pq.Len() > 0 {
 		current := heap.Pop(&pq).(*Node)
 		currentToken := current.Token
@@ -522,8 +575,8 @@ func ComputeOptimalRoute(graph Graph, startToken, endToken string) ([]string, fl
 		}
 		visited[currentToken] = true
 
-		// If we reach the end token, construct the path
 		if currentToken == endToken {
+			// Construct path from `previous` map
 			path := []string{}
 			for token := endToken; token != ""; token = previous[token] {
 				path = append([]string{token}, path...)
@@ -531,14 +584,14 @@ func ComputeOptimalRoute(graph Graph, startToken, endToken string) ([]string, fl
 			return path, distances[endToken], nil
 		}
 
-		// Explore neighbors
-		for neighbor, weight := range graph[currentToken] {
+		for neighbor, edge := range graph.AdjacencyList[currentToken] {
 			if visited[neighbor] {
 				continue
 			}
 
-			newDistance := distances[currentToken] + weight
-			if newDistance < distances[neighbor] {
+			// Relax the edge
+			newDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
+			if newDistance.Cmp(distances[neighbor]) < 0 {
 				distances[neighbor] = newDistance
 				previous[neighbor] = currentToken
 				heap.Push(&pq, &Node{Token: neighbor, Priority: newDistance})
@@ -546,9 +599,9 @@ func ComputeOptimalRoute(graph Graph, startToken, endToken string) ([]string, fl
 		}
 	}
 
-	// No path found
-	return nil, math.Inf(1), nil
+	return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
+
 
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
@@ -686,39 +739,36 @@ func setToOrderBookCache(key string, value interface{}, duration time.Duration) 
 
 
 // Helper function for exponential backoff retries
-func fetchWithRetries(url string, headers map[string]string, maxRetries int, backoff time.Duration) ([]byte, error) {
-	var err error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		req, reqErr := http.NewRequest("GET", url, nil)
-		if reqErr != nil {
-			return nil, fmt.Errorf("failed to create request: %v", reqErr)
+func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
+	operation := func() (interface{}, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
 		}
+
 		for key, value := range headers {
 			req.Header.Set(key, value)
 		}
 
 		client := &http.Client{}
-		resp, respErr := client.Do(req)
-		if respErr != nil {
-			err = respErr
-			log.Printf("Error fetching data (attempt %d): %v", attempt, respErr)
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return ioutil.ReadAll(resp.Body)
-			}
-
-			if resp.StatusCode == 429 && attempt < maxRetries {
-				log.Printf("Rate limit hit. Retrying in %v... (Attempt %d/%d)", backoff, attempt, maxRetries)
-				time.Sleep(backoff)
-				backoff *= 2 // Exponential backoff
-			} else {
-				body, _ := ioutil.ReadAll(resp.Body)
-				return nil, fmt.Errorf("error fetching data: %s", string(body))
-			}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
 		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		return ioutil.ReadAll(resp.Body)
 	}
-	return nil, fmt.Errorf("failed to fetch data after %d attempts: %v", maxRetries, err)
+
+	result, err := Retry(operation, 3, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return result.([]byte), nil
 }
 
 // Fetch a single quote with caching and retries
@@ -899,19 +949,12 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{},
 }
 
 // Helper function for HTTP GET with retries and parameters
-func fetchWithRetryOrderBook(url string, headers, params map[string]string, backoff time.Duration) ([]byte, error) {
-	client := &http.Client{}
-	queryParams := "?"
-	for key, value := range params {
-		queryParams += fmt.Sprintf("%s=%s&", key, value)
-	}
-	url += queryParams[:len(queryParams)-1] // Remove trailing '&'
-
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
-		req, reqErr := http.NewRequest("GET", url, nil)
-		if reqErr != nil {
-			return nil, fmt.Errorf("failed to create request: %v", reqErr)
+func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]byte, error) {
+	operation := func() (interface{}, error) {
+		client := &http.Client{}
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
 		}
 
 		// Add headers
@@ -919,27 +962,33 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string, back
 			req.Header.Set(key, value)
 		}
 
-		resp, respErr := client.Do(req)
-		if respErr != nil {
-			err = respErr
-			log.Printf("Request failed (attempt %d): %v", attempt, respErr)
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return ioutil.ReadAll(resp.Body)
-			}
-			if resp.StatusCode == 429 {
-				log.Printf("Rate limit hit. Retrying in %v...", backoff)
-				time.Sleep(backoff)
-				backoff *= 2
-			} else {
-				body, _ := ioutil.ReadAll(resp.Body)
-				return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
-			}
+		// Add query parameters
+		query := req.URL.Query()
+		for key, value := range params {
+			query.Add(key, value)
 		}
+		req.URL.RawQuery = query.Encode()
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		return ioutil.ReadAll(resp.Body)
 	}
-	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
+
+	result, err := Retry(operation, 3, time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return result.([]byte), nil
 }
+
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
@@ -1154,16 +1203,18 @@ func getEthClient() (*ethclient.Client, error) {
 	return sharedClient, err
 }
 
-// Validate environment variables at startup
-func validateEnvVars() error {
-	requiredVars := []string{"RPC_URL", "PRIVATE_KEY"}
-	for _, v := range requiredVars {
-		if os.Getenv(v) == "" {
-			return fmt.Errorf("environment variable %s is not set", v)
+
+// Validate and fetch environment variables
+func validateEnvVars(requiredVars []string) error {
+	for _, key := range requiredVars {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			return fmt.Errorf("environment variable %s is not set or empty", key)
 		}
 	}
 	return nil
 }
+
 
 func sendTransaction(tx Transaction, token string) (*Receipt, error) {
 	// Validate required environment variables
@@ -1326,65 +1377,46 @@ func FetchTokenPricesAcrossProtocols(tokens []string, chainID int) (map[string]m
 	return prices, nil
 }
 
-
 func executeRoute(route []string, CAPITAL *big.Int) error {
 	const maxRetries = 3
 	const initialBackoff = time.Second
 
-	// Step 1: Fetch the current gas price with retry logic
 	var gasPrice *big.Int
 	var err error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		gasPrice, err = fetchGasPrice()
-		if err == nil {
-			break
-		}
-		log.Printf("Failed to fetch gas price (attempt %d/%d): %v", attempt, maxRetries, err)
-		time.Sleep(initialBackoff * time.Duration(attempt)) // Exponential backoff
-	}
-	if err != nil {
-		return fmt.Errorf("failed to fetch gas price after %d attempts: %v", maxRetries, err)
+
+	// Step 1: Fetch gas price
+	if gasPrice, err = retryWithBackoff(maxRetries, initialBackoff, fetchGasPrice); err != nil {
+		return fmt.Errorf("failed to fetch gas price: %w", err)
 	}
 
-	// Step 2: Adjust the trade size based on gas cost
+	// Step 2: Adjust trade size
 	scaledAmount, err := adjustTradeSizeForGas(CAPITAL, gasPrice)
 	if err != nil {
-		return fmt.Errorf("failed to adjust trade size: %v", err)
+		return fmt.Errorf("failed to adjust trade size: %w", err)
 	}
 
-	// Step 3: Approve tokens via Node.js API with retry logic
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err = approveTokensNode(route, scaledAmount)
-		if err == nil {
-			break
-		}
-		log.Printf("Token approval failed (attempt %d/%d): %v", attempt, maxRetries, err)
-		time.Sleep(initialBackoff * time.Duration(attempt)) // Exponential backoff
-	}
-	if err != nil {
-		return fmt.Errorf("token approval failed after %d attempts: %v", maxRetries, err)
+	// Step 3: Approve tokens
+	if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
+		return approveTokensNode(route, scaledAmount)
+	}); err != nil {
+		return fmt.Errorf("token approval failed: %w", err)
 	}
 
-	// Step 4: Construct transaction calldata and estimate gas
+	// Step 4: Construct transaction parameters
 	params, err := constructParams(route, scaledAmount, nil)
 	if err != nil {
-		return fmt.Errorf("failed to construct transaction parameters: %v", err)
+		return fmt.Errorf("failed to construct transaction parameters: %w", err)
 	}
 
+	// Step 5: Estimate gas
 	var gasEstimate *big.Int
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		gasEstimate, err = estimateGas(params)
-		if err == nil {
-			break
-		}
-		log.Printf("Gas estimation failed (attempt %d/%d): %v", attempt, maxRetries, err)
-		time.Sleep(initialBackoff * time.Duration(attempt)) // Exponential backoff
-	}
-	if err != nil {
-		return fmt.Errorf("gas estimation failed after %d attempts: %v", maxRetries, err)
+	if gasEstimate, err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
+		return estimateGas(params)
+	}); err != nil {
+		return fmt.Errorf("gas estimation failed: %w", err)
 	}
 
-	// Step 5: Execute transaction with retry logic
+	// Step 6: Execute transaction
 	tx := Transaction{
 		From:     os.Getenv("WALLET_ADDRESS"),
 		To:       os.Getenv("CONTRACT_ADDRESS"),
@@ -1394,26 +1426,37 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
 	}
 
 	var receipt *Receipt
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		receipt, err = sendTransaction(tx)
-		if err == nil {
-			break
-		}
-		log.Printf("Transaction execution failed (attempt %d/%d): %v", attempt, maxRetries, err)
-		time.Sleep(initialBackoff * time.Duration(attempt)) // Exponential backoff
-	}
-	if err != nil {
-		notifyNode("execution_error", fmt.Sprintf("Error executing route after %d attempts: %v", maxRetries, err))
-		return fmt.Errorf("transaction failed after %d attempts: %v", maxRetries, err)
+	if receipt, err = retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+		return sendTransaction(tx)
+	}); err != nil {
+		notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
+		return fmt.Errorf("transaction execution failed: %w", err)
 	}
 
-	// Step 6: Notify Node.js for successful execution
 	notifyNode("execution_success", fmt.Sprintf("Route executed: %v, TxHash: %s", route, receipt.TransactionHash))
-
 	log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
 	return nil
 }
 
+// retryWithBackoff retries a function with exponential backoff.
+func retryWithBackoff[T any](maxRetries int, initialBackoff time.Duration, fn func() (T, error)) (T, error) {
+	var result T
+	var err error
+	backoff := initialBackoff
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result, err = fn()
+		if err == nil {
+			return result, nil
+		}
+
+		log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+
+	return result, fmt.Errorf("all retries failed: %w", err)
+}
 
 
 // Helper function to set cache with expiration for token prices
@@ -1485,6 +1528,7 @@ func filterValidAddresses(tokens []StableToken) []string {
 	return addresses
 }
 
+
 func generateTokenPairs(tokens []string) []TokenPair {
 	var pairs []TokenPair
 	for _, src := range tokens {
@@ -1497,8 +1541,9 @@ func generateTokenPairs(tokens []string) []TokenPair {
 	return pairs
 }
 
-func buildGraph(tokenPairs []TokenPair, chainID int64) (*Graph, error) {
-    graph := &Graph{AdjacencyList: make(map[string]map[string]*big.Float)}
+
+func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
+    graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
 
     for _, pair := range tokenPairs {
         // Validate source and destination token addresses
@@ -1507,17 +1552,82 @@ func buildGraph(tokenPairs []TokenPair, chainID int64) (*Graph, error) {
             continue
         }
 
-        // Ensure the adjacency list exists for the source token
-        if graph.AdjacencyList[pair.SrcToken] == nil {
-            graph.AdjacencyList[pair.SrcToken] = make(map[string]*big.Float)
+        // Fetch token prices and liquidity
+        price, liquidity, err := fetchTokenPairData(pair.SrcToken, pair.DstToken, chainID)
+        if err != nil {
+            log.Printf("Error fetching data for pair %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
+            continue
         }
 
-        // Add edge to the graph with a default weight (replace with real weight logic)
-        graph.AdjacencyList[pair.SrcToken][pair.DstToken] = big.NewFloat(1.0) // Example weight
-        log.Printf("Added edge: %s -> %s with weight: %f", pair.SrcToken, pair.DstToken, 1.0)
+        // Compute edge weight based on adjustable metrics
+        weight := calculateWeight(price, liquidity)
+
+        if graph.AdjacencyList[pair.SrcToken] == nil {
+            graph.AdjacencyList[pair.SrcToken] = make(map[string]EdgeWeight)
+        }
+
+        // Add weighted edge to the graph
+        graph.AdjacencyList[pair.SrcToken][pair.DstToken] = EdgeWeight{
+            Weight:    weight,
+            Liquidity: liquidity,
+        }
+
+        log.Printf("Edge added: %s -> %s, Weight: %f, Liquidity: %f",
+            pair.SrcToken, pair.DstToken, weight, liquidity)
     }
 
     return graph, nil
+}
+
+// Dynamic weight calculation function
+func calculateWeight(price, liquidity *big.Float) *big.Float {
+    // Fetch configurable factors from environment variables
+    weightFactor := getEnvAsFloat("WEIGHT_FACTOR", 1.0)      // Default to 1.0 if not set
+    liquidityFactor := getEnvAsFloat("LIQUIDITY_FACTOR", 1.0) // Default to 1.0 if not set
+
+    // Custom formula: weight = (1 / price) * weightFactor + liquidityFactor * liquidity
+    inversePrice := new(big.Float).Quo(big.NewFloat(1), price)      // Compute 1/price
+    weightedPrice := new(big.Float).Mul(inversePrice, big.NewFloat(weightFactor))
+    liquidityWeight := new(big.Float).Mul(liquidity, big.NewFloat(liquidityFactor))
+
+    return new(big.Float).Add(weightedPrice, liquidityWeight) // Sum up weighted components
+}
+
+// Helper function to fetch environment variables as floats
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+    value := os.Getenv(key)
+    if value == "" {
+        return defaultValue
+    }
+    if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+        return floatValue
+    }
+    return defaultValue
+}
+
+
+func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *big.Float, error) {
+	// Fetch token prices
+	prices, err := FetchTokenPrices([]string{srcToken, dstToken})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch token prices: %v", err)
+	}
+
+	srcPrice, srcExists := prices[srcToken]
+	dstPrice, dstExists := prices[dstToken]
+	if !srcExists || !dstExists {
+		return nil, nil, fmt.Errorf("missing price data for token pair %s -> %s", srcToken, dstToken)
+	}
+
+	// Estimate liquidity
+	liquidity, err := estimateLiquidity(chainID, srcToken, dstToken)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to estimate liquidity for pair %s -> %s: %v", srcToken, dstToken, err)
+	}
+
+	// Calculate price ratio
+	priceRatio := new(big.Float).Quo(big.NewFloat(srcPrice), big.NewFloat(dstPrice))
+	return priceRatio, liquidity, nil
 }
 
 
@@ -1930,18 +2040,38 @@ func processUniswapTransaction(methodName string, args map[string]interface{}) {
 }
 
 // Helper function to decode Uniswap V3 path
-func decodePath(path []byte) []string {
-	// Each token address is 20 bytes
-	const addressLength = 20
+func decodePath(path []byte) ([]string, error) {
+	const addressLength = 20 // Each token address is 20 bytes
+
+	// Validate that the path is not nil or empty
+	if path == nil || len(path) == 0 {
+		return nil, fmt.Errorf("path is empty or nil")
+	}
+
+	// Validate that the length of the path is a multiple of the address length
+	if len(path)%addressLength != 0 {
+		return nil, fmt.Errorf("invalid path length: %d (must be a multiple of %d)", len(path), addressLength)
+	}
+
 	decodedPath := []string{}
 
+	// Decode each 20-byte chunk as a token address
 	for i := 0; i+addressLength <= len(path); i += addressLength {
-		token := common.BytesToAddress(path[i : i+addressLength])
+		tokenBytes := path[i : i+addressLength]
+
+		// Validate that the bytes can form a valid Ethereum address
+		token := common.BytesToAddress(tokenBytes)
+		if !common.IsHexAddress(token.Hex()) {
+			return nil, fmt.Errorf("invalid token address at chunk %d: %x", i/addressLength, tokenBytes)
+		}
+
 		decodedPath = append(decodedPath, token.Hex())
 	}
 
-	return decodedPath
+	return decodedPath, nil
 }
+
+
 
 
 // Process SushiSwap-specific transactions
@@ -1981,38 +2111,96 @@ func decodePathSushi(path []common.Address) []string {
 	return decodedPath
 }
 
+func shutdownAll(ctx context.Context) {
+	log.Println("Initiating shutdown sequence...")
+
+	// Shutdown WebSocket server
+	shutdownWebSocketServer()
+
+	// Wait for context cancellation to ensure all components are stopped
+	<-ctx.Done()
+
+	log.Println("All components shut down gracefully.")
+}
+
 
 // Monitor mempool for pending transactions
-func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) {
-    client, err := ethclient.Dial(rpcURL)
-    if err != nil {
-        log.Fatalf("Failed to connect to Ethereum client: %v", err)
-    }
-
-    log.Println("Connected to Ethereum client. Monitoring mempool...")
-
-    // Subscribe to pending transactions
-    pendingTxs := make(chan *types.Transaction)
-    sub, err := client.SubscribePendingTransactions(ctx, pendingTxs)
-    if err != nil {
-        log.Fatalf("Failed to subscribe to pending transactions: %v", err)
-    }
-    defer sub.Unsubscribe()
-
-    // Process transactions as they arrive
-    for {
-        select {
-        case err := <-sub.Err():
-            log.Printf("Subscription error: %v", err)
-            time.Sleep(time.Second) // Retry with a delay
-        case tx := <-pendingTxs:
-            go processTransaction(client, tx, targetContracts)
-        case <-ctx.Done():
-            log.Println("Shutting down mempool monitoring...")
-            return
-        }
-    }
+// Wrapper function to retry mempool monitoring with graceful shutdown
+func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Mempool monitoring stopped due to context cancellation.")
+			return nil
+		default:
+			// Retry connection and subscription
+			err := monitorMempool(ctx, targetContracts, rpcURL)
+			if err != nil {
+				log.Printf("Error in mempool monitoring: %v. Retrying...", err)
+				time.Sleep(5 * time.Second) // Delay before retry
+			}
+		}
+	}
 }
+
+// Main function for monitoring mempool with retryable connection and subscription logic
+func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+	// Retry logic for connecting to Ethereum client
+	clientResult, err := Retry(func() (interface{}, error) {
+		return ethclient.Dial(rpcURL)
+	}, 3, 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
+	}
+
+	client := clientResult.(*ethclient.Client)
+	defer client.Close()
+	log.Println("Connected to Ethereum client. Monitoring mempool...")
+
+	for {
+		// Retry logic for subscribing to pending transactions
+		subResult, err := Retry(func() (interface{}, error) {
+			pendingTxs := make(chan *types.Transaction)
+			sub, err := client.SubscribePendingTransactions(ctx, pendingTxs)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Sub       ethereum.Subscription
+				PendingTx chan *types.Transaction
+			}{Sub: sub, PendingTx: pendingTxs}, nil
+		}, 3, 2*time.Second)
+		if err != nil {
+			log.Printf("Failed to subscribe to pending transactions after retries: %v", err)
+			time.Sleep(5 * time.Second) // Delay before retrying the entire loop
+			continue
+		}
+
+		subscriptionData := subResult.(struct {
+			Sub       ethereum.Subscription
+			PendingTx chan *types.Transaction
+		})
+		sub := subscriptionData.Sub
+		pendingTxs := subscriptionData.PendingTx
+
+		// Process transactions as they arrive
+		for {
+			select {
+			case err := <-sub.Err():
+				log.Printf("Subscription error: %v. Retrying subscription...", err)
+				sub.Unsubscribe()
+				break // Exit the inner loop to retry subscription
+			case tx := <-pendingTxs:
+				go processTransaction(client, tx, targetContracts)
+			case <-ctx.Done():
+				log.Println("Shutting down mempool monitoring...")
+				sub.Unsubscribe()
+				return nil
+			}
+		}
+	}
+}
+
 
 func approveTokensNode(route []string, amount *big.Int) error {
 	apiURL := os.Getenv("NODE_API_URL") + "/approve"
@@ -2183,7 +2371,7 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 }
 
 
-// Handle WebSocket connections
+
 // WebSocket handler
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -2192,21 +2380,121 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	client := &WebSocketClient{
 		Conn:         conn,
 		RateLimiter:  NewRateLimiter(1, time.Second), // Limit to 1 message per second
 		Disconnected: make(chan bool),
+		Context:      ctx,
+		CancelFunc:   cancel,
 	}
 
+	// Add the client to the global map
 	clientsMutex.Lock()
 	wsClients[client] = true
 	clientsMutex.Unlock()
 
 	log.Println("New WebSocket client connected.")
 
-	go handleMessages(client)
+	// Start message handling and connection monitoring
+	go handleClientMessages(client)
+	go monitorClientConnection(client)
 }
 
+func monitorClientConnection(client *WebSocketClient) {
+	select {
+	case <-client.Disconnected:
+		log.Println("Client disconnected. Cleaning up resources...")
+	case <-client.Context.Done():
+		log.Println("Context canceled. Cleaning up resources...")
+	}
+
+	// Cleanup resources
+	clientsMutex.Lock()
+	delete(wsClients, client)
+	clientsMutex.Unlock()
+
+	client.RateLimiter.Stop()
+	client.Conn.Close()
+	client.CancelFunc() // Cancel the context
+}
+
+func handleClientMessages(client *WebSocketClient) {
+	defer func() {
+		// Signal disconnection and clean up
+		client.Disconnected <- true
+	}()
+
+	for {
+		select {
+		case <-client.Context.Done():
+			log.Println("Stopping message handler for disconnected client.")
+			return
+		default:
+			// Read and handle WebSocket messages
+			_, message, err := client.Conn.ReadMessage()
+			if err != nil {
+				log.Printf("Error reading message from client: %v", err)
+				client.Disconnected <- true
+				return
+			}
+
+			if !client.RateLimiter.Allow() {
+				log.Println("Rate limit exceeded. Dropping message.")
+				continue
+			}
+
+			// Handle valid messages (e.g., broadcast)
+			broadcastChannel <- string(message)
+		}
+	}
+}
+
+func shutdownWebSocketServer() {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+
+	log.Println("Shutting down WebSocket server. Closing all client connections...")
+
+	for client := range wsClients {
+		client.CancelFunc() // Signal all client contexts to cancel
+		client.Conn.Close() // Close WebSocket connection
+		delete(wsClients, client)
+	}
+
+	log.Println("All client connections closed.")
+}
+
+func monitorSystemHealth() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		clientsMutex.Lock()
+		activeClients := len(wsClients)
+		clientsMutex.Unlock()
+
+		log.Printf("System Health: Active WebSocket Clients: %d, Active Goroutines: %d",
+			activeClients, runtime.NumGoroutine())
+
+		// Optional: Remove inactive clients
+		cleanupInactiveClients()
+	}
+}
+
+func cleanupInactiveClients() {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+
+	for client := range wsClients {
+		if client.Context.Err() != nil { // Check if the context is done
+			log.Printf("Removing inactive WebSocket client.")
+			client.Conn.Close()
+			delete(wsClients, client)
+		}
+	}
+}
 
 // Handle messages from a WebSocket client
 func handleMessages(client *WebSocketClient) {
@@ -2241,12 +2529,17 @@ func handleMessages(client *WebSocketClient) {
 func broadcastMessages() {
 	for message := range broadcastChannel {
 		clientsMutex.Lock()
+
+		// Iterate over all clients and send messages
 		for client := range wsClients {
-			if err := client.Conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
-				log.Printf("Error broadcasting message: %v", err)
-				client.Disconnected <- true
+			err := client.Conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				log.Printf("Error broadcasting to client: %v. Removing client.", err)
+				client.Conn.Close()
+				delete(wsClients, client) // Remove stale client
 			}
 		}
+
 		clientsMutex.Unlock()
 	}
 }
@@ -2285,122 +2578,117 @@ func wsBroadcastManager() {
 
 // Main function
 func main() {
-    // Parse Uniswap V3 Router ABI
-    uniswapABI, err := abi.JSON(strings.NewReader(UniswapV3RouterABI))
-    if err != nil {
-        log.Fatalf("Failed to parse Uniswap V3 Router ABI: %v", err)
-    }
+	// Required environment variables
+	requiredVars := []string{
+		"INFURA_WS_URL",     // WebSocket RPC URL for Ethereum
+		"NODE_API_URL",      // API endpoint for token approvals
+		"RPC_URL",           // RPC URL for Ethereum client
+		"PRIVATE_KEY",       // Private key for signing transactions
+		"WALLET_ADDRESS",    // Address of the wallet
+		"CONTRACT_ADDRESS",  // Address of the contract
+	}
 
-    // Parse SushiSwap Router ABI
-    sushiSwapABI, err := abi.JSON(strings.NewReader(SushiSwapRouterABI))
-    if err != nil {
-        log.Fatalf("Failed to parse SushiSwap Router ABI: %v", err)
-    }
+	// Validate environment variables
+	if err := validateEnvVars(requiredVars); err != nil {
+		log.Fatalf("Environment validation failed: %v", err)
+	}
 
-    // Define the target contracts to monitor
-    targetContracts := map[string]bool{
-        "0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
-        "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
-    }
+	// Fetch and use validated variables
+	rpcURL := os.Getenv("INFURA_WS_URL")
+	nodeAPIURL := os.Getenv("NODE_API_URL")
 
-    // Fetch the RPC URL from environment variables
-    rpcURL := os.Getenv("INFURA_WS_URL")
-    if rpcURL == "" {
-        log.Fatal("INFURA_WS_URL is not set")
-    }
+	// Parse Uniswap and SushiSwap ABIs
+	uniswapABI, err := abi.JSON(strings.NewReader(UniswapV3RouterABI))
+	if err != nil {
+		log.Fatalf("Failed to parse Uniswap V3 Router ABI: %v", err)
+	}
 
-    // Create a context with cancel for shutdown handling
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	sushiSwapABI, err := abi.JSON(strings.NewReader(SushiSwapRouterABI))
+	if err != nil {
+		log.Fatalf("Failed to parse SushiSwap Router ABI: %v", err)
+	}
 
-    // Listen for interrupt signals to gracefully shut down
-    go func() {
-        c := make(chan os.Signal, 1)
-        signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-        <-c
-        log.Println("Received shutdown signal, cleaning up...")
-        cancel() // Signal all goroutines to terminate
-    }()
-     
-        http.HandleFunc("/ws", wsHandler)
-	go broadcastMessages()
+	// Define target contracts
+	targetContracts := map[string]bool{
+		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
+		"0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
+	}
 
-    // Start WebSocket broadcast manager in a separate goroutine
-    go wsBroadcastManager()
+       // Graceful shutdown handling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-    // Start the WebSocket server
-    http.HandleFunc("/ws", wsHandler)
-    go func() {
-        log.Println("WebSocket server listening on :8080/ws")
-        log.Fatal(http.ListenAndServe(":8080", nil))
-    }()
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		<-c
+		log.Println("Received shutdown signal, initiating cleanup...")
+		cancel()           // Signal goroutines to stop
+		shutdownWebSocketServer() // Cleanup WebSocket server
+	}()
 
-    // Start monitoring the mempool in a separate goroutine
-    go func() {
-        monitorMempool(ctx, targetContracts, rpcURL)
-    }()
+	// Start WebSocket server
+	http.HandleFunc("/ws", wsHandler)
+	go func() {
+		log.Println("WebSocket server listening on :8080/ws")
+		log.Fatal(http.ListenAndServe(":8080", nil))
+	}()
 
-    // Start the REST API server for route generation and dynamic graph building
-    http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
-        chainID := int64(42161) // Ethereum Mainnet
-        startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+	// Start monitoring the mempool in a separate goroutine
+	// Monitor mempool in a separate goroutine with retry logic
+	go func() {
+		if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("INFURA_WS_URL")); err != nil {
+			log.Printf("Mempool monitoring terminated: %v", err)
+			cancel() // Trigger shutdown on failure
+		}
+	}()
 
-        dstToken := r.URL.Query().Get("dstToken")
-        if !isValidTokenAddress(dstToken) {
-            http.Error(w, "Invalid destination token address", http.StatusBadRequest)
-            return
-        }
+	// Start the REST API server for route generation and dynamic graph building
+	http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
+		// Example REST API handler logic
+		chainID := int64(42161) // Ethereum Mainnet
+		startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
 
-        tokenPairs := []TokenPair{
-            {SrcToken: startToken, DstToken: dstToken},
-        }
+		dstToken := r.URL.Query().Get("dstToken")
+		if !isValidTokenAddress(dstToken) {
+			http.Error(w, "Invalid destination token address", http.StatusBadRequest)
+			return
+		}
 
-        graph, err := BuildGraph(tokenPairs, chainID)
-        if err != nil {
-            log.Printf("Error building graph: %v", err)
-            http.Error(w, "Failed to build graph", http.StatusInternalServerError)
-            return
-        }
+		tokenPairs := []TokenPair{
+			{SrcToken: startToken, DstToken: dstToken},
+		}
 
-        path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
-        if err != nil {
-            log.Printf("Error computing optimal route: %v", err)
-            http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
-            return
-        }
+		graph, err := BuildGraph(tokenPairs, chainID)
+		if err != nil {
+			log.Printf("Error building graph: %v", err)
+			http.Error(w, "Failed to build graph", http.StatusInternalServerError)
+			return
+		}
 
-        log.Printf("Optimal route: %v, Total cost: %f", path, cost)
-        w.Header().Set("Content-Type", "application/json")
-        response := map[string]interface{}{
-            "path": path,
-            "cost": cost,
-        }
-        json.NewEncoder(w).Encode(response)
-    })
+		path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
+		if err != nil {
+			log.Printf("Error computing optimal route: %v", err)
+			http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
+			return
+		}
 
-    // Example usage of decodeTransactionData
-    go func() {
-        data := "0x12345678abcdef..." // Replace with actual data
-        srcToken, dstToken, amountIn, err := decodeTransactionData(data)
-        if err != nil {
-            log.Fatalf("Error decoding transaction data: %v", err)
-        }
-        log.Printf("Decoded transaction: srcToken=%s, dstToken=%s, amountIn=%s", srcToken, dstToken, amountIn.String())
-    }()
+		log.Printf("Optimal route: %v, Total cost: %f", path, cost)
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"path": path,
+			"cost": cost,
+		}
+		json.NewEncoder(w).Encode(response)
+	})
 
-    // Example usage of fetchGasPrice
-    go func() {
-        gasPrice, err := fetchGasPrice()
-        if err != nil {
-            log.Fatalf("Error fetching gas price: %v", err)
-        }
-        log.Printf("Current gas price: %s Wei", gasPrice.String())
-    }()
-
-    // Final log before starting HTTP server
-    log.Println("WebSocket server started on :8080/ws")
-    log.Println("Starting HTTP server on :8080...")
-    log.Fatal(http.ListenAndServe(":8080", nil))
+     // Monitor system health periodically
+	go monitorSystemHealth()
+    
+       shutdownAll(ctx)
+	// Final log before starting HTTP server
+	log.Println("Starting HTTP server on :8080...")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 // Helper function to validate token address
