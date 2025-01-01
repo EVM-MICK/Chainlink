@@ -740,8 +740,6 @@ export async function notifyMonitoringSystem(message) {
   }
 }
 
-
-
 // Main Function
 async function runArbitrageBot() {
   log('Starting arbitrage bot...');
