@@ -993,16 +993,20 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ChainID        int64  `json:"chainId"`
-		StartToken     string `json:"startToken"`
-		StartAmount    string `json:"startAmount"`
-		MaxHops        int    `json:"maxHops"`
-		ProfitThreshold string `json:"profitThreshold"`
+		ChainID        int64                      `json:"chainId"`
+		StartToken     string                     `json:"startToken"`
+		StartAmount    string                     `json:"startAmount"`
+		MaxHops        int                        `json:"maxHops"`
+		ProfitThreshold string                    `json:"profitThreshold"`
+		TokenPrices    map[string]float64         `json:"tokenPrices"`
+		Liquidity      []map[string]interface{}   `json:"liquidity"`
 	}
 
+	// Parse JSON body
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		log.Printf("Error decoding request body: %v", err)
 		return
 	}
 
@@ -1024,17 +1028,65 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate routes
-	routes, err := generateRoutes(req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
+	// Log received market data for debugging
+	log.Printf("Received market data: TokenPrices=%v, Liquidity=%v", req.TokenPrices, req.Liquidity)
+
+	// Compute profitable routes based on market data
+	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error generating routes: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Error computing profitable routes: %v", err), http.StatusInternalServerError)
+		log.Printf("Error computing routes: %v", err)
 		return
 	}
 
-	// Respond with the generated routes
+	// If routes are successfully computed, further filter them based on request parameters
+	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error filtering routes: %v", err), http.StatusInternalServerError)
+		log.Printf("Error filtering routes: %v", err)
+		return
+	}
+
+	// Respond with the final filtered routes
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(routes)
+	err = json.NewEncoder(w).Encode(filteredRoutes)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
+		log.Printf("Error encoding response: %v", err)
+	}
 }
+
+func filterRoutes(routes []Route, chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
+	var filtered []Route
+
+	for _, route := range routes {
+		if route.ChainID != chainID {
+			continue
+		}
+
+		if route.StartToken != strings.ToLower(startToken) {
+			continue
+		}
+
+		if route.StartAmount.Cmp(startAmount) < 0 {
+			continue
+		}
+
+		if route.Hops > maxHops {
+			continue
+		}
+
+		if route.Profit.Cmp(profitThreshold) < 0 {
+			continue
+		}
+
+		filtered = append(filtered, route)
+	}
+
+	return filtered, nil
+}
+
+
 
 func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
 	// Validate the start token address
