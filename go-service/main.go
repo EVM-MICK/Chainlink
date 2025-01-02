@@ -38,9 +38,12 @@ type ArbitrageOpportunity struct {
 	DstToken string  `json:"dstToken"`
 	AmountIn string  `json:"amountIn"`
 }
-
-var uniswapABI abi.ABI
-var sushiSwapABI abi.ABI
+var (
+	uniswapABI    abi.ABI
+	sushiSwapABI  abi.ABI
+)
+var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
+var wg sync.WaitGroup
 
 const UniswapV3RouterABI = `[
   {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
@@ -52,8 +55,6 @@ const SushiSwapRouterABI = `[
   {"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"amountADesired","type":"uint256"},{"internalType":"uint256","name":"amountBDesired","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
 ]`
-
-
 
 type InputData struct {
 	TokenPairs   []string `json:"tokenPairs"`
@@ -294,6 +295,88 @@ func (pq PriorityQueue) Swap(i, j int) {
 	pq[j].Index = j
 }
 
+func loadABI(abiString string) abi.ABI {
+	parsedABI, err := abi.JSON(strings.NewReader(abiString))
+	if err != nil {
+		log.Fatalf("Failed to parse ABI: %v", err)
+	}
+	return parsedABI
+}
+
+func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
+	operation := func() (interface{}, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == 429 {
+			return nil, fmt.Errorf("rate limit exceeded: %d", resp.StatusCode)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		}
+
+		return ioutil.ReadAll(resp.Body)
+	}
+
+	result, err := Retry(operation, 3, 1*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return result.([]byte), nil
+}
+
+func fetchWithRateLimit(url string, headers, params map[string]string) ([]byte, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add headers
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	// Add query parameters
+	query := req.URL.Query()
+	for key, value := range params {
+		query.Add(key, value)
+	}
+	req.URL.RawQuery = query.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("rate limit exceeded")
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	return ioutil.ReadAll(resp.Body)
+}
+
+
 // Push adds a node to the priority queue
 func (pq *PriorityQueue) Push(x interface{}) {
 	n := x.(*Node)         // Cast the interface{} to a *Node.
@@ -516,6 +599,9 @@ func setupCacheExpirationLogging() {
 // Initialize the cache with expiration logging
 func init() {
 	setupCacheExpirationLogging()
+        uniswapABI = loadABI(UniswapV3RouterABI)
+	sushiSwapABI = loadABI(SushiSwapRouterABI)
+	log.Println("Uniswap and SushiSwap ABIs successfully loaded.")
 }
 
 func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
@@ -694,17 +780,18 @@ func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, e
 
 // CalculateDynamicProfitThreshold dynamically calculates the profit threshold
 func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
-	estimatedGas := big.NewFloat(800000) // Replace with dynamic estimate
-	gasCost := new(big.Float).Mul(gasPrice, estimatedGas)
+	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(800000)) // Estimate gas for 800k units
+	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), FLASHLOAN_FEE_RATE)
+	totalCost := new(big.Float).Add(gasCost, flashLoanFee)
 
-	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), big.NewFloat(0.0005)) // 0.05% fee
-	dynamicThreshold := new(big.Float).Add(new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD), gasCost)
-	dynamicThreshold.Add(dynamicThreshold, flashLoanFee)
-
+	profitThreshold := new(big.Float).Add(totalCost, new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD))
 	result := new(big.Int)
-	dynamicThreshold.Int(result)
+	profitThreshold.Int(result)
+
+	log.Printf("Dynamic profit threshold: %s", result.String())
 	return result, nil
 }
+
 
 // Helper to set a value in the cache
 func setToCache(key string, value interface{}) {
@@ -735,6 +822,11 @@ func setToOrderBookCache(key string, value interface{}, duration time.Duration) 
 		data:      value,
 		timestamp: time.Now().Add(duration),
 	}
+}
+
+func adjustForDecimals(amount *big.Int, decimals int) *big.Int {
+	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	return new(big.Int).Mul(amount, factor)
 }
 
 
@@ -903,27 +995,28 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{},
 		"limit":      "50", // Max number of orders to fetch
 	}
 
-	maxRetries := 3
+	const maxRetries = 3
 	backoff := time.Second
 
-	// Retry logic with exponential backoff
+	// Retry logic with exponential backoff and graceful fallback
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("Fetching order book for %s -> %s on chain %d (Attempt %d)...", srcToken, dstToken, chainID, attempt)
 
-		responseData, err := fetchWithRetryOrderBook(url, headers, params, backoff)
+		// Use rate-limited fetch function
+		responseData, err := fetchWithRateLimit(url, headers, params)
 		if err != nil {
+			// Handle rate limit errors with exponential backoff
+			if strings.Contains(err.Error(), "rate limit") {
+				log.Printf("Rate limit exceeded for %s -> %s. Retrying after %v...", srcToken, dstToken, backoff)
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
 			log.Printf("Error fetching order book for %s -> %s: %v", srcToken, dstToken, err)
 			if attempt == maxRetries {
 				return nil, fmt.Errorf("max retries reached for %s -> %s: %v", srcToken, dstToken, err)
 			}
-			time.Sleep(backoff)
-			backoff *= 2 // Exponential backoff
 			continue
-		}
-
-		// Check for non-200 status or empty response
-		if len(responseData) == 0 {
-			return nil, fmt.Errorf("empty response received for order book API %s -> %s", srcToken, dstToken)
 		}
 
 		// Parse response
@@ -931,22 +1024,26 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{},
 			Orders []interface{} `json:"orders"`
 		}
 		if err := json.Unmarshal(responseData, &result); err != nil {
+			log.Printf("Failed to parse order book response for %s -> %s: %v", srcToken, dstToken, err)
 			return nil, fmt.Errorf("failed to parse order book response: %v", err)
 		}
 
-		if len(result.Orders) == 0 {
-			log.Printf("No orders found for %s -> %s", srcToken, dstToken)
-			return nil, nil
+		if len(result.Orders) > 0 {
+			// Cache the result for future use
+			cacheSetOrderBook(cacheKey, result.Orders, cacheDuration*time.Second)
+			log.Printf("Order book fetched and cached successfully for %s -> %s", srcToken, dstToken)
+			return result.Orders, nil
 		}
 
-		// Cache and return the result
-		log.Printf("Order book fetched successfully for %s -> %s", srcToken, dstToken)
-		cacheSetOrderBook(cacheKey, result.Orders, cacheDuration*time.Second)
-		return result.Orders, nil
+		log.Printf("No orders found for %s -> %s. Retrying if attempts remain.", srcToken, dstToken)
+		time.Sleep(backoff) // Retry delay
+		backoff *= 2
 	}
 
-	return nil, fmt.Errorf("failed to fetch order book for %s -> %s after %d attempts", srcToken, dstToken, maxRetries)
+	log.Printf("No orders found for %s -> %s after %d attempts. Returning empty.", srcToken, dstToken, maxRetries)
+	return nil, nil
 }
+
 
 // Helper function for HTTP GET with retries and parameters
 func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]byte, error) {
@@ -1005,26 +1102,29 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
-		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		log.Printf("Error decoding request body: %v", err) // Keep detailed logs for debugging
 		return
 	}
 
 	// Input validation
-	if !common.IsHexAddress(req.StartToken) || req.ChainID == 0 || req.MaxHops <= 0 {
+	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
 		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
+		log.Println("Invalid input parameters detected in the request.") // Log invalid inputs
 		return
 	}
 
 	startAmount := new(big.Int)
 	if _, success := startAmount.SetString(req.StartAmount, 10); !success {
 		http.Error(w, "Invalid startAmount format", http.StatusBadRequest)
+		log.Println("Invalid startAmount format.") // Log invalid format
 		return
 	}
 
 	profitThreshold := new(big.Int)
 	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success {
 		http.Error(w, "Invalid profitThreshold format", http.StatusBadRequest)
+		log.Println("Invalid profitThreshold format.") // Log invalid format
 		return
 	}
 
@@ -1034,27 +1134,43 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	// Compute profitable routes based on market data
 	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error computing profitable routes: %v", err), http.StatusInternalServerError)
-		log.Printf("Error computing routes: %v", err)
+		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
+		log.Printf("Error computing profitable routes: %v", err) // Detailed log for debugging
 		return
 	}
 
-	// If routes are successfully computed, further filter them based on request parameters
+	// Further filter routes based on request parameters
 	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error filtering routes: %v", err), http.StatusInternalServerError)
-		log.Printf("Error filtering routes: %v", err)
+		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
+		log.Printf("Error filtering profitable routes: %v", err) // Detailed log for debugging
 		return
 	}
 
 	// Respond with the final filtered routes
 	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(filteredRoutes)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
-		log.Printf("Error encoding response: %v", err)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"routes": filteredRoutes,
+	}); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		log.Printf("Error encoding response: %v", err) // Detailed log for debugging
+		return
+	}
+
+	log.Println("Successfully computed and returned filtered routes.") // Success log
+}
+
+func handleClientReconnection(client *WebSocketClient) {
+	for {
+		_, _, err := client.Conn.ReadMessage()
+		if err != nil {
+			log.Printf("Client disconnected. Attempting reconnection: %v", err)
+			client.Disconnected <- true
+			return
+		}
 	}
 }
+
 
 func filterRoutes(routes []Route, chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
 	var filtered []Route
@@ -1181,54 +1297,54 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
 func fetchGasPrice() (*big.Int, error) {
 	gasPriceCache.RLock()
 	if gasPriceCache.price != nil && time.Since(gasPriceCache.timestamp) < cacheDuration {
-		log.Println("Using cached gas price.")
 		gasPriceCache.RUnlock()
 		return gasPriceCache.price, nil
 	}
 	gasPriceCache.RUnlock()
 
-	// Retry logic
 	const maxRetries = 3
-	const retryDelay = 1 * time.Second
-	var gasPriceGwei float64
+	var gasPrices []float64
 
+	// Fetch gas prices from recent blocks
 	for i := 0; i < maxRetries; i++ {
 		resp, err := http.Get("https://api.blocknative.com/gasprices/blockprices")
 		if err != nil {
-			log.Printf("Error fetching gas price (attempt %d/%d): %v", i+1, maxRetries, err)
-			time.Sleep(retryDelay)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		defer resp.Body.Close()
 
-		// Parse the response
 		var result struct {
 			BlockPrices []struct {
 				BaseFeePerGas float64 `json:"baseFeePerGas"`
 			} `json:"blockPrices"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			log.Printf("Error decoding gas price response: %v", err)
-			time.Sleep(retryDelay)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if len(result.BlockPrices) > 0 {
-			gasPriceGwei = result.BlockPrices[0].BaseFeePerGas
-			break
+		for _, block := range result.BlockPrices {
+			gasPrices = append(gasPrices, block.BaseFeePerGas)
 		}
+
+		break
 	}
 
-	// If fetching fails, use a fallback value
-	if gasPriceGwei == 0 {
-		log.Println("Gas price API failed. Using fallback value: 50 Gwei.")
-		gasPriceGwei = 50
+	if len(gasPrices) == 0 {
+		log.Println("Failed to fetch gas prices, using fallback value: 50 Gwei.")
+		return big.NewInt(50 * 1e9), nil // 50 Gwei fallback
 	}
 
-	// Convert Gwei to Wei
-	gasPriceWei := new(big.Int).Mul(big.NewInt(int64(gasPriceGwei)), big.NewInt(1e9))
+	// Calculate average gas price
+	var total float64
+	for _, price := range gasPrices {
+		total += price
+	}
+	avgGasPriceGwei := total / float64(len(gasPrices))
+	gasPriceWei := new(big.Int).Mul(big.NewInt(int64(avgGasPriceGwei)), big.NewInt(1e9))
 
-	// Update the cache
+	// Update cache
 	gasPriceCache.Lock()
 	gasPriceCache.price = gasPriceWei
 	gasPriceCache.timestamp = time.Now()
@@ -1236,7 +1352,6 @@ func fetchGasPrice() (*big.Int, error) {
 
 	return gasPriceWei, nil
 }
-
 
 // Initialize shared Ethereum client with connection pooling
 func getEthClient() (*ethclient.Client, error) {
@@ -2170,8 +2285,8 @@ func shutdownAll(ctx context.Context) {
 	shutdownWebSocketServer()
 
 	// Wait for context cancellation to ensure all components are stopped
+        wg.Wait() // Wait for all tasks to finish
 	<-ctx.Done()
-
 	log.Println("All components shut down gracefully.")
 }
 
@@ -2179,6 +2294,8 @@ func shutdownAll(ctx context.Context) {
 // Monitor mempool for pending transactions
 // Wrapper function to retry mempool monitoring with graceful shutdown
 func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+       wg.Add(1)
+	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -2426,6 +2543,7 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 
 // WebSocket handler
 func wsHandler(w http.ResponseWriter, r *http.Request) {
+func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade to WebSocket: %v", err)
@@ -2433,26 +2551,15 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	client := &WebSocketClient{Conn: conn, Context: ctx, CancelFunc: cancel}
 
-	client := &WebSocketClient{
-		Conn:         conn,
-		RateLimiter:  NewRateLimiter(1, time.Second), // Limit to 1 message per second
-		Disconnected: make(chan bool),
-		Context:      ctx,
-		CancelFunc:   cancel,
-	}
-
-	// Add the client to the global map
 	clientsMutex.Lock()
 	wsClients[client] = true
 	clientsMutex.Unlock()
 
-	log.Println("New WebSocket client connected.")
-
-	// Start message handling and connection monitoring
-	go handleClientMessages(client)
-	go monitorClientConnection(client)
+	go handleClientReconnection(client)
 }
+
 
 func monitorClientConnection(client *WebSocketClient) {
 	select {
