@@ -31,6 +31,17 @@ import (
 
 type RetryFunction func() (interface{}, error)
 
+type WebSocketSession struct {
+	SessionID string
+	Client    *WebSocketClient
+	State     map[string]interface{} // Store client-specific state
+}
+
+var (
+	wsSessions     = make(map[string]*WebSocketSession)
+	sessionMutex   sync.Mutex
+)
+
 type ArbitrageOpportunity struct {
 	TxHash   string  `json:"txHash"`
 	Profit   string  `json:"profit"`
@@ -44,6 +55,7 @@ var (
 )
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
+var abis = map[string]abi.ABI{}
 
 const UniswapV3RouterABI = `[
   {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
@@ -221,6 +233,8 @@ type CacheEntry struct {
 
 // Cache duration in seconds
 const cacheDuration = 600 // 10 minutes
+const DefaultGasEstimate = 800000
+const DefaultRetries = 3
 
 // Cache structure to store quotes
 type QuoteCache struct {
@@ -239,6 +253,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type RateLimitTracker struct {
+	Used      int
+	Remaining int
+	ResetTime time.Time
+}
+
+var apiRateLimits = make(map[string]*RateLimitTracker)
 
 type TokenPair struct {
 	SrcToken string `json:"srcToken"`
@@ -423,6 +444,12 @@ func NewRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
 	return rl
 }
 
+func logAPILimits() {
+	for api, tracker := range apiRateLimits {
+		log.Printf("API: %s, Used: %d, Remaining: %d, Resets at: %v", api, tracker.Used, tracker.Remaining, tracker.ResetTime)
+	}
+}
+
 // NewDynamicRateLimiter creates a rate limiter with dynamic capacity and refill interval.
 func NewDynamicRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
 	rl := &RateLimiter{
@@ -601,7 +628,12 @@ func init() {
 	setupCacheExpirationLogging()
         uniswapABI = loadABI(UniswapV3RouterABI)
 	sushiSwapABI = loadABI(SushiSwapRouterABI)
-	log.Println("Uniswap and SushiSwap ABIs successfully loaded.")
+        // Populate the map
+       abis = map[string]abi.ABI{
+        "uniswap":   uniswapABI,
+        "sushiswap": sushiSwapABI,
+       }
+     log.Println("Uniswap and SushiSwap ABIs successfully loaded.")
 }
 
 func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
@@ -733,7 +765,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 		}
 
 		// Accumulate gas cost
-		hopGasCost := new(big.Float).Mul(gasPrice, big.NewFloat(800000)) // Adjust gas per hop if needed
+		hopGasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate)) // Adjust gas per hop if needed
 		totalGasCost.Add(totalGasCost, hopGasCost)
 	}
 
@@ -780,7 +812,7 @@ func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, e
 
 // CalculateDynamicProfitThreshold dynamically calculates the profit threshold
 func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
-	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(800000)) // Estimate gas for 800k units
+	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate)) // Estimate gas for 800k units
 	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), FLASHLOAN_FEE_RATE)
 	totalCost := new(big.Float).Add(gasCost, flashLoanFee)
 
@@ -1115,16 +1147,32 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	startAmount := new(big.Int)
-	if _, success := startAmount.SetString(req.StartAmount, 10); !success {
-		http.Error(w, "Invalid startAmount format", http.StatusBadRequest)
-		log.Println("Invalid startAmount format.") // Log invalid format
+	if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
+		log.Println("Invalid startAmount format or value.") // Log invalid format or value
 		return
 	}
 
 	profitThreshold := new(big.Int)
-	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success {
-		http.Error(w, "Invalid profitThreshold format", http.StatusBadRequest)
-		log.Println("Invalid profitThreshold format.") // Log invalid format
+	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
+		log.Println("Invalid profitThreshold format or value.") // Log invalid format or value
+		return
+	}
+
+	// Validate token decimals
+	tokenDecimals := getTokenDecimals(req.StartToken) // Assumes a helper function exists
+	if tokenDecimals < 0 {
+		http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
+		log.Printf("Invalid token decimals for token: %s", req.StartToken)
+		return
+	}
+
+	// Check if the start amount aligns with token decimals
+	adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
+	if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
+		log.Println("Invalid adjusted startAmount.") // Log invalid adjusted amount
 		return
 	}
 
@@ -1140,7 +1188,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Further filter routes based on request parameters
-	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, startAmount, req.MaxHops, profitThreshold)
+	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
 	if err != nil {
 		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
 		log.Printf("Error filtering profitable routes: %v", err) // Detailed log for debugging
@@ -1159,6 +1207,31 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Successfully computed and returned filtered routes.") // Success log
 }
+
+func getTokenDecimals(tokenAddress string) int {
+	// Example: Fetch decimals from a hardcoded list or blockchain query
+	hardcodedDecimals := map[string]int{
+		"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9": 6,  // USDT
+		"0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6,  // USDC
+		"0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18, // DAI
+                "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18,//weth
+                "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,//wbtc
+	}
+
+	if decimals, exists := hardcodedDecimals[strings.ToLower(tokenAddress)]; exists {
+		return decimals
+	}
+
+	// Fallback: Query blockchain for token decimals (requires Ethereum client)
+	decimals, err := fetchTokenDecimalsFromBlockchain(tokenAddress)
+	if err != nil {
+		log.Printf("Failed to fetch token decimals for %s: %v", tokenAddress, err)
+		return -1
+	}
+
+	return decimals
+}
+
 
 func handleClientReconnection(client *WebSocketClient) {
 	for {
@@ -1786,6 +1859,9 @@ func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *
 		return nil, nil, fmt.Errorf("missing price data for token pair %s -> %s", srcToken, dstToken)
 	}
 
+      if srcPrice, ok := prices[srcToken]; !ok {
+                return nil, nil, fmt.Errorf("missing price data for source token: %s", srcToken)
+      }
 	// Estimate liquidity
 	liquidity, err := estimateLiquidity(chainID, srcToken, dstToken)
 	if err != nil {
@@ -1983,7 +2059,7 @@ func sortAndLimitRoutes(routes []Route, limit int) []Route {
 }
 
 func adjustTradeSizeForGas(amount *big.Int, gasPrice *big.Int) (*big.Int, error) {
-	estimatedGasCost := new(big.Int).Mul(gasPrice, big.NewInt(800000)) // Estimate: 800k gas units
+	estimatedGasCost := new(big.Int).Mul(gasPrice, big.NewInt(DefaultGasEstimate)) // Estimate: 800k gas units
 	maxGasCostRatio := new(big.Int).Div(amount, big.NewInt(200))       // 0.5% of the amount
 
 	if estimatedGasCost.Cmp(maxGasCostRatio) > 0 {
@@ -2067,64 +2143,52 @@ func BuildGraph(tokenPairs []TokenPair, chainID int64) (Graph, error) {
 
 // Decode transaction data (replace this ABI decoding logic with your contract's ABI)
 func decodeTransactionData(data string, routerType string) (string, string, *big.Int, error) {
-	var parsedABI abi.ABI
-	var err error
+    // Lookup the ABI in the map
+    parsedABI, exists := abis[routerType]
+    if !exists {
+        return "", "", nil, fmt.Errorf("unsupported router type: %s", routerType)
+    }
 
-	// Choose the ABI based on the router type
-	switch routerType {
-	case "uniswap":
-		parsedABI, err = abi.JSON(strings.NewReader(`[{"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[],"name":"WETH9","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"components":[{"internalType":"bytes","name":"path","type":"bytes"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"}],"internalType":"struct ISwapRouter.ExactInputParams","name":"params","type":"tuple"}],"name":"exactInput","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"},{"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"}]`)) // Replace with actual Uniswap ABI
-	case "sushiswap":
-		parsedABI, err = abi.JSON(strings.NewReader(`[{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}]`)) // Replace with actual SushiSwap ABI
-	default:
-		return "", "", nil, fmt.Errorf("unsupported router type: %s", routerType)
-	}
+    // Ensure data length is sufficient
+    if len(data) < 10 {
+        return "", "", nil, fmt.Errorf("invalid data length")
+    }
 
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to parse ABI: %v", err)
-	}
+    // Extract method signature and input data
+    methodSig := common.FromHex(data[:10]) // First 4 bytes are the method signature
+    inputData := common.FromHex(data)
 
-	// Ensure data is long enough for method signature
-	if len(data) < 10 {
-		return "", "", nil, fmt.Errorf("invalid data length")
-	}
+    // Decode the transaction data using the ABI
+    method, err := parsedABI.MethodById(methodSig)
+    if err != nil {
+        return "", "", nil, fmt.Errorf("failed to decode method ID: %v", err)
+    }
 
-	// Extract method signature and input data
-	methodSig := common.FromHex(data[:10]) // First 4 bytes are the method signature
-	inputData := common.FromHex(data)
+    args := make(map[string]interface{})
+    if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
+        return "", "", nil, fmt.Errorf("failed to unpack inputs: %v", err)
+    }
 
-	// Decode the transaction data using the ABI
-	method, err := parsedABI.MethodById(methodSig)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to decode method ID: %v", err)
-	}
+    // Extract and validate `tokenIn`
+    tokenIn, ok := args["tokenIn"].(common.Address)
+    if !ok || !common.IsHexAddress(tokenIn.Hex()) {
+        return "", "", nil, fmt.Errorf("invalid or missing tokenIn")
+    }
 
-	args := make(map[string]interface{})
-	err = method.Inputs.UnpackIntoMap(args, inputData[4:])
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to unpack inputs: %v", err)
-	}
+    // Extract and validate `tokenOut`
+    tokenOut, ok := args["tokenOut"].(common.Address)
+    if !ok || !common.IsHexAddress(tokenOut.Hex()) {
+        return "", "", nil, fmt.Errorf("invalid or missing tokenOut")
+    }
 
-	// Extract and validate `tokenIn`
-	tokenIn, ok := args["tokenIn"].(common.Address)
-	if !ok || !common.IsHexAddress(tokenIn.Hex()) {
-		return "", "", nil, fmt.Errorf("invalid or missing tokenIn")
-	}
+    // Extract and validate `amountIn`
+    amountIn, ok := args["amountIn"].(*big.Int)
+    if !ok {
+        return "", "", nil, fmt.Errorf("invalid or missing amountIn")
+    }
 
-	// Extract and validate `tokenOut`
-	tokenOut, ok := args["tokenOut"].(common.Address)
-	if !ok || !common.IsHexAddress(tokenOut.Hex()) {
-		return "", "", nil, fmt.Errorf("invalid or missing tokenOut")
-	}
-
-	// Extract and validate `amountIn`
-	amountIn, ok := args["amountIn"].(*big.Int)
-	if !ok {
-		return "", "", nil, fmt.Errorf("invalid or missing amountIn")
-	}
-
-	return tokenIn.Hex(), tokenOut.Hex(), amountIn, nil
- }
+    return tokenIn.Hex(), tokenOut.Hex(), amountIn, nil
+}
 
 
 // Process a transaction to identify arbitrage opportunities
@@ -2477,7 +2541,7 @@ func estimateGas(route []string, CAPITAL *big.Int) (*big.Int, error) {
 	gasEstimate, err := client.EstimateGas(context.Background(), callMsg)
 	if err != nil {
 		log.Printf("Error estimating gas: %v. Returning fallback estimate.", err)
-		return big.NewInt(800000), nil // Fallback gas estimate
+		return big.NewInt(DefaultGasEstimate), nil // Fallback gas estimate
 	}
 
 	log.Printf("Gas estimate: %d", gasEstimate)
@@ -2543,22 +2607,61 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 
 // WebSocket handler
 func wsHandler(w http.ResponseWriter, r *http.Request) {
-func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade to WebSocket: %v", err)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	client := &WebSocketClient{Conn: conn, Context: ctx, CancelFunc: cancel}
+	// Extract or generate session ID
+	sessionID := r.URL.Query().Get("sessionID")
+	if sessionID == "" {
+		sessionID = generateSessionID() // Generate a unique session ID
+	}
 
-	clientsMutex.Lock()
-	wsClients[client] = true
-	clientsMutex.Unlock()
+	// Check for existing session
+	sessionMutex.Lock()
+	session, exists := wsSessions[sessionID]
+	if exists {
+		// Reuse the existing session
+		log.Printf("Reconnected to session %s", sessionID)
+		session.Client.Conn.Close() // Close old connection
+		session.Client.Conn = conn
+		session.Client.Context, session.Client.CancelFunc = context.WithCancel(context.Background())
+	} else {
+		// Create a new session
+		client := &WebSocketClient{Conn: conn, Context: context.WithCancel(context.Background())}
+		session = &WebSocketSession{
+			SessionID: sessionID,
+			Client:    client,
+			State:     make(map[string]interface{}),
+		}
+		wsSessions[sessionID] = session
+		log.Printf("New session created: %s", sessionID)
+	}
+	sessionMutex.Unlock()
 
-	go handleClientReconnection(client)
+	// Handle client messages
+	go handleClientMessages(session.Client)
+
+	// Send session ID to the client
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"sessionID":"%s"}`, sessionID))); err != nil {
+		log.Printf("Failed to send session ID: %v", err)
+	}
 }
+
+func generateSessionID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func logMemoryUsage() {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	log.Printf("Memory Usage: Alloc = %v KB, TotalAlloc = %v KB, Sys = %v KB, NumGC = %v",
+		memStats.Alloc/1024, memStats.TotalAlloc/1024, memStats.Sys/1024, memStats.NumGC)
+}
+
 
 
 func monitorClientConnection(client *WebSocketClient) {
@@ -2630,15 +2733,18 @@ func monitorSystemHealth() {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		// Log active WebSocket clients and goroutines
 		clientsMutex.Lock()
 		activeClients := len(wsClients)
 		clientsMutex.Unlock()
-
 		log.Printf("System Health: Active WebSocket Clients: %d, Active Goroutines: %d",
 			activeClients, runtime.NumGoroutine())
 
-		// Optional: Remove inactive clients
-		cleanupInactiveClients()
+		// Log memory usage
+		logMemoryUsage()
+
+		// Log API rate limits
+		logAPILimits()
 	}
 }
 
