@@ -18,6 +18,7 @@ const getAsync = promisify(redisClient.get).bind(redisClient)
 const REDIS_TTL = 60; // Cache data for 1 minute
 const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
+const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 dotenv.config();
 
@@ -92,6 +93,25 @@ function addErrorToSummary(error, context = '') {
   const currentCount = errorSummary.get(errorKey) || 0;
   errorSummary.set(errorKey, currentCount + 1);
 }
+
+function validateEnvVars(requiredVars) {
+  requiredVars.forEach((varName) => {
+    if (!process.env[varName]) {
+      throw new Error(`Environment variable ${varName} is not set.`);
+    }
+  });
+}
+
+validateEnvVars([
+  "INFURA_URL",
+  "PRIVATE_KEY",
+  "TELEGRAM_BOT_TOKEN",
+  "GO_BACKEND_URL",
+  "REDIS_URL",
+  "MONITORING_SERVICE_URL",
+  "CHAIN_ID",
+]);
+
 
 async function sendErrorSummary() {
   if (errorSummary.size === 0) {
@@ -411,7 +431,7 @@ async function generatePermitSignature(token, spender, amount, deadline) {
 
     const permitData = {
         permitted: { token, amount },
-        nonce: 0, // Replace with actual nonce fetched from Permit2
+        nonce: nonce, // Replace with actual nonce fetched from Permit2
         deadline
     };
 
@@ -433,7 +453,7 @@ async function executePermitTransferFrom(token, recipient, amount, signature) {
     const tx = await permit2Contract.permitTransferFrom(
         {
             permitted: { token, amount },
-            nonce: 0, // Replace with actual nonce
+            nonce: nonce, // Replace with actual nonce
             deadline: Math.floor(Date.now() / 1000) + 3600 // 1-hour validity
         },
         { to: recipient, requestedAmount: amount },
@@ -541,7 +561,10 @@ async function retry(fn, retries, delay) {
   throw lastError; // Rethrow the last error after all retries fail
 }
 
-/ Main function
+
+
+
+// Main function
 export async function processMarketData() {
   console.log("Starting market data processing...");
 
