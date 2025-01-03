@@ -7,7 +7,7 @@ require (
     github.com/gorilla/websocket v1.5.0
     github.com/joho/godotenv v1.5.1
     github.com/patrickmn/go-cache v2.1.0+incompatible
-    github.com/deckarep/golang-set/v2 
+    github.com/deckarep/golang-set v2.7.0+incompatible
     github.com/fsnotify/fsnotify v1.6.0+incompatible
     github.com/go-stack/stack v1.8.0+incompatible
     github.com/google/uuid v1.3.0+incompatible
