@@ -27,6 +27,7 @@ import (
         "github.com/patrickmn/go-cache"
 	"github.com/ethereum/go-ethereum/crypto"
         "github.com/joho/godotenv"
+        "github.com/shirou/gopsutil/v3/cpu"
 )
 
 type RetryFunction func() (interface{}, error)
