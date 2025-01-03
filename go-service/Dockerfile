@@ -18,3 +18,6 @@ RUN go build -o app main.go
 
 # Set the default command to run the app
 CMD ["./app"]
+
+ENV GOPROXY=https://proxy.golang.org,direct
+
