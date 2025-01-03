@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
         "github.com/joho/godotenv"
        "github.com/shirou/gopsutil/v4/mem"
+       "github.com/deckarep/golang-set/v2"
 )
 
 type RetryFunction func() (interface{}, error)
