@@ -10,9 +10,6 @@ RUN go clean -modcache
 # Copy only go.mod and go.sum first to leverage Docker caching
 COPY go.mod go.sum ./
 
-# Enable Go modules
-ENV GO111MODULE=on
-
 # Download Go module dependencies
 RUN go mod download
 
