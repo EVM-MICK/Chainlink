@@ -12,7 +12,7 @@ require (
     github.com/go-stack/stack v1.8.0
     github.com/google/uuid v1.3.0
     github.com/holiman/uint256 v1.0.0
-    github.com/shirou/gopsutil/cpu v3.23.8
+    github.com/shirou/gopsutil/v3 v3.23.8
     golang.org/x/crypto v0.12.0
     golang.org/x/sys v0.10.0
 )
