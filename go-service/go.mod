@@ -7,12 +7,12 @@ require (
     github.com/gorilla/websocket v1.5.0
     github.com/joho/godotenv v1.5.1
     github.com/patrickmn/go-cache v2.1.0+incompatible
-   github.com/deckarep/golang-set/v2@latest
-   github.com/fsnotify/fsnotify@latest
-   github.com/go-stack/stack@latest
-   github.com/google/uuid@latest
-   github.com/holiman/uint256@latest
-   github.com/shirou/gopsutil/cpu@latest
-   golang.org/x/crypto@latest
-   golang.org/x/sys@latest
+    github.com/deckarep/golang-set/v2 v2.1.0
+    github.com/fsnotify/fsnotify v1.6.0
+    github.com/go-stack/stack v1.8.0
+    github.com/google/uuid v1.3.0
+    github.com/holiman/uint256 v1.0.0
+    github.com/shirou/gopsutil/cpu v3.23.8
+    golang.org/x/crypto v0.12.0
+    golang.org/x/sys v0.10.0
 )
