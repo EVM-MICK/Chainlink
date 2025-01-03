@@ -4,12 +4,12 @@ FROM golang:1.20
 # Set the working directory inside the container
 WORKDIR /app
 
+# Clean module cache and download dependencies
+RUN go mod tidy
+RUN go clean -modcache
+
 # Copy only go.mod and go.sum first to leverage Docker caching
 COPY go.mod go.sum ./
-
-# Clean module cache and download dependencies
-RUN go clean -modcache
-RUN go mod tidy
 
 # Download Go module dependencies
 RUN go mod download
