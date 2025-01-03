@@ -5,7 +5,6 @@ FROM golang:1.20
 WORKDIR /app
 
 # Clean module cache and download dependencies
-RUN go mod tidy
 RUN go clean -modcache
 
 # Copy only go.mod and go.sum first to leverage Docker caching
