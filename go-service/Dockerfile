@@ -18,6 +18,7 @@ COPY . .
 
 # Build the Go application
 RUN go build -o app
+
 # Set the default command to run the app
 CMD ["./app"]
 
