@@ -2,7 +2,7 @@ github.com/ethereum/go-ethereum v1.11.5 h1:BaQtn4T9Al78IXruP/K9kCHcdSxTzWlsaaN+O
 github.com/ethereum/go-ethereum v1.11.5/go.mod h1:TDeHK9RTyDm+3xSyR8Fc6pEr70hbcS5Fr+Gh6AX90bA=
 github.com/gorilla/websocket v1.5.0 h1:z2qa71hdWKRyqtu7Zq2GyBFv3WnvPycLSm4E43ec4eE=
 github.com/gorilla/websocket v1.5.0/go.mod h1:rddfDxzACcKPYylHnJdj3M4DKoa4MLaU2HULd+P3jX4=
-github.com/joho/godotenv v1.5.1 h1:NdbHtRCshRx+x02ehZ+N+sOtFq96AArwfwPENKP3EmI=
+github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:w2LUl0aEbD49mfr89uJw5TTvwlD+yPZrhcCuqZXBTP4=
 github.com/patrickmn/go-cache v2.1.0+incompatible h1:NLFcmDGv9DpJ87Kn0K8Hq+L9/zDQ4LzgI/VHglzkHmA=
 github.com/patrickmn/go-cache v2.1.0+incompatible/go.mod h1:GdzBoFvzwAOeqA4szrrdnSPdvECKayMSoL5mtuv/L1A=
