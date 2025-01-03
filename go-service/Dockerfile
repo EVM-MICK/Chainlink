@@ -7,6 +7,10 @@ WORKDIR /app
 # Copy only go.mod and go.sum first to leverage Docker caching
 COPY go.mod go.sum ./
 
+# Clean module cache and download dependencies
+RUN go clean -modcache
+RUN go mod tidy
+
 # Download Go module dependencies
 RUN go mod download
 
