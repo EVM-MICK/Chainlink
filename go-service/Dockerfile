@@ -10,11 +10,9 @@ RUN go clean -modcache
 # Copy only go.mod and go.sum to leverage Docker caching
 COPY go.mod go.sum ./
 
-# Run go mod tidy to fix and fetch dependencies
-RUN go mod tidy
 
-# Download Go module dependencies
-RUN go mod download
+# Ensure go.mod and go.sum are up to date
+RUN go mod tidy && go mod download
 
 # Copy the entire project code into the container
 COPY . .
