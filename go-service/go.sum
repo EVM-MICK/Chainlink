@@ -36,6 +36,6 @@ github.com/ethereum/go-verkle v0.2.2 h1:8hl57x77HSUo+cXExrURjU/w1VhL+ShCTJrTwcCQ
 github.com/ethereum/go-verkle v0.2.2/go.mod h1:RAC2gVMWJ6FkxSPESfbshrcKpIokgQKsVKmAuqdekDY=
 github.com/shirou/gopsutil/cpu v4.24.12 h1:qvePBOk20e0IKA1QXrIIU+jmk+zEiYVVx06WjBRlZo4=
 github.com/shirou/gopsutil/cpu v4.24.12/go.mod h1:DCtMPAad2XceTeIAbGyVfycbYQNBGk2P8cvDi7/VN9o=
-golang.org/x/exp/maps v0.0.0 h1:
-golang.org/x/exp/maps v0.0.0/go.mod h1:
+golang.org/x/exp/maps v0.0.0 h1:8hl57x77HSUo+cXExrURjU/w1VhL+ShCTJrTwcCQSe4=
+golang.org/x/exp/maps v0.0.0/go.mod h1:RAC2gVMWJ6FkxSPESfbshrcKpIokgQKsVKmAuqdekDY=
 
