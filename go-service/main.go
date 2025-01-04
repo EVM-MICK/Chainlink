@@ -297,7 +297,11 @@ var (
 
 // Constants
 var (
-	CAPITAL                 = big.NewInt(0).SetString("100000000000000000000000", 10) //big.NewInt(100000000000000000000000) // $100,000 in USDC (6 decimals)
+	var CAPITAL = new(big.Int)
+_, ok := CAPITAL.SetString("100000000000000000000000", 10)
+if !ok {
+    log.Fatal("Failed to initialize CAPITAL constant")
+} //big.NewInt(100000000000000000000000) // $100,000 in USDC (6 decimals)
 	MINIMUM_PROFIT_THRESHOLD = big.NewInt(500000000000000000)      // $500 in USDC (6 decimals)
 	FLASHLOAN_FEE_RATE       = big.NewFloat(0.0009)               // 0.09% fee
 )
@@ -592,7 +596,8 @@ func getStableTokenList(chainID int) ([]Token, error) {
 	}
 
 	// Cache the response and return
-	setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
+	//setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
+        setToStableTokenCache("key", value, 10*time.Minute)
 	log.Printf("Fetched stable token list: %+v", stableTokens)
 	return stableTokens, nil
 }
@@ -643,8 +648,8 @@ func init() {
 }
 
 func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
-	stableTokenCache.mu.Lock()
-	defer stableTokenCache.mu.Unlock()
+	stableTokenCache.Set(key, value, duration)
+	defer stableTokenCache.Set(key, value, duration)
 	stableTokenCache.cache[key] = CacheEntry{
 		data:      value,
 		timestamp: time.Now().Add(duration),
@@ -715,11 +720,15 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string) ([]s
 
 			// Relax the edge
 			newDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
-			if newDistance.Cmp(distances[neighbor]) < 0 {
-				distances[neighbor] = newDistance
-				previous[neighbor] = currentToken
-				heap.Push(&pq, &Node{Token: neighbor, Priority: newDistance})
-			}
+if newDistance.Cmp(distances[neighbor]) < 0 {
+    distances[neighbor] = newDistance
+    previous[neighbor] = currentToken
+
+    // Convert *big.Float to float64 for Priority field
+    floatValue, _ := newDistance.Float64()
+    heap.Push(&pq, &Node{Token: neighbor, Priority: floatValue})
+}
+
 		}
 	}
 
@@ -854,9 +863,9 @@ func getFromOrderBookCache(key string) (interface{}, bool) {
 }
 
 func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
-	orderBookCache.mu.Lock()
-	defer orderBookCache.mu.Unlock()
-	orderBookCache.cache[key] = CacheEntry{
+	orderBookCache.Set(key, value, duration)
+	defer orderBookCache.Set(key, value, duration)
+	orderBookCache.Set[key] = CacheEntry{
 		data:      value,
 		timestamp: time.Now().Add(duration),
 	}
