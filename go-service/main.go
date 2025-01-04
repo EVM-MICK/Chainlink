@@ -135,7 +135,7 @@ type RateLimiter struct {
 }
 
 // WebSocket connection manager
-var wsClients = make(map[*websocket.Conn]bool)
+//var wsClients = make(map[*websocket.Conn]bool)
 // Global shared Ethereum client
 var sharedClient *ethclient.Client
 var clientOnce sync.Once
@@ -215,7 +215,7 @@ type Node struct {
 // PriorityQueue implements a priority queue for Dijkstra's algorithm
 type PriorityQueue []*Node
 // Graph represents a weighted graph
-type Graph map[string]map[string]float64
+//type Graph map[string]map[string]float64
 
 
 
@@ -238,7 +238,7 @@ type CacheEntry struct {
 
 
 // Cache duration in seconds
-const cacheDuration = 600 // 10 minutes
+//const cacheDuration = 600 // 10 minutes
 const DefaultGasEstimate = 800000
 const DefaultRetries = 3
 
@@ -253,11 +253,11 @@ var quoteCache = QuoteCache{
 }
 
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
+// var upgrader = websocket.Upgrader{
+// 	CheckOrigin: func(r *http.Request) bool {
+// 		return true
+// 	},
+// }
 
 type RateLimitTracker struct {
 	Used      int
@@ -297,7 +297,7 @@ var (
 
 // Constants
 var (
-	CAPITAL                 = big.NewInt(100000000000000000000000) // $100,000 in USDC (6 decimals)
+	CAPITAL                 = big.NewInt(0).SetString("100000000000000000000000", 10) //big.NewInt(100000000000000000000000) // $100,000 in USDC (6 decimals)
 	MINIMUM_PROFIT_THRESHOLD = big.NewInt(500000000000000000)      // $500 in USDC (6 decimals)
 	FLASHLOAN_FEE_RATE       = big.NewFloat(0.0009)               // 0.09% fee
 )
@@ -616,11 +616,11 @@ func getFromStableTokenCache(key string) (interface{}, bool) {
 	return data, true
 }
 
-func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
-	// Add entry to go-cache with a specific expiration duration
-	stableTokenCache.Set(key, value, duration)
-	log.Printf("Added key: %s to cache with expiration: %v", key, duration)
-}
+// func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
+// 	// Add entry to go-cache with a specific expiration duration
+// 	stableTokenCache.Set(key, value, duration)
+// 	log.Printf("Added key: %s to cache with expiration: %v", key, duration)
+// }
 
 // Callback for cache expiration (optional but useful for debugging)
 func setupCacheExpirationLogging() {
@@ -653,21 +653,21 @@ func setToStableTokenCache(key string, value interface{}, duration time.Duration
 
 
 // Pop removes and returns the node with the highest priority
-func (pq *PriorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	node := old[n-1]
-	old[n-1] = nil // Avoid memory leak
-	node.Index = -1
-	*pq = old[0 : n-1]
-	return node
-}
+// func (pq *PriorityQueue) Pop() interface{} {
+// 	old := *pq
+// 	n := len(old)
+// 	node := old[n-1]
+// 	old[n-1] = nil // Avoid memory leak
+// 	node.Index = -1
+// 	*pq = old[0 : n-1]
+// 	return node
+// }
 
-// Update modifies the priority of a node in the queue
-func (pq *PriorityQueue) Update(node *Node, priority float64) {
-	node.Priority = priority
-	heap.Fix(pq, node.Index)
-}
+// // Update modifies the priority of a node in the queue
+// func (pq *PriorityQueue) Update(node *Node, priority float64) {
+// 	node.Priority = priority
+// 	heap.Fix(pq, node.Index)
+// }
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string) ([]string, *big.Float, error) {
@@ -2008,40 +2008,40 @@ func adjustMaxHops(maxHops int, avgLiquidity *big.Float) int {
 	return maxHops
 }
 
-// EstimateLiquidity estimates the maximum liquidity for a trading pair
-func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Int, error) {
-	orderBook, err := fetchOrderBookDepth(srcToken, dstToken)
-	if err != nil || orderBook.Liquidity == nil {
-		return nil, errors.New("liquidity data unavailable for " + srcToken + " ➡️ " + dstToken)
-	}
+// // EstimateLiquidity estimates the maximum liquidity for a trading pair
+// func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Int, error) {
+// 	orderBook, err := fetchOrderBookDepth(srcToken, dstToken)
+// 	if err != nil || orderBook.Liquidity == nil {
+// 		return nil, errors.New("liquidity data unavailable for " + srcToken + " ➡️ " + dstToken)
+// 	}
 
-	// Set binary search range
-	low := big.NewInt(1e18)   // 1 token (scaled to 18 decimals)
-	high := big.NewInt(1e24)  // 1 million tokens (scaled to 18 decimals)
-	bestAmount := new(big.Int).Set(low)
+// 	// Set binary search range
+// 	low := big.NewInt(1e18)   // 1 token (scaled to 18 decimals)
+// 	high := big.NewInt(1e24)  // 1 million tokens (scaled to 18 decimals)
+// 	bestAmount := new(big.Int).Set(low)
 
-	for low.Cmp(high) <= 0 {
-		mid := new(big.Int).Add(low, high)
-		mid.Div(mid, big.NewInt(2)) // mid = (low + high) / 2
+// 	for low.Cmp(high) <= 0 {
+// 		mid := new(big.Int).Add(low, high)
+// 		mid.Div(mid, big.NewInt(2)) // mid = (low + high) / 2
 
-		// Adjust for slippage
-		adjustedAmount, err := adjustForSlippage(big.NewFloat(0).SetInt(mid), orderBook.Liquidity)
-		if err != nil {
-			log.Printf("Liquidity estimation failed: %v", err)
-			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
-			continue
-		}
+// 		// Adjust for slippage
+// 		adjustedAmount, err := adjustForSlippage(big.NewFloat(0).SetInt(mid), orderBook.Liquidity)
+// 		if err != nil {
+// 			log.Printf("Liquidity estimation failed: %v", err)
+// 			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
+// 			continue
+// 		}
 
-		if adjustedAmount.Cmp(big.NewFloat(0)) > 0 { // If adjustedAmount > 0
-			bestAmount.Set(mid)       // Update the best amount
-			low.Add(mid, big.NewInt(1)) // Move the lower bound up
-		} else {
-			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
-		}
-	}
+// 		if adjustedAmount.Cmp(big.NewFloat(0)) > 0 { // If adjustedAmount > 0
+// 			bestAmount.Set(mid)       // Update the best amount
+// 			low.Add(mid, big.NewInt(1)) // Move the lower bound up
+// 		} else {
+// 			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
+// 		}
+// 	}
 
-	return bestAmount, nil
-}
+// 	return bestAmount, nil
+// }
 
 
 func find(graph *Graph, startToken, endToken string) ([]string, *big.Int, error) {
@@ -2109,42 +2109,42 @@ func max(a, b int) int {
 	return b
 }
 
-func BuildGraph(tokenPairs []TokenPair, chainID int64) (Graph, error) {
-	graph := make(Graph)
+// func BuildGraph(tokenPairs []TokenPair, chainID int64) (Graph, error) {
+// 	graph := make(Graph)
 
-	for _, pair := range tokenPairs {
-		orders, err := fetchOrderBookDepth(pair.SrcToken, pair.DstToken, int(chainID))
-		if err != nil {
-			log.Printf("Error fetching order book for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
-			continue
-		}
+// 	for _, pair := range tokenPairs {
+// 		orders, err := fetchOrderBookDepth(pair.SrcToken, pair.DstToken, int(chainID))
+// 		if err != nil {
+// 			log.Printf("Error fetching order book for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
+// 			continue
+// 		}
 
-		if len(orders) == 0 {
-			log.Printf("No orders found for %s -> %s. Skipping.", pair.SrcToken, pair.DstToken)
-			continue
-		}
+// 		if len(orders) == 0 {
+// 			log.Printf("No orders found for %s -> %s. Skipping.", pair.SrcToken, pair.DstToken)
+// 			continue
+// 		}
 
-		bestOrder, err := findBestOrder(orders)
-		if err != nil {
-			log.Printf("Error finding best order for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
-			continue
-		}
+// 		bestOrder, err := findBestOrder(orders)
+// 		if err != nil {
+// 			log.Printf("Error finding best order for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
+// 			continue
+// 		}
 
-		// Calculate the weight (e.g., price or inverse liquidity)
-		makingAmount := bestOrder["makingAmount"].(float64) // Replace with actual parsing logic
-		takingAmount := bestOrder["takingAmount"].(float64)
-		weight := takingAmount / makingAmount
+// 		// Calculate the weight (e.g., price or inverse liquidity)
+// 		makingAmount := bestOrder["makingAmount"].(float64) // Replace with actual parsing logic
+// 		takingAmount := bestOrder["takingAmount"].(float64)
+// 		weight := takingAmount / makingAmount
 
-		if _, exists := graph[pair.SrcToken]; !exists {
-			graph[pair.SrcToken] = make(map[string]float64)
-		}
-		graph[pair.SrcToken][pair.DstToken] = weight
+// 		if _, exists := graph[pair.SrcToken]; !exists {
+// 			graph[pair.SrcToken] = make(map[string]float64)
+// 		}
+// 		graph[pair.SrcToken][pair.DstToken] = weight
 
-		log.Printf("Edge added: %s -> %s, weight: %f", pair.SrcToken, pair.DstToken, weight)
-	}
+// 		log.Printf("Edge added: %s -> %s, weight: %f", pair.SrcToken, pair.DstToken, weight)
+// 	}
 
-	return graph, nil
-}
+// 	return graph, nil
+// }
 
 
 // Decode transaction data (replace this ABI decoding logic with your contract's ABI)
