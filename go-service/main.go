@@ -27,7 +27,7 @@ import (
         "github.com/patrickmn/go-cache"
 	"github.com/ethereum/go-ethereum/crypto"
         "github.com/joho/godotenv"
-       "github.com/shirou/gopsutil/v4/mem"
+       "github.com/shirou/gopsutil/v4/cpu"
        "github.com/deckarep/golang-set/v2"
 )
 
