@@ -13,6 +13,6 @@ require (
     github.com/google/uuid v1.6.0
     github.com/holiman/uint256 v1.3.2
     github.com/shirou/gopsutil/v4 v4.24.12
-    golang.org/x/crypto v0.31.0 
-    golang.org/x/sys v0.28.0 
+    golang.org/x/crypto v0.31.0
+    golang.org/x/sys v0.28.0
 )
