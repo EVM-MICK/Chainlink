@@ -13,7 +13,7 @@ github.com/fsnotify/fsnotify v1.8.0/go.mod h1:YojvXqA5GiRVu0XQQ1Ch6aqccPb3EcHnOw
 github.com/go-stack/stack v1.8.1 h1:5B3BNTHI6q90x4Zob7h41pVYrTAkkLDr5YOL1vMiXYA=
 github.com/go-stack/stack v1.8.1/go.mod h1:UmF6nA1ChZ3dkeF7RCoBXrId/E33/7weOuNKnR1VW34=
 github.com/google/uuid v1.6.0 h1:LoOVdhku0eGz6mQhRPlH3NG4oeRxiAJvrz4/hgywJeo=
-github.com/google/uuid v1.6.0/go.mod h1:jYtS9wKCRXb/RI2/0/8/yb/CWmKbaGWr9MVBSACcSm8=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/holiman/uint256 v1.3.2 h1:0cuBtD99qV/pn9pTHrEDuXv1aJbXjzh2CJgUN3Pg57U=
 github.com/holiman/uint256 v1.3.2/go.mod h1:+U6rk+vTFS7kFqA9HDzgfXy7xeQpQdIaBRNI6c2D81o=
 github.com/shirou/gopsutil/v4 v4.24.12 h1:qvePBOk20e0IKA1QXrIIU+jmk+zEiYVVx06WjBRlZo4=
