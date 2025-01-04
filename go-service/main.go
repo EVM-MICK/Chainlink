@@ -297,14 +297,11 @@ var (
 
 // Constants
 var (
- CAPITAL = new(big.Int)
-_, ok = CAPITAL.SetString("100000000000000000000000", 10);
- !ok {
-    log.Fatal("Failed to initialize CAPITAL constant")
-}  // $100,000 in USDC (6 decimals)
-	MINIMUM_PROFIT_THRESHOLD = big.NewInt(500000000000000000)      // $500 in USDC (6 decimals)
-	FLASHLOAN_FEE_RATE       = big.NewFloat(0.0009)               // 0.09% fee
-)
+CAPITAL = new(big.Int)
+    _, ok := CAPITAL.SetString("100000000000000000000000", 10)
+    if !ok {
+        log.Fatal("Failed to set value for CAPITAL")
+    }
 
 // TokenPrice represents token data including price and liquidity
 type TokenPrice struct {
