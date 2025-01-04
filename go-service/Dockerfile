@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go application
-RUN go build -o app.
+RUN go build -o app main.go
 
 # Set the default command to run the app
 CMD ["./app"]
