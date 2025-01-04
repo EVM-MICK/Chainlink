@@ -297,11 +297,11 @@ var (
 
 // Constants
 var (
-	var CAPITAL = new(big.Int)
-_, ok := CAPITAL.SetString("100000000000000000000000", 10)
-if !ok {
+ CAPITAL = new(big.Int)
+_, ok = CAPITAL.SetString("100000000000000000000000", 10);
+ !ok {
     log.Fatal("Failed to initialize CAPITAL constant")
-} //big.NewInt(100000000000000000000000) // $100,000 in USDC (6 decimals)
+}  // $100,000 in USDC (6 decimals)
 	MINIMUM_PROFIT_THRESHOLD = big.NewInt(500000000000000000)      // $500 in USDC (6 decimals)
 	FLASHLOAN_FEE_RATE       = big.NewFloat(0.0009)               // 0.09% fee
 )
@@ -1247,7 +1247,6 @@ func getTokenDecimals(tokenAddress string) int {
 	return decimals
 }
 
-
 func handleClientReconnection(client *WebSocketClient) {
 	for {
 		_, _, err := client.Conn.ReadMessage()
@@ -1258,7 +1257,6 @@ func handleClientReconnection(client *WebSocketClient) {
 		}
 	}
 }
-
 
 func filterRoutes(routes []Route, chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
 	var filtered []Route
@@ -1289,7 +1287,6 @@ func filterRoutes(routes []Route, chainID int64, startToken string, startAmount 
 
 	return filtered, nil
 }
-
 
 
 func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
