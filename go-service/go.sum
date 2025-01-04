@@ -20,5 +20,5 @@ github.com/shirou/gopsutil/v4 v4.24.12 h1:qvePBOk20e0IKA1QXrIIU+jmk+zEiYVVx06WjB
 github.com/shirou/gopsutil/v4 v4.24.12/go.mod h1:DCtMPAad2XceTeIAbGyVfycbYQNBGk2P8cvDi7/VN9o=
 golang.org/x/crypto v0.31.0 h1:bdAA/uO6DFRt1RNwXmA4CwP7u5RUwjtXW0VJzYhFGSc=
 golang.org/x/crypto v0.31.0/go.mod h1:ab46Yy6LQp6vS4Ijdy8lQy/NTG+mAEgJ92U1JIMW0pM=
-golang.org/x/sys v0.28.0 h1:9oj02Cxk6saw7yPvF6TkTAHoIlAPMLdQLPvZnsOd9/Y=
+golang.org/x/sys v0.28.0 h1:Fksou7UEQUWlKvIdsqzJmUmCX3cZuD2+P3XyyzwMhlA=
 golang.org/x/sys v0.28.0/go.mod h1:8jT0Wb8Cu4QIRXiq7KqF5DmnF/yqlLTh8FAEKD2wsAI=
