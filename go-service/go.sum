@@ -19,6 +19,6 @@ github.com/holiman/uint256 v1.3.2/go.mod h1:+U6rk+vTFS7kFqA9HDzgfXy7xeQpQdIaBRNI
 github.com/shirou/gopsutil/v4 v4.24.12 h1:qvePBOk20e0IKA1QXrIIU+jmk+zEiYVVx06WjBRlZo4=
 github.com/shirou/gopsutil/v4 v4.24.12/go.mod h1:DCtMPAad2XceTeIAbGyVfycbYQNBGk2P8cvDi7/VN9o=
 golang.org/x/crypto v0.31.0 h1:bdAA/uO6DFRt1RNwXmA4CwP7u5RUwjtXW0VJzYhFGSc=
-golang.org/x/crypto v0.31.0/go.mod h1:ab46Yy6LQp6vS4Ijdy8lQy/NTG+mAEgJ92U1JIMW0pM=
+golang.org/x/crypto v0.31.0/go.mod h1:kDsLvtWBEx7MV9tJOj9bnXsPbxwJQ6csT/x4KIN4Ssk=
 golang.org/x/sys v0.28.0 h1:Fksou7UEQUWlKvIdsqzJmUmCX3cZuD2+P3XyyzwMhlA=
 golang.org/x/sys v0.28.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
