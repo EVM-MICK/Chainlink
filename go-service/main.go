@@ -809,7 +809,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Calculate net profit: final amount - starting capital - gas costs
-    netProfit := (new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
+    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
 
     // Log the route and profit for debugging
     log.Printf("Route evaluated: %v, Profit: %s wei", route, netProfit.String())
@@ -822,6 +822,8 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 
     return netProfit, nil
 }
+
+
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
