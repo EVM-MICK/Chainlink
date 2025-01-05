@@ -798,7 +798,7 @@ if amountInFinal.Cmp(big.NewInt(0)) <= 0 {
 	return nil, nil
 }
 
-// AdjustForSlippage adjusts the trade size based on liquidity
+// Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
 	if liquidity == nil || liquidity.Cmp(big.NewFloat(0)) <= 0 {
 		return nil, errors.New("invalid liquidity: must be greater than zero")
@@ -814,10 +814,7 @@ func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, e
 	return adjustedAmount, nil
 }
 
-
-
-
-// CalculateDynamicProfitThreshold dynamically calculates the profit threshold
+// Dynamically calculate the profit threshold
 func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate))
 	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), FLASHLOAN_FEE_RATE)
@@ -825,144 +822,158 @@ func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 
 	profitThreshold := new(big.Float).Add(totalCost, new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD))
 	result := new(big.Int)
-	profitThreshold.Int(result) // Correctly convert *big.Float to *big.Int
+	profitThreshold.Int(result) // Convert *big.Float to *big.Int
 
 	log.Printf("Dynamic profit threshold: %s", result.String())
 	return result, nil
 }
 
-
-// Helper to set a value in the cache
+// Set a value in the cache
 func setToCache(key string, value interface{}) {
 	quoteCache.mu.Lock()
 	defer quoteCache.mu.Unlock()
-	if quoteCache.cache == nil { // Initialize cache if not already done
+	if quoteCache.cache == nil { // Initialize the cache if nil
 		quoteCache.cache = make(map[string]interface{})
 	}
 	quoteCache.cache[key] = value
 }
 
-// Helper to get a value from the cache
+// Get a value from the cache
 func getFromCache(key string) (interface{}, bool) {
 	quoteCache.mu.Lock()
 	defer quoteCache.mu.Unlock()
-	if quoteCache.cache == nil {
+	if quoteCache.cache == nil { // Check if the cache is initialized
 		return nil, false
 	}
 	value, exists := quoteCache.cache[key]
 	return value, exists
 }
+
+// Get a value from the order book cache
 func getFromOrderBookCache(key string) (interface{}, bool) {
-    return orderBookCache.Get(key) // Use go-cache's Get method
+    if orderBookCache == nil {
+        return nil, false
+    }
+    return orderBookCache.Get(key) // Ensure `orderBookCache` is properly initialized elsewhere
 }
 
+// Set a value in the order book cache
 func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
-    orderBookCache.Set(key, value, duration) // Use go-cache's Set method
+    if orderBookCache == nil {
+        log.Println("Order book cache not initialized.")
+        return
+    }
+    orderBookCache.Set(key, value, duration)
 }
 
+// Adjust for decimals
 func adjustForDecimals(amount *big.Int, decimals int) *big.Int {
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	return new(big.Int).Mul(amount, factor)
+    factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+    return new(big.Int).Mul(amount, factor)
 }
-
 
 // Helper function for exponential backoff retries
 func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
-	operation := func() (interface{}, error) {
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
+    operation := func() (interface{}, error) {
+        req, err := http.NewRequest("GET", url, nil)
+        if err != nil {
+            return nil, err
+        }
 
-		for key, value := range headers {
-			req.Header.Set(key, value)
-		}
+        for key, value := range headers {
+            req.Header.Set(key, value)
+        }
 
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
+        client := &http.Client{}
+        resp, err := client.Do(req)
+        if err != nil {
+            return nil, err
+        }
+        defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
+        if resp.StatusCode != http.StatusOK {
+            return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+        }
 
-		return ioutil.ReadAll(resp.Body)
-	}
+        return ioutil.ReadAll(resp.Body)
+    }
 
-	result, err := Retry(operation, 3, time.Second)
-	if err != nil {
-		return nil, err
-	}
-	return result.([]byte), nil
+    result, err := Retry(operation, 3, time.Second)
+    if err != nil {
+        return nil, err
+    }
+    return result.([]byte), nil
 }
 
 // Fetch a single quote with caching and retries
 func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
+    cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
 
-	if cachedQuote, exists := getFromCache(cacheKey); exists {
-		log.Printf("Using cached quote for %s", cacheKey)
-		return cachedQuote.(map[string]interface{}), nil
-	}
+    // Check cache first
+    if cachedQuote, exists := getFromCache(cacheKey); exists {
+        log.Printf("Using cached quote for %s", cacheKey)
+        return cachedQuote.(map[string]interface{}), nil
+    }
 
-	url := fmt.Sprintf("https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d",
-		chainID, srcToken, dstToken, amount, complexityLevel)
+    // Construct the request URL
+    url := fmt.Sprintf(
+        "https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d",
+        chainID, srcToken, dstToken, amount, complexityLevel,
+    )
 
-	headers := map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", getEnv("ONEINCH_API_KEY", "")),
-	}
+    headers := map[string]string{
+        "Authorization": fmt.Sprintf("Bearer %s", getEnv("ONEINCH_API_KEY", "")),
+    }
 
-	data, err := fetchWithRetries(url, headers)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch quote for %s -> %s: %v", srcToken, dstToken, err)
-	}
+    // Fetch data with retries
+    data, err := fetchWithRetries(url, headers)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch quote for %s -> %s: %v", srcToken, dstToken, err)
+    }
 
-	var quote map[string]interface{}
-	if err := json.Unmarshal(data, &quote); err != nil {
-		return nil, fmt.Errorf("failed to parse quote response: %v", err)
-	}
+    var quote map[string]interface{}
+    if err := json.Unmarshal(data, &quote); err != nil {
+        return nil, fmt.Errorf("failed to parse quote response: %v", err)
+    }
 
-	setToCache(cacheKey, quote)
-	return quote, nil
+    // Cache the result
+    setToCache(cacheKey, quote)
+    return quote, nil
 }
 
 // Fetch multiple quotes concurrently with rate limiting
 func fetchMultipleQuotes(chainID int, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
-	var wg sync.WaitGroup
-	results := make([]map[string]interface{}, len(tokenPairs))
-	errors := make([]error, len(tokenPairs))
+    var wg sync.WaitGroup
+    results := make([]map[string]interface{}, len(tokenPairs))
+    errors := make([]error, len(tokenPairs))
 
-	limit := make(chan struct{}, 5) // Limit concurrency to 5
+    limit := make(chan struct{}, 5) // Limit concurrency to 5
 
-	for i, pair := range tokenPairs {
-		wg.Add(1)
-		limit <- struct{}{}
-		go func(i int, srcToken, dstToken string) {
-			defer wg.Done()
-			defer func() { <-limit }()
-			quote, err := fetchQuote(chainID, srcToken, dstToken, amount, complexityLevel, slippage)
-			if err != nil {
-				errors[i] = err
-				return
-			}
-			results[i] = quote
-		}(i, pair[0], pair[1])
-	}
+    for i, pair := range tokenPairs {
+        wg.Add(1)
+        limit <- struct{}{}
+        go func(i int, srcToken, dstToken string) {
+            defer wg.Done()
+            defer func() { <-limit }()
+            quote, err := fetchQuote(chainID, srcToken, dstToken, amount, complexityLevel, slippage)
+            if err != nil {
+                errors[i] = err
+                return
+            }
+            results[i] = quote
+        }(i, pair[0], pair[1])
+    }
 
-	wg.Wait()
+    wg.Wait()
 
-	var validResults []map[string]interface{}
-	for i, res := range results {
-		if errors[i] == nil {
-			validResults = append(validResults, res)
-		}
-	}
-	return validResults, nil
+    var validResults []map[string]interface{}
+    for i, res := range results {
+        if errors[i] == nil {
+            validResults = append(validResults, res)
+        }
+    }
+    return validResults, nil
 }
-
 
 // Helper function to get environment variables with a default value
 func getEnv(key, defaultValue string) string {
