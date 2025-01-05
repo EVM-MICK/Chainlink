@@ -55,10 +55,13 @@ type ArbitrageOpportunity struct {
 	DstToken string  `json:"dstToken"`
 	AmountIn string  `json:"amountIn"`
 }
+
 var (
 	uniswapABI    abi.ABI
 	sushiSwapABI  abi.ABI
 )
+
+var CAPITAL *big.Int // Declare CAPITAL globally
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
@@ -297,11 +300,11 @@ var (
 
 // Constants
 var (
-CAPITAL = new(big.Int)
-    _, ok := CAPITAL.SetString("100000000000000000000000", 10)
-    if !ok {
-        log.Fatal("Failed to set value for CAPITAL")
-    }
+	CAPITAL                 *big.Int
+	MINIMUM_PROFIT_THRESHOLD = big.NewInt(500000000000000000) // $500 in USDC
+	FLASHLOAN_FEE_RATE       = big.NewFloat(0.0009)          // 0.09% fee
+)
+
 
 // TokenPrice represents token data including price and liquidity
 type TokenPrice struct {
@@ -633,6 +636,11 @@ func setupCacheExpirationLogging() {
 
 // Initialize the cache with expiration logging
 func init() {
+        CAPITAL = new(big.Int)
+	_, ok := CAPITAL.SetString("100000000000000000000000", 10)
+	if !ok {
+		log.Fatal("Failed to set value for CAPITAL")
+	}
 	setupCacheExpirationLogging()
         uniswapABI = loadABI(UniswapV3RouterABI)
 	sushiSwapABI = loadABI(SushiSwapRouterABI)
