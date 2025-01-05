@@ -334,6 +334,10 @@ func loadABI(abiString string) abi.ABI {
 }
 
 func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
+      // Declare result and err
+    var result interface{}
+    var err error
+
 	operation := func() (interface{}, error) {
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -363,11 +367,18 @@ func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
 		return ioutil.ReadAll(resp.Body)
 	}
 
-	result, err = Retry(operation, 3, 1*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	return result.([]byte), nil
+	// Call Retry with the operation
+    result, err = Retry(operation, 3, 1*time.Second)
+    if err != nil {
+        return nil, err
+    }
+
+    // Type assert the result to []byte
+    if byteResult, ok := result.([]byte); ok {
+        return byteResult, nil
+    }
+
+    return nil, fmt.Errorf("unexpected result type from Retry function")
 }
 
 func fetchWithRateLimit(url string, headers, params map[string]string) ([]byte, error) {
@@ -512,7 +523,8 @@ func (rl *RateLimiter) Stop() {
 // Retry retries a function with exponential backoff.
 func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration) (interface{}, error) {
 	backoff := initialBackoff
-	var lastErr error
+    var result interface{}
+    var err error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		result, err = operation()
@@ -2278,6 +2290,9 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 
 // Main function for monitoring mempool with retryable connection and subscription logic
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+        // Declare variables
+    var subResult interface{}
+    var err error
 	// Retry logic for connecting to Ethereum client
 	clientResult, err = Retry(func() (interface{}, error) {
 		return ethclient.Dial(rpcURL)
