@@ -2203,13 +2203,13 @@ func decodeTransactionData(data string, routerType string) (string, string, *big
     }
 
     // Extract and validate `tokenIn`
-    tokenIn, ok := args["tokenIn"].(To common.Address)
+    tokenIn, ok := args["tokenIn"].(common.Address)
     if !ok || !common.IsHexAddress(tokenIn.Hex()) {
         return "", "", nil, fmt.Errorf("invalid or missing tokenIn")
     }
 
     // Extract and validate `tokenOut`
-    tokenOut, ok := args["tokenOut"].(To common.Address)
+    tokenOut, ok := args["tokenOut"].(common.Address)
     if !ok || !common.IsHexAddress(tokenOut.Hex()) {
         return "", "", nil, fmt.Errorf("invalid or missing tokenOut")
     }
@@ -2293,8 +2293,8 @@ func processUniswapTransaction(methodName string, args map[string]interface{}) {
 
 	case "exactInputSingle":
 		params := args["params"].(map[string]interface{})
-		tokenIn := params["tokenIn"].(To common.Address)
-		tokenOut := params["tokenOut"].(To common.Address)
+		tokenIn := params["tokenIn"].(common.Address)
+		tokenOut := params["tokenOut"].(common.Address)
 		amountIn := params["amountIn"].(*big.Int)
 		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
 
@@ -2328,7 +2328,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 	case "swapExactTokensForTokens":
 		amountIn := args["amountIn"].(*big.Int)
 		amountOutMin := args["amountOutMin"].(*big.Int)
-		path := args["path"].([]To common.Address)
+		path := args["path"].([]common.Address)
 
 		decodedPath := decodePathSushi(path) // Decode path to token addresses
 
@@ -2338,7 +2338,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 	case "swapTokensForExactTokens":
 		amountOut := args["amountOut"].(*big.Int)
 		amountInMax := args["amountInMax"].(*big.Int)
-		path := args["path"].([]To common.Address)
+		path := args["path"].([]common.Address)
 
 		decodedPath := decodePathSushi(path) // Decode path to token addresses
 
@@ -2351,7 +2351,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 }
 
 // Helper function to decode SushiSwap path
-func decodePathSushi(path []To common.Address) []string {
+func decodePathSushi(path []common.Address) []string {
 	decodedPath := []string{}
 	for _, token := range path {
 		decodedPath = append(decodedPath, token.Hex())
