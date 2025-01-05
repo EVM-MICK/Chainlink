@@ -275,8 +275,12 @@ type TokenPair struct {
 }
 
 type Route struct {
-	Path   []string  `json:"path"`
-	Profit *big.Int  `json:"profit"`
+	ChainID      int64      `json:"chainId"`
+	StartToken   string     `json:"startToken"`
+	StartAmount  *big.Int   `json:"startAmount"`
+	Hops         int        `json:"hops"`
+	Profit       *big.Int   `json:"profit"`
+	Path         []string   `json:"path"` // Sequence of tokens in the route
 }
 
 type StableToken struct {
@@ -921,25 +925,29 @@ func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
 
 // Fetch a single quote with caching and retries
 func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
+    // Construct the cache key
     cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
-    cachedValue, exists := getFromCache(cacheKey) // Call the function properly.
-   
-  if exists {
-    if castValue, ok := cachedValue.(map[string]interface{}); ok {
-        // Safely use the value as a map if it matches the expected type.
-        log.Println("Cached value:", castValue)
+
+    // Attempt to retrieve from cache
+    cachedValue, exists := getFromCache(cacheKey)
+    if exists {
+        // Safely assert the cached value to the expected type
+        if castValue, ok := cachedValue.(map[string]interface{}); ok {
+            log.Println("Using cached quote:", castValue)
+            return castValue, nil
+        }
+        log.Println("Cached value exists but is not of the expected type")
     } else {
-        log.Println("Cached value exists but is not of expected type")
-      }
-   } else {
-    log.Println("Value not found in cache")
-  }
+        log.Println("Quote not found in cache")
+    }
+
     // Construct the request URL
     url := fmt.Sprintf(
         "https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d",
         chainID, srcToken, dstToken, amount, complexityLevel,
     )
 
+    // Add required headers
     headers := map[string]string{
         "Authorization": fmt.Sprintf("Bearer %s", getEnv("ONEINCH_API_KEY", "")),
     }
@@ -950,15 +958,19 @@ func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel,
         return nil, fmt.Errorf("failed to fetch quote for %s -> %s: %v", srcToken, dstToken, err)
     }
 
+    // Parse the fetched data into a map
     var quote map[string]interface{}
     if err := json.Unmarshal(data, &quote); err != nil {
         return nil, fmt.Errorf("failed to parse quote response: %v", err)
     }
 
-    // Cache the result
+    // Cache the fetched quote for future use
     setToCache(cacheKey, quote)
+    log.Println("Fetched and cached quote:", quote)
+
     return quote, nil
 }
+
 
 // Fetch multiple quotes concurrently with rate limiting
 func fetchMultipleQuotes(chainID int, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
@@ -1166,33 +1178,33 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		log.Printf("Error decoding request body: %v", err) // Keep detailed logs for debugging
+		log.Printf("Error decoding request body: %v", err)
 		return
 	}
 
 	// Input validation
 	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
 		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
-		log.Println("Invalid input parameters detected in the request.") // Log invalid inputs
+		log.Println("Invalid input parameters detected in the request.")
 		return
 	}
 
 	startAmount := new(big.Int)
 	if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
 		http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
-		log.Println("Invalid startAmount format or value.") // Log invalid format or value
+		log.Println("Invalid startAmount format or value.")
 		return
 	}
 
 	profitThreshold := new(big.Int)
 	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
 		http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
-		log.Println("Invalid profitThreshold format or value.") // Log invalid format or value
+		log.Println("Invalid profitThreshold format or value.")
 		return
 	}
 
 	// Validate token decimals
-	tokenDecimals := getTokenDecimals(req.StartToken) // Assumes a helper function exists
+	tokenDecimals := getTokenDecimals(req.StartToken)
 	if tokenDecimals < 0 {
 		http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
 		log.Printf("Invalid token decimals for token: %s", req.StartToken)
@@ -1203,7 +1215,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
 	if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
 		http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
-		log.Println("Invalid adjusted startAmount.") // Log invalid adjusted amount
+		log.Println("Invalid adjusted startAmount.")
 		return
 	}
 
@@ -1214,7 +1226,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
 	if err != nil {
 		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
-		log.Printf("Error computing profitable routes: %v", err) // Detailed log for debugging
+		log.Printf("Error computing profitable routes: %v", err)
 		return
 	}
 
@@ -1222,7 +1234,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
 	if err != nil {
 		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
-		log.Printf("Error filtering profitable routes: %v", err) // Detailed log for debugging
+		log.Printf("Error filtering profitable routes: %v", err)
 		return
 	}
 
@@ -1232,11 +1244,94 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		"routes": filteredRoutes,
 	}); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		log.Printf("Error encoding response: %v", err) // Detailed log for debugging
+		log.Printf("Error encoding response: %v", err)
 		return
 	}
 
-	log.Println("Successfully computed and returned filtered routes.") // Success log
+	log.Println("Successfully computed and returned filtered routes.")
+}
+
+// fetchTokenDecimalsFromBlockchain queries the blockchain to retrieve token decimals
+func fetchTokenDecimalsFromBlockchain(tokenAddress string) (int, error) {
+	client, err := getEthClient()
+	if err != nil {
+		return -1, fmt.Errorf("failed to connect to Ethereum client: %v", err)
+	}
+
+	erc20ABI := `[{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]`
+	parsedABI, err := abi.JSON(strings.NewReader(erc20ABI))
+	if err != nil {
+		return -1, fmt.Errorf("failed to parse ERC20 ABI: %v", err)
+	}
+
+	address := common.HexToAddress(tokenAddress)
+	callData, err := parsedABI.Pack("decimals")
+	if err != nil {
+		return -1, fmt.Errorf("failed to pack ABI call: %v", err)
+	}
+
+	msg := ethereum.CallMsg{
+		To:   &address,
+		Data: callData,
+	}
+	result, err := client.CallContract(context.Background(), msg, nil)
+	if err != nil {
+		return -1, fmt.Errorf("failed to call contract: %v", err)
+	}
+
+	decimals := new(big.Int)
+	decimals.SetBytes(result)
+	return int(decimals.Int64()), nil
+}
+
+// computeProfitableRoutes calculates profitable routes based on token prices and liquidity
+func computeProfitableRoutes(tokenPrices map[string]float64, liquidity []map[string]interface{}) ([]Route, error) {
+	if len(tokenPrices) == 0 || len(liquidity) == 0 {
+		return nil, fmt.Errorf("insufficient market data for route computation")
+	}
+
+	var routes []Route
+	for _, liquidityEntry := range liquidity {
+		fromToken, ok := liquidityEntry["fromToken"].(string)
+		if !ok {
+			log.Println("Skipping entry: invalid fromToken")
+			continue
+		}
+		toToken, ok := liquidityEntry["toToken"].(string)
+		if !ok {
+			log.Println("Skipping entry: invalid toToken")
+			continue
+		}
+		liquidityValue, ok := liquidityEntry["liquidity"].(float64)
+		if !ok || liquidityValue <= 0 {
+			log.Println("Skipping entry: invalid or zero liquidity")
+			continue
+		}
+
+		// Calculate profit
+		fromPrice, fromExists := tokenPrices[fromToken]
+		toPrice, toExists := tokenPrices[toToken]
+		if !fromExists || !toExists || fromPrice <= 0 || toPrice <= 0 {
+			log.Printf("Skipping pair %s -> %s due to missing or invalid prices", fromToken, toToken)
+			continue
+		}
+
+		profit := liquidityValue * (toPrice / fromPrice)
+		if profit > 0 {
+			routes = append(routes, Route{
+				Path:   []string{fromToken, toToken},
+				Profit: big.NewInt(int64(profit * 1e18)), // Convert to Wei
+			})
+		}
+	}
+
+	if len(routes) == 0 {
+		log.Println("No profitable routes found")
+		return nil, fmt.Errorf("no profitable routes detected")
+	}
+
+	log.Printf("Computed %d profitable routes", len(routes))
+	return routes, nil
 }
 
 func getTokenDecimals(tokenAddress string) int {
@@ -1274,30 +1369,37 @@ func handleClientReconnection(client *WebSocketClient) {
 	}
 }
 
+
 func filterRoutes(routes []Route, chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
 	var filtered []Route
 
 	for _, route := range routes {
+		// Check chain ID
 		if route.ChainID != chainID {
 			continue
 		}
 
-		if route.StartToken != strings.ToLower(startToken) {
+		// Check start token
+		if strings.ToLower(route.StartToken) != strings.ToLower(startToken) {
 			continue
 		}
 
+		// Check start amount
 		if route.StartAmount.Cmp(startAmount) < 0 {
 			continue
 		}
 
+		// Check max hops
 		if route.Hops > maxHops {
 			continue
 		}
 
+		// Check profit threshold
 		if route.Profit.Cmp(profitThreshold) < 0 {
 			continue
 		}
 
+		// Add to filtered routes
 		filtered = append(filtered, route)
 	}
 
@@ -1330,7 +1432,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
 
 	// Generate token pairs and build the graph using real-time data
 	tokenPairs := generateTokenPairs(validStableTokenAddresses)
-	graph, err := buildGraph(tokenPairs, int(chainID))
+	graph, err := BuildGraph(tokenPairs, int(chainID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build graph: %v", err)
 	}
