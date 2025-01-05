@@ -800,16 +800,13 @@ if amountInFinal.Cmp(big.NewInt(0)) <= 0 {
 
 // AdjustForSlippage adjusts the trade size based on liquidity
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
-	// Ensure liquidity is greater than zero to avoid division by zero
 	if liquidity == nil || liquidity.Cmp(big.NewFloat(0)) <= 0 {
 		return nil, errors.New("invalid liquidity: must be greater than zero")
 	}
 
-	// Calculate slippage as a percentage of the input amount
 	slippage := new(big.Float).Mul(amountIn, big.NewFloat(0.01)) // Example: 1% slippage
 	adjustedAmount := new(big.Float).Sub(amountIn, slippage)
 
-	// Ensure the adjusted amount remains positive
 	if adjustedAmount.Cmp(big.NewFloat(0)) <= 0 {
 		return nil, errors.New("adjusted amount is negative or zero after slippage")
 	}
@@ -819,15 +816,16 @@ func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, e
 
 
 
+
 // CalculateDynamicProfitThreshold dynamically calculates the profit threshold
 func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
-	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate)) // Estimate gas for 800k units
+	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate))
 	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), FLASHLOAN_FEE_RATE)
 	totalCost := new(big.Float).Add(gasCost, flashLoanFee)
 
 	profitThreshold := new(big.Float).Add(totalCost, new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD))
 	result := new(big.Int)
-	profitThreshold.Set(result)
+	profitThreshold.Int(result) // Correctly convert *big.Float to *big.Int
 
 	log.Printf("Dynamic profit threshold: %s", result.String())
 	return result, nil
@@ -836,19 +834,24 @@ func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 
 // Helper to set a value in the cache
 func setToCache(key string, value interface{}) {
-	quoteCache.mu.Lock()         // Acquire the lock
-	defer quoteCache.mu.Unlock() // Release the lock after the operation
+	quoteCache.mu.Lock()
+	defer quoteCache.mu.Unlock()
+	if quoteCache.cache == nil { // Initialize cache if not already done
+		quoteCache.cache = make(map[string]interface{})
+	}
 	quoteCache.cache[key] = value
 }
 
 // Helper to get a value from the cache
 func getFromCache(key string) (interface{}, bool) {
-	quoteCache.mu.Lock()         // Acquire the lock
-	defer quoteCache.mu.Unlock() // Ensure the lock is released, even if the function exits early
+	quoteCache.mu.Lock()
+	defer quoteCache.mu.Unlock()
+	if quoteCache.cache == nil {
+		return nil, false
+	}
 	value, exists := quoteCache.cache[key]
 	return value, exists
 }
-
 func getFromOrderBookCache(key string) (interface{}, bool) {
     return orderBookCache.Get(key) // Use go-cache's Get method
 }
@@ -856,7 +859,6 @@ func getFromOrderBookCache(key string) (interface{}, bool) {
 func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
     orderBookCache.Set(key, value, duration) // Use go-cache's Set method
 }
-
 
 func adjustForDecimals(amount *big.Int, decimals int) *big.Int {
 	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
@@ -898,33 +900,24 @@ func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
 }
 
 // Fetch a single quote with caching and retries
-func fetchQuote(chainID int, srcToken, dstToken string, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
+func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
 
-	// Check cache
 	if cachedQuote, exists := getFromCache(cacheKey); exists {
 		log.Printf("Using cached quote for %s", cacheKey)
 		return cachedQuote.(map[string]interface{}), nil
 	}
 
-	// Construct API request
-	url := fmt.Sprintf("https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d&includeTokensInfo=true&includeProtocols=true&includeGas=true",
+	url := fmt.Sprintf("https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d",
 		chainID, srcToken, dstToken, amount, complexityLevel)
 
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", getEnv("ONEINCH_API_KEY", "")),
 	}
 
-	// Fetch quote with retries
-	log.Printf("Fetching quote for %s ➡️ %s, amount: %s", srcToken, dstToken, amount)
-	data, err := fetchWithRetries(url, headers, 3, 1*time.Second)
+	data, err := fetchWithRetries(url, headers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch quote for %s ➡️ %s: %v", srcToken, dstToken, err)
-	}
-
-	// Check response for non-200 status
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty response from quote API for %s ➡️ %s", srcToken, dstToken)
+		return nil, fmt.Errorf("failed to fetch quote for %s -> %s: %v", srcToken, dstToken, err)
 	}
 
 	var quote map[string]interface{}
@@ -932,25 +925,24 @@ func fetchQuote(chainID int, srcToken, dstToken string, amount string, complexit
 		return nil, fmt.Errorf("failed to parse quote response: %v", err)
 	}
 
-	// Cache the result
 	setToCache(cacheKey, quote)
 	return quote, nil
 }
 
 // Fetch multiple quotes concurrently with rate limiting
 func fetchMultipleQuotes(chainID int, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
-	limit := make(chan struct{}, 5) // Limit concurrency to 5
 	var wg sync.WaitGroup
 	results := make([]map[string]interface{}, len(tokenPairs))
 	errors := make([]error, len(tokenPairs))
 
+	limit := make(chan struct{}, 5) // Limit concurrency to 5
+
 	for i, pair := range tokenPairs {
 		wg.Add(1)
-		limit <- struct{}{} // Acquire a slot
+		limit <- struct{}{}
 		go func(i int, srcToken, dstToken string) {
 			defer wg.Done()
-			defer func() { <-limit }() // Release the slot
-
+			defer func() { <-limit }()
 			quote, err := fetchQuote(chainID, srcToken, dstToken, amount, complexityLevel, slippage)
 			if err != nil {
 				errors[i] = err
@@ -962,18 +954,15 @@ func fetchMultipleQuotes(chainID int, tokenPairs [][2]string, amount string, com
 
 	wg.Wait()
 
-	// Filter out any failed results
 	var validResults []map[string]interface{}
 	for i, res := range results {
 		if errors[i] == nil {
 			validResults = append(validResults, res)
-		} else {
-			log.Printf("Error fetching quote for pair %v: %v", tokenPairs[i], errors[i])
 		}
 	}
-
 	return validResults, nil
 }
+
 
 // Helper function to get environment variables with a default value
 func getEnv(key, defaultValue string) string {
