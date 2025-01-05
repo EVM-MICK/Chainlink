@@ -12,10 +12,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+        "bytes"
 	"strings"
 	"time"
         "strconv"
 	"math"
+        "runtime"
 	"errors"
         "sort"
 
@@ -2201,13 +2203,13 @@ func decodeTransactionData(data string, routerType string) (string, string, *big
     }
 
     // Extract and validate `tokenIn`
-    tokenIn, ok := args["tokenIn"].(common.Address)
+    tokenIn, ok := args["tokenIn"].(To common.Address)
     if !ok || !common.IsHexAddress(tokenIn.Hex()) {
         return "", "", nil, fmt.Errorf("invalid or missing tokenIn")
     }
 
     // Extract and validate `tokenOut`
-    tokenOut, ok := args["tokenOut"].(common.Address)
+    tokenOut, ok := args["tokenOut"].(To common.Address)
     if !ok || !common.IsHexAddress(tokenOut.Hex()) {
         return "", "", nil, fmt.Errorf("invalid or missing tokenOut")
     }
@@ -2291,8 +2293,8 @@ func processUniswapTransaction(methodName string, args map[string]interface{}) {
 
 	case "exactInputSingle":
 		params := args["params"].(map[string]interface{})
-		tokenIn := params["tokenIn"].(common.Address)
-		tokenOut := params["tokenOut"].(common.Address)
+		tokenIn := params["tokenIn"].(To common.Address)
+		tokenOut := params["tokenOut"].(To common.Address)
 		amountIn := params["amountIn"].(*big.Int)
 		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
 
@@ -2326,7 +2328,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 	case "swapExactTokensForTokens":
 		amountIn := args["amountIn"].(*big.Int)
 		amountOutMin := args["amountOutMin"].(*big.Int)
-		path := args["path"].([]common.Address)
+		path := args["path"].([]To common.Address)
 
 		decodedPath := decodePathSushi(path) // Decode path to token addresses
 
@@ -2336,7 +2338,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 	case "swapTokensForExactTokens":
 		amountOut := args["amountOut"].(*big.Int)
 		amountInMax := args["amountInMax"].(*big.Int)
-		path := args["path"].([]common.Address)
+		path := args["path"].([]To common.Address)
 
 		decodedPath := decodePathSushi(path) // Decode path to token addresses
 
@@ -2349,7 +2351,7 @@ func processSushiSwapTransaction(methodName string, args map[string]interface{})
 }
 
 // Helper function to decode SushiSwap path
-func decodePathSushi(path []common.Address) []string {
+func decodePathSushi(path []To common.Address) []string {
 	decodedPath := []string{}
 	for _, token := range path {
 		decodedPath = append(decodedPath, token.Hex())
@@ -2371,7 +2373,7 @@ func shutdownAll(ctx context.Context) {
 
 
 // Monitor mempool for pending transactions
-// Wrapper function to retry mempool monitoring with graceful shutdown
+
 func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
        wg.Add(1)
 	defer wg.Done()
@@ -2413,7 +2415,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 		// Retry logic for subscribing to pending transactions
 		subResult, err = Retry(func() (interface{}, error) {
 			pendingTxs := make(chan *types.Transaction)
-			sub, err := client.SubscribePendingTransactions(ctx, pendingTxs)
+			sub, err := client..EthSubscribe(ctx, pendingTxs)
 			if err != nil {
 				return nil, err
 			}
@@ -2728,7 +2730,7 @@ func handleClientMessages(client *WebSocketClient) {
 			}
 
 			// Handle valid messages (e.g., broadcast)
-			broadcastChannel <- string(message)
+			broadcastChannel <- []byte(message) // Correct type for byte array.
 		}
 	}
 }
@@ -2817,7 +2819,7 @@ func broadcastMessages() {
 
 		// Iterate over all clients and send messages
 		for client := range wsClients {
-			err := client.Conn.WriteMessage(websocket.TextMessage, message)
+			err := client.Conn.WriteMessage(websocket.TextMessage, []byte(message))
 			if err != nil {
 				log.Printf("Error broadcasting to client: %v. Removing client.", err)
 				client.Conn.Close()
@@ -2900,7 +2902,7 @@ func main() {
 	}
 
        // Graceful shutdown handling
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
