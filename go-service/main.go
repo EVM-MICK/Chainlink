@@ -61,7 +61,6 @@ var (
 	sushiSwapABI  abi.ABI
 )
 
-var CAPITAL *big.Int // Declare CAPITAL globally
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
@@ -747,7 +746,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 		return nil, fmt.Errorf("invalid route, must contain at least two tokens")
 	}
 
-	amountIn := new(big.Float).SetInt(CAPITAL) // Start with the full trading capital
+	amountIn := new(big.Int).Set(CAPITAL) // Start with the full trading capital
 	totalGasCost := new(big.Float)
 
 	for i := 0; i < len(route)-1; i++ {
