@@ -168,9 +168,9 @@ var (
 
 
 // Global cache instance for stable token data
-var stableTokenCache = cache.New(10*time.Minute, 15*time.Minute) // Default expiration and cleanup interval
-var tokenPriceCache = cache.New(10*time.Minute, 15*time.Minute)
-var orderBookCache = cache.New(10*time.Minute, 15*time.Minute)
+var stableTokenCache = cache.New(1*time.Minute, 15*time.Minute) // Default expiration and cleanup interval
+var tokenPriceCache = cache.New(1*time.Minute, 15*time.Minute)
+var orderBookCache = cache.New(1*time.Minute, 15*time.Minute)
 
 
 var (
@@ -796,6 +796,7 @@ if amountInFinal.Cmp(big.NewInt(0)) <= 0 {
 
 	log.Printf("Route %v did not meet the profit threshold.", route)
 	return nil, nil
+}
 }
 
 // Adjust for slippage
