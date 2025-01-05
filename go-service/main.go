@@ -2415,7 +2415,15 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 		// Retry logic for subscribing to pending transactions
 		subResult, err = Retry(func() (interface{}, error) {
 			pendingTxs := make(chan *types.Transaction)
-			sub, err := client.EthSubscribe(ctx, pendingTxs)
+			rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
+if err != nil {
+    return fmt.Errorf("failed to connect to RPC client: %v", err)
+}
+sub, err := rpcClient.Subscribe(ctx, ch, "newHeads")
+if err != nil {
+    return fmt.Errorf("failed to subscribe to newHeads: %v", err)
+}
+
 			if err != nil {
 				return nil, err
 			}
@@ -2550,11 +2558,11 @@ func estimateGas(route []string, CAPITAL *big.Int) (*big.Int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct transaction parameters: %v", err)
 	}
-
+         contractAddress := common.HexToAddress(os.Getenv("CONTRACT_ADDRESS"))
 	// Build call message
 	callMsg := ethereum.CallMsg{
 		From: common.HexToAddress(os.Getenv("WALLET_ADDRESS")),
-		To:   common.HexToAddress(os.Getenv("CONTRACT_ADDRESS")),
+		To:   &contractAddress,
 		Data: common.FromHex(params),
 	}
 
@@ -2696,7 +2704,7 @@ func monitorClientConnection(client *WebSocketClient) {
 
 	// Cleanup resources
 	clientsMutex.Lock()
-	delete(wsClients, client)
+	delete(wsClients, wsClients[client])
 	clientsMutex.Unlock()
 
 	client.RateLimiter.Stop()
@@ -2744,7 +2752,7 @@ func shutdownWebSocketServer() {
 	for client := range wsClients {
 		client.CancelFunc() // Signal all client contexts to cancel
 		client.Conn.Close() // Close WebSocket connection
-		delete(wsClients, client)
+		delete(wsClients, wsClients[client])
 	}
 
 	log.Println("All client connections closed.")
@@ -2777,7 +2785,7 @@ func cleanupInactiveClients() {
     for client := range wsClients {
         if client.Context.Err() != nil { // Context canceled
             client.Conn.Close()
-            delete(wsClients, client)
+            delete(wsClients, wsClients[client])
         }
     }
 }
@@ -2787,7 +2795,7 @@ func cleanupInactiveClients() {
 func handleMessages(client *WebSocketClient) {
 	defer func() {
 		clientsMutex.Lock()
-		delete(wsClients, client)
+		delete(wsClients, wsClients[client])
 		clientsMutex.Unlock()
 		client.RateLimiter.Stop() // Stop rate limiter for this client
 		client.Conn.Close()
@@ -2808,7 +2816,7 @@ func handleMessages(client *WebSocketClient) {
 		}
 
 		// Broadcast the received message to the channel
-		broadcastChannel <- string(message)
+		broadcastChannel <- []byte(message)
 	}
 }
 
@@ -2823,7 +2831,7 @@ func broadcastMessages() {
 			if err != nil {
 				log.Printf("Error broadcasting to client: %v. Removing client.", err)
 				client.Conn.Close()
-				delete(wsClients, client) // Remove stale client
+				delete(wsClients, wsClients[client]) // Remove stale client
 			}
 		}
 
@@ -2842,11 +2850,12 @@ func wsBroadcastManager() {
 
         for client := range wsClients {
             func(client *websocket.Conn) {
+                  wsConn := client.Conn
                 defer func() {
                     if r := recover(); r != nil {
                         log.Printf("Recovered from panic while sending WebSocket message: %v", r)
                         client.Close()
-                        delete(wsClients, client)
+                        delete(wsClients, wsClients[client])
                     }
                 }()
 
@@ -2855,7 +2864,7 @@ func wsBroadcastManager() {
                 if err != nil {
                     log.Printf("WebSocket send error: %v", err)
                     client.Close()
-                    delete(wsClients, client)
+                    delete(wsClients, wsClients[client])
                 }
             }(client)
         }
