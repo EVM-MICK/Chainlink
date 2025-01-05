@@ -2415,7 +2415,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 		// Retry logic for subscribing to pending transactions
 		subResult, err = Retry(func() (interface{}, error) {
 			pendingTxs := make(chan *types.Transaction)
-			sub, err := client..EthSubscribe(ctx, pendingTxs)
+			sub, err := client.EthSubscribe(ctx, pendingTxs)
 			if err != nil {
 				return nil, err
 			}
