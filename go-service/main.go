@@ -172,7 +172,9 @@ var (
 // Global cache instance for stable token data
 // Cache Initialization
 var stableTokenCache = cache.New(5*time.Minute, 10*time.Minute)
-var tokenPriceCache = cache.New(5*time.Minute, 10*time.Minute)
+var tokenPriceCache = &TokenPriceCache{
+    cache: make(map[string]interface{}),
+}
 var orderBookCache = cache.New(5*time.Minute, 10*time.Minute)
 
 var (
@@ -205,8 +207,8 @@ type StableTokenCache struct {
 
 // Cache structure for token prices
 type TokenPriceCache struct {
-	mu    sync.Mutex
-	cache map[string]CacheEntry
+    mu    sync.Mutex
+    cache map[string]interface{}
 }
 
 // Node represents a node in the priority queue
@@ -630,14 +632,24 @@ func getFromStableTokenCache(key string) (interface{}, bool) {
 }
 
 // Token Price Cache Functions
-func setToTokenPriceCache(key string, value interface{}) {
-    tokenPriceCache.Set(key, value, cache.DefaultExpiration)
+func setToTokenPriceCache(cacheKey string, data interface{}) {
+    tokenPriceCache.mu.Lock()
+    defer tokenPriceCache.mu.Unlock()
+    tokenPriceCache.cache[cacheKey] = data
+    go func() {
+        time.Sleep(time.Duration(tokenPriceCacheDuration) * time.Second)
+        tokenPriceCache.mu.Lock()
+        delete(tokenPriceCache.cache, cacheKey)
+        tokenPriceCache.mu.Unlock()
+    }()
 }
 
-func getFromTokenPriceCache(key string) (interface{}, bool) {
-    return tokenPriceCache.Get(key)
+func getFromTokenPriceCache(cacheKey string) (interface{}, bool) {
+    tokenPriceCache.mu.Lock()
+    defer tokenPriceCache.mu.Unlock()
+    cachedData, exists := tokenPriceCache.cache[cacheKey]
+    return cachedData, exists
 }
-
 
 
 // Callback for cache expiration (optional but useful for debugging)
@@ -1777,29 +1789,27 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     }
 
     // Step 5: Estimate gas
-    var gasEstimate *big.Int
-    if gasEstimate, err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
+    gasEstimate, err := retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
         return estimateGas(route, CAPITAL)
-    }); err != nil {
+    })
+    if err != nil {
         return fmt.Errorf("gas estimation failed: %w", err)
     }
 
-    // Convert `gasEstimate` to `uint64`
-    gasLimit := gasEstimate.Uint64()
-
     // Step 6: Execute transaction
+    gasLimit := gasEstimate.Uint64()
     tx := Transaction{
         From:     os.Getenv("WALLET_ADDRESS"),
         To:       os.Getenv("CONTRACT_ADDRESS"),
         Data:     params,
-        Gas:      gasLimit, // Use uint64 gas limit
+        Gas:      gasLimit,
         GasPrice: gasPrice,
     }
 
-    var receipt *Receipt
-    if receipt, err = retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
-        return sendTransaction(tx, os.Getenv("CONTRACT_ADDRESS"))
-    }); err != nil {
+    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+        return sendTransaction(tx, "token")
+    })
+    if err != nil {
         notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
         return fmt.Errorf("transaction execution failed: %w", err)
     }
@@ -1808,7 +1818,6 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
     return nil
 }
-
 
 // retryWithBackoff retries a function with exponential backoff.
 func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*big.Int, error)) (*big.Int, error) {
