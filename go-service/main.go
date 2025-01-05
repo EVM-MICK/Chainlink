@@ -17,6 +17,7 @@ import (
         "strconv"
 	"math"
 	"errors"
+        "sort"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -1801,24 +1802,23 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
         Gas:      gasEstimate.Uint64(),
         GasPrice: gasPrice,
     }
+receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+    return sendTransaction(tx, "token")
+})
+if err != nil {
+    notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
+    return fmt.Errorf("transaction execution failed: %w", err)
+}
 
-    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
-        return sendTransaction(tx, "token")
-    })
-    if err != nil {
-        notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
-        return fmt.Errorf("transaction execution failed: %w", err)
-    }
+log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
 
-    notifyNode("execution_success", fmt.Sprintf("Route executed: %v, TxHash: %s", route, receipt.TransactionHash))
-    log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
     return nil
 }
 
 
 // retryWithBackoff retries a function with exponential backoff.
-func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*big.Int, error)) (*big.Int, error) {
-    var result *big.Int
+func retryWithBackoff[T any](maxRetries int, initialBackoff time.Duration, fn func() (T, error)) (T, error) {
+    var result T
     var err error
     for i := 0; i < maxRetries; i++ {
         result, err = fn()
@@ -1827,7 +1827,7 @@ func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*
         }
         time.Sleep(initialBackoff * time.Duration(i+1))
     }
-    return nil, err
+    return result, err
 }
 
 
@@ -1968,30 +1968,23 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
 
 
 func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *big.Float, error) {
-	// Fetch token prices
-	prices, err := FetchTokenPrices([]string{srcToken, dstToken})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to fetch token prices: %v", err)
-	}
+    prices, err := FetchTokenPrices([]string{srcToken, dstToken})
+    if err != nil {
+        return nil, nil, fmt.Errorf("failed to fetch prices: %w", err)
+    }
 
-	srcPrice, srcExists := prices[srcToken]
-	dstPrice, dstExists := prices[dstToken]
-	if !srcExists || !dstExists {
-		return nil, nil, fmt.Errorf("missing price data for token pair %s -> %s", srcToken, dstToken)
-	}
+    srcPrice, srcExists := prices[srcToken]
+    dstPrice, dstExists := prices[dstToken]
+    if !srcExists || !dstExists {
+        return nil, nil, fmt.Errorf("price data missing for tokens")
+    }
 
-      if srcPrice, ok := prices[srcToken]; !ok {
-                return nil, nil, fmt.Errorf("missing price data for source token: %s", srcToken)
-      }
-	// Estimate liquidity
-	liquidity, err := estimateLiquidity(chainID, srcToken, dstToken)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to estimate liquidity for pair %s -> %s: %v", srcToken, dstToken, err)
-	}
+    liquidity, err := estimateLiquidity(chainID, srcToken, dstToken)
+    if err != nil {
+        return nil, nil, fmt.Errorf("failed to estimate liquidity: %w", err)
+    }
 
-	// Calculate price ratio
-	priceRatio := new(big.Float).Quo(big.NewFloat(srcPrice), big.NewFloat(dstPrice))
-	return priceRatio, liquidity, nil
+    return big.NewFloat(srcPrice / dstPrice), liquidity, nil
 }
 
 
@@ -2050,7 +2043,9 @@ func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, er
     bestAmount := new(big.Float).Set(low)
 
     for low.Cmp(high) <= 0 {
-        mid := new(big.Float).Add(low, high).Quo(new(big.Float).SetInt64(2))
+        
+        mid := new(big.Float).Add(low, high)
+        mid.Quo(mid, big.NewFloat(2))
         adjustedAmount, err := adjustForSlippage(mid, totalLiquidity)
         if err != nil || adjustedAmount.Cmp(big.NewFloat(0)) <= 0 {
             high = mid.Sub(mid, big.NewFloat(1))
@@ -2109,40 +2104,6 @@ func adjustMaxHops(maxHops int, avgLiquidity *big.Float) int {
 	return maxHops
 }
 
-// // EstimateLiquidity estimates the maximum liquidity for a trading pair
-// func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Int, error) {
-// 	orderBook, err := fetchOrderBookDepth(srcToken, dstToken)
-// 	if err != nil || orderBook.Liquidity == nil {
-// 		return nil, errors.New("liquidity data unavailable for " + srcToken + " ➡️ " + dstToken)
-// 	}
-
-// 	// Set binary search range
-// 	low := big.NewInt(1e18)   // 1 token (scaled to 18 decimals)
-// 	high := big.NewInt(1e24)  // 1 million tokens (scaled to 18 decimals)
-// 	bestAmount := new(big.Int).Set(low)
-
-// 	for low.Cmp(high) <= 0 {
-// 		mid := new(big.Int).Add(low, high)
-// 		mid.Div(mid, big.NewInt(2)) // mid = (low + high) / 2
-
-// 		// Adjust for slippage
-// 		adjustedAmount, err := adjustForSlippage(big.NewFloat(0).SetInt(mid), orderBook.Liquidity)
-// 		if err != nil {
-// 			log.Printf("Liquidity estimation failed: %v", err)
-// 			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
-// 			continue
-// 		}
-
-// 		if adjustedAmount.Cmp(big.NewFloat(0)) > 0 { // If adjustedAmount > 0
-// 			bestAmount.Set(mid)       // Update the best amount
-// 			low.Add(mid, big.NewInt(1)) // Move the lower bound up
-// 		} else {
-// 			high.Sub(mid, big.NewInt(1)) // Move the upper bound down
-// 		}
-// 	}
-
-// 	return bestAmount, nil
-// }
 
 
 func find(graph *Graph, startToken, endToken string) ([]string, *big.Int, error) {
@@ -2318,7 +2279,10 @@ func processUniswapTransaction(methodName string, args map[string]interface{}) {
 	case "exactInput":
 		params := args["params"].(map[string]interface{})
 		path := params["path"].([]byte) // Multi-hop path as a byte array
-		decodedPath := decodePath(path) // Decode path to token addresses
+		decodedPath, err := decodePath(path) // Decode path to token addresses
+                if err != nil {
+                 return fmt.Errorf("failed to decode path: %v", err)
+                }
 		amountIn := params["amountIn"].(*big.Int)
 		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
 
@@ -2342,37 +2306,18 @@ func processUniswapTransaction(methodName string, args map[string]interface{}) {
 
 // Helper function to decode Uniswap V3 path
 func decodePath(path []byte) ([]string, error) {
-	const addressLength = 20 // Each token address is 20 bytes
+    const addressLength = 20
+    if len(path)%addressLength != 0 {
+        return nil, fmt.Errorf("invalid path length")
+    }
 
-	// Validate that the path is not nil or empty
-	if path == nil || len(path) == 0 {
-		return nil, fmt.Errorf("path is empty or nil")
-	}
-
-	// Validate that the length of the path is a multiple of the address length
-	if len(path)%addressLength != 0 {
-		return nil, fmt.Errorf("invalid path length: %d (must be a multiple of %d)", len(path), addressLength)
-	}
-
-	decodedPath := []string{}
-
-	// Decode each 20-byte chunk as a token address
-	for i := 0; i+addressLength <= len(path); i += addressLength {
-		tokenBytes := path[i : i+addressLength]
-
-		// Validate that the bytes can form a valid Ethereum address
-		token := common.BytesToAddress(tokenBytes)
-		if !common.IsHexAddress(token.Hex()) {
-			return nil, fmt.Errorf("invalid token address at chunk %d: %x", i/addressLength, tokenBytes)
-		}
-
-		decodedPath = append(decodedPath, token.Hex())
-	}
-
-	return decodedPath, nil
+    decodedPath := make([]string, 0, len(path)/addressLength)
+    for i := 0; i < len(path); i += addressLength {
+        token := common.BytesToAddress(path[i : i+addressLength])
+        decodedPath = append(decodedPath, token.Hex())
+    }
+    return decodedPath, nil
 }
-
-
 
 
 // Process SushiSwap-specific transactions
@@ -2450,6 +2395,7 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
         // Declare variables
     var subResult interface{}
+    var clientResult interface{}
     var err error
 	// Retry logic for connecting to Ethereum client
 	clientResult, err = Retry(func() (interface{}, error) {
