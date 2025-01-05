@@ -809,7 +809,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Calculate net profit: final amount - starting capital - gas costs
-    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
+    netProfit := (new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
 
     // Log the route and profit for debugging
     log.Printf("Route evaluated: %v, Profit: %s wei", route, netProfit.String())
@@ -860,16 +860,13 @@ func setToCache(key string, value interface{}) {
     quoteCache.cache[key] = value
 }
 
-func getFromCache(key string) (map[string]interface{}, bool) {
+func getFromCache(key string) (interface{}, bool) {
     quoteCache.mu.Lock()
     defer quoteCache.mu.Unlock()
     value, exists := quoteCache.cache[key]
-    if !exists {
-        return nil, false
-    }
-    result, ok := value.(map[string]interface{})
-    return result, ok
+    return value, exists
 }
+
 
 // Get a value from the order book cache
 func getFromOrderBookCache(key string) (interface{}, bool) {
@@ -970,7 +967,6 @@ func fetchQuote(chainID int64, srcToken, dstToken, amount string, complexityLeve
 
     return quote, nil
 }
-
 
 // Fetch multiple quotes concurrently with rate limiting
 func fetchMultipleQuotes(chainID int64, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
@@ -1408,92 +1404,90 @@ func filterRoutes(routes []Route, chainID int64, startToken string, startAmount 
 
 
 func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
-	// Validate the start token address
-	if !common.IsHexAddress(startToken) {
-		return nil, fmt.Errorf("invalid start token address: %s", startToken)
-	}
-        
-       if startAmount.Cmp(big.NewInt(0)) <= 0 || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
-                  return nil, fmt.Errorf("startAmount and profitThreshold must be positive values")
+    // Validate the start token address
+    if !common.IsHexAddress(startToken) {
+        return nil, fmt.Errorf("invalid start token address: %s", startToken)
+    }
+
+    if startAmount.Cmp(big.NewInt(0)) <= 0 || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("startAmount and profitThreshold must be positive values")
+    }
+
+    // Fallback directly to hardcoded stable token addresses
+    validStableTokenAddresses := filterValidAddresses(hardcodedStableAddresses)
+    if len(validStableTokenAddresses) == 0 {
+        return nil, fmt.Errorf("no valid stable token addresses available")
+    }
+
+    // Generate token pairs and build the graph using real-time data
+    tokenPairs := generateTokenPairs(validStableTokenAddresses)
+    graph, err := BuildGraph(tokenPairs, chainID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to build graph: %v", err)
+    }
+
+    // Calculate average liquidity to adjust the max hops
+    averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, int(chainID), startToken)
+    if err != nil {
+        log.Fatalf("Failed to calculate average liquidity: %v", err)
+    }
+    log.Printf("Average Liquidity: %s", averageLiquidity.String())
+    maxHops = adjustMaxHops(maxHops, averageLiquidity)
+
+    var profitableRoutes []Route
+    var mu sync.Mutex
+    var wg sync.WaitGroup
+
+    // Iterate over all end tokens and find routes
+    for _, endToken := range validStableTokenAddresses {
+        if strings.EqualFold(endToken, startToken) {
+            continue
         }
 
-	// Fetch stable tokens dynamically or fallback to hardcoded list
-	stableTokens, err := getStableTokenList(int64(chainID))
-	if err != nil {
-		log.Printf("Error fetching stable tokens: %v. Using fallback tokens.", err)
-		stableTokens = fallbackStableTokens() // Fallback to hardcoded tokens
-	}
+        wg.Add(1)
+        go func(endToken string) {
+            defer wg.Done()
 
-	// Filter valid stable token addresses
-	validStableTokenAddresses := filterValidAddresses([]stableTokens)
-	if len(validStableTokenAddresses) == 0 {
-		return nil, fmt.Errorf("no valid stable token addresses available")
-	}
+            // Use Dijkstra's algorithm to find the shortest path
+            path, cost, err := ComputeOptimalRoute(graph, startToken, endToken)
+            if err != nil || len(path) <= 1 {
+                return
+            }
 
-	// Generate token pairs and build the graph using real-time data
-	tokenPairs := generateTokenPairs(validStableTokenAddresses)
-	graph, err := BuildGraph(tokenPairs, int64(chainID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to build graph: %v", err)
-	}
+            // Convert `cost` from *big.Float to *big.Int for compatibility
+            costInt := new(big.Int)
+            cost.Int(costInt)
 
-	// Calculate average liquidity to adjust the max hops
-	averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, int64(chainID), startToken)
-	if err != nil {
-		log.Fatalf("Failed to calculate average liquidity: %v", err)
-	}
-	log.Printf("Average Liquidity: %s", averageLiquidity.String())
-	maxHops = adjustMaxHops(maxHops, averageLiquidity)
+            // Calculate profit
+            profit := new(big.Int).Sub(startAmount, costInt)
+            if profit.Cmp(profitThreshold) > 0 {
+                mu.Lock()
+                profitableRoutes = append(profitableRoutes, Route{
+                    Path:   path,
+                    Profit: profit,
+                })
+                mu.Unlock()
+                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
+            }
+        }(endToken)
+    }
 
-	var profitableRoutes []Route
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+    wg.Wait()
 
-	// Iterate over all end tokens and find routes
-	for _, endToken := range validStableTokenAddresses {
-		if strings.EqualFold(endToken, startToken) {
-			continue
-		}
+    // Execute profitable routes
+    for _, route := range profitableRoutes {
+        if route.Profit.Cmp(MINIMUM_PROFIT_THRESHOLD) > 0 {
+            log.Printf("Executing profitable route: %v, Profit: %s", route.Path, route.Profit.String())
+            if err := executeRoute(route.Path, route.Profit); err != nil {
+                log.Printf("Failed to execute route: %v", err)
+            }
+        }
+    }
 
-		wg.Add(1)
-		go func(endToken string) {
-			defer wg.Done()
-
-			// Use Dijkstra's algorithm to find the shortest path
-			path, cost, err := ComputeOptimalRoute(graph, startToken, endToken)
-			if err != nil || len(path) <= 1 {
-				return
-			}
-
-			// Calculate profit
-			profit := new(big.Int).Sub(startAmount, cost)
-			if profit.Cmp(profitThreshold) > 0 {
-				mu.Lock()
-				profitableRoutes = append(profitableRoutes, Route{
-					Path:   path,
-					Profit: profit,
-				})
-				mu.Unlock()
-				log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-			}
-		}(endToken)
-	}
-
-	wg.Wait()
-
-	// Execute profitable routes
-	for _, route := range profitableRoutes {
-		if route.Profit.Cmp(MINIMUM_PROFIT_THRESHOLD) > 0 {
-			log.Printf("Executing profitable route: %v, Profit: %s", route.Path, route.Profit.String())
-			if err := executeRoute(route.Path, route.Profit); err != nil {
-				log.Printf("Failed to execute route: %v", err)
-			}
-		}
-	}
-
-	// Return sorted and limited routes
-	return sortAndLimitRoutes(profitableRoutes, 3), nil
+    // Return sorted and limited routes
+    return sortAndLimitRoutes(profitableRoutes, 3), nil
 }
+
 
 
 // FetchGasPrice fetches the current gas price with caching and retry logic
@@ -1951,7 +1945,7 @@ func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *
 }
 
 
-func calculateAverageLiquidity(tokens []string, chainID int, startToken string) (*big.Float, error) {
+func calculateAverageLiquidity(tokens []string, chainID int64, startToken string) (*big.Float, error) {
 	totalLiquidity := big.NewFloat(0)
 	count := 0
 
