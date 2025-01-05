@@ -363,7 +363,7 @@ func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
 		return ioutil.ReadAll(resp.Body)
 	}
 
-	result, err := Retry(operation, 3, 1*time.Second)
+	result, err = Retry(operation, 3, 1*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +515,7 @@ func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		result, err := operation()
+		result, err = operation()
 		if err == nil {
 			return result, nil
 		}
@@ -595,8 +595,7 @@ func getStableTokenList(chainID int) ([]Token, error) {
 	}
 
 	// Cache the response and return
-	//setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
-        setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
+	setToStableTokenCache(cacheKey, stableTokens)
 	log.Printf("Fetched stable token list: %+v", stableTokens)
 	return stableTokens, nil
 }
@@ -715,63 +714,84 @@ if newDistance.Cmp(distances[neighbor]) < 0 {
 }
 
 
+// calculateTotalGasCost calculates the total gas cost for a transaction.
+func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
+    // Ensure gas price and limit are valid
+    if gasPrice == nil || gasPrice.Cmp(big.NewInt(0)) <= 0 {
+        log.Println("Invalid gas price provided. Defaulting to 50 Gwei.")
+        gasPrice = big.NewInt(50 * 1e9) // Default to 50 Gwei
+    }
+
+    if gasLimit == 0 {
+        log.Println("Invalid gas limit provided. Defaulting to 800,000 units.")
+        gasLimit = DefaultGasEstimate // Default gas limit
+    }
+
+    // Calculate total gas cost = gas price * gas limit
+    totalGasCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
+
+    // Log for debugging
+    log.Printf("Calculated total gas cost: %s wei", totalGasCost.String())
+    return totalGasCost
+}
+
+
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
-	if len(route) < 2 {
-		return nil, fmt.Errorf("invalid route, must contain at least two tokens")
-	}
+    if len(route) < 2 {
+        return nil, fmt.Errorf("invalid route, must contain at least two tokens")
+    }
 
-	amountIn := new(big.Int).Set(CAPITAL) // Start with the full trading capital
-	totalGasCost := new(big.Float)
+    // Starting capital
+    amountIn := new(big.Int).Set(CAPITAL)
+    totalGasCost := new(big.Int) // Initialize for gas cost calculation
 
-	for i := 0; i < len(route)-1; i++ {
-		fromToken := route[i]
-		toToken := route[i+1]
+    // Loop through route and compute trade flow
+    for i := 0; i < len(route)-1; i++ {
+        fromToken := route[i]
+        toToken := route[i+1]
 
-		// Retrieve token data
-		fromData, ok := tokenPrices[fromToken]
-		if !ok {
-			return nil, fmt.Errorf("missing price data for token: %s", fromToken)
-		}
-		toData, ok := tokenPrices[toToken]
-		if !ok {
-			return nil, fmt.Errorf("missing price data for token: %s", toToken)
-		}
+        // Fetch price and liquidity data
+        fromData, ok := tokenPrices[fromToken]
+        if !ok {
+            return nil, fmt.Errorf("missing price data for token: %s", fromToken)
+        }
+        toData, ok := tokenPrices[toToken]
+        if !ok {
+            return nil, fmt.Errorf("missing price data for token: %s", toToken)
+        }
 
-		// Ensure liquidity is valid before calling adjustForSlippage
-		if fromData.Liquidity == nil || fromData.Liquidity.Cmp(big.NewFloat(0)) <= 0 {
-			return nil, fmt.Errorf("invalid liquidity for token: %s", fromToken)
-		}
+        // Adjust for slippage
+        adjustedAmount, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
+        if err != nil {
+            return nil, fmt.Errorf("slippage adjustment failed for token %s: %v", fromToken, err)
+        }
 
-		// Adjust trade size for slippage
-                amountInFloat := new(big.Float).SetInt(amountIn) // Convert *big.Int to *big.Float
-                 // Example correction for lines 772-793
-                 adjustedAmount, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
-                if err != nil {
-                  return nil, fmt.Errorf("slippage adjustment error: %v", err)
-                }
+        // Update the trading amount
+        amountIn = new(big.Int).Div(new(big.Int).Mul(new(big.Int).SetInt(adjustedAmount), toData.Price), fromData.Price)
 
-        // Convert adjustedAmount back to *big.Int for further calculations
-        adjustedInt := new(big.Int)
-        adjustedAmount.Int(adjustedInt)
- 
-        // Proceed with multiplication and division using *big.Float for consistency
-        amountInFloat := new(big.Float).SetInt(amountIn)
-        amountInFloat.Mul(amountInFloat, toData.Price)
-       amountInFloat.Quo(amountInFloat, fromData.Price)
+        // Calculate gas cost for this trade (use a constant gas limit per hop)
+        hopGasCost := calculateTotalGasCost(new(big.Int).Set(gasPrice), DefaultGasEstimate)
+        totalGasCost.Add(totalGasCost, hopGasCost)
 
-         // Convert final amountInFloat back to *big.Int
-       amountInFinal := new(big.Int)
-     amountInFloat.Int(amountInFinal)
+        // Ensure remaining amount is positive
+        if amountIn.Cmp(big.NewInt(0)) <= 0 {
+            return nil, fmt.Errorf("trade resulted in zero or negative amount after hop %s -> %s", fromToken, toToken)
+        }
+    }
 
-// Ensure amount remains positive
-if amountInFinal.Cmp(big.NewInt(0)) <= 0 {
-    return nil, fmt.Errorf("negative or zero output at hop: %s -> %s", fromToken, toToken)
-}
+    // Calculate net profit: final amount - starting capital - gas costs
+    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
 
-	log.Printf("Route %v did not meet the profit threshold.", route)
-	return nil, nil
-}
+    // Log the route and profit for debugging
+    log.Printf("Route evaluated: %v, Profit: %s wei", route, netProfit.String())
+
+    if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
+        log.Printf("Route did not meet the profit threshold.")
+        return nil, nil
+    }
+
+    return netProfit, nil
 }
 
 // Adjust for slippage
@@ -878,11 +898,19 @@ func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
 func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
     cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
 
-    // Check cache first
-    if cachedQuote, exists := getFromCache(cacheKey); exists {
-        log.Printf("Using cached quote for %s", cacheKey)
-        return cachedQuote.(map[string]interface{}), nil
-    }
+    // // Check cache first
+    // if cachedQuote, exists := getFromCache(cacheKey); exists {
+    //     log.Printf("Using cached quote for %s", cacheKey)
+    //     return cachedQuote.(map[string]interface{}), nil
+    // }
+
+
+if cachedQuote, ok := getFromCache["cacheKey"].(string); ok {
+    log.Println("Cached value:", value)
+     return cachedQuote.(map[string]interface{})
+} else {
+    log.Println("Value not found in cache or invalid type")
+}
 
     // Construct the request URL
     url := fmt.Sprintf(
@@ -956,24 +984,32 @@ func getEnv(key, defaultValue string) string {
 
 // Helper to set cache with expiration
 func cacheSetOrderBook(key string, value interface{}, duration time.Duration) {
-	orderBookCache.mu.Lock()
-	defer orderBookCache.mu.Unlock()
-	orderBookCache.cache[key] = CacheEntry{
-		data:      value,
-		timestamp: time.Now().Add(duration),
-	}
+    if orderBookCache == nil {
+        log.Println("Order book cache is not initialized.")
+        return
+    }
+
+    // Use go-cache's Set method
+    orderBookCache.Set(key, value, duration)
+    log.Printf("Order book cache set: key=%s, expiration=%v", key, duration)
 }
 
 // Helper to get value from cache
 func cacheGetOrderBook(key string) (interface{}, bool) {
-	orderBookCache.mu.Lock()
-	defer orderBookCache.mu.Unlock()
-	entry, exists := orderBookCache.cache[key]
-	if exists && time.Now().Before(entry.timestamp) {
-		return entry.data, true
-	}
-	delete(orderBookCache.cache, key) // Remove expired entry
-	return nil, false
+    if orderBookCache == nil {
+        log.Println("Order book cache is not initialized.")
+        return nil, false
+    }
+
+    // Use go-cache's Get method
+    data, found := orderBookCache.Get(key)
+    if found {
+        log.Printf("Order book cache hit: key=%s, data=%v", key, data)
+        return data, true
+    }
+
+    log.Printf("Order book cache miss: key=%s", key)
+    return nil, false
 }
 
 // Fetch order book depth with retries and caching
@@ -1082,7 +1118,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 		return ioutil.ReadAll(resp.Body)
 	}
 
-	result, err := Retry(operation, 3, time.Second)
+	result, err = Retry(operation, 3, time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -2243,7 +2279,7 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 // Main function for monitoring mempool with retryable connection and subscription logic
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
 	// Retry logic for connecting to Ethereum client
-	clientResult, err := Retry(func() (interface{}, error) {
+	clientResult, err = Retry(func() (interface{}, error) {
 		return ethclient.Dial(rpcURL)
 	}, 3, 2*time.Second)
 	if err != nil {
@@ -2256,7 +2292,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 
 	for {
 		// Retry logic for subscribing to pending transactions
-		subResult, err := Retry(func() (interface{}, error) {
+		subResult, err = Retry(func() (interface{}, error) {
 			pendingTxs := make(chan *types.Transaction)
 			sub, err := client.SubscribePendingTransactions(ctx, pendingTxs)
 			if err != nil {
