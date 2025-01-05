@@ -1760,11 +1760,9 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     const maxRetries = 3
     const initialBackoff = time.Second
 
-    var gasPrice *big.Int
-    var err error
-
     // Step 1: Fetch gas price
-    if gasPrice, err = retryWithBackoff(maxRetries, initialBackoff, fetchGasPrice); err != nil {
+    gasPrice, err := retryWithBackoff(maxRetries, initialBackoff, fetchGasPrice)
+    if err != nil {
         return fmt.Errorf("failed to fetch gas price: %w", err)
     }
 
@@ -1775,7 +1773,7 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     }
 
     // Step 3: Approve tokens
-    if err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
+    if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
         return approveTokensNode(route, scaledAmount)
     }); err != nil {
         return fmt.Errorf("token approval failed: %w", err)
@@ -1796,16 +1794,15 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     }
 
     // Step 6: Execute transaction
-    gasLimit := gasEstimate.Uint64()
     tx := Transaction{
         From:     os.Getenv("WALLET_ADDRESS"),
         To:       os.Getenv("CONTRACT_ADDRESS"),
         Data:     params,
-        Gas:      gasLimit,
+        Gas:      gasEstimate.Uint64(),
         GasPrice: gasPrice,
     }
 
-    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
+    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
         return sendTransaction(tx, "token")
     })
     if err != nil {
@@ -1817,6 +1814,7 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
     return nil
 }
+
 
 // retryWithBackoff retries a function with exponential backoff.
 func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*big.Int, error)) (*big.Int, error) {
@@ -1835,24 +1833,27 @@ func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*
 
 // Helper function to set cache with expiration for token prices
 func cacheSetTokenPrices(key string, value interface{}, duration time.Duration) {
-	tokenPriceCache.mu.Lock()
-	defer tokenPriceCache.mu.Unlock()
-	tokenPriceCache.cache[key] = CacheEntry{
-		data:      value,
-		timestamp: time.Now().Add(duration),
-	}
+    tokenPriceCache.mu.Lock()
+    defer tokenPriceCache.mu.Unlock()
+    tokenPriceCache.cache[key] = CacheEntry{
+        Data:      value,
+        Timestamp: time.Now().Add(duration),
+    }
 }
 
 // Helper function to get cache for token prices
 func cacheGetTokenPrices(key string) (interface{}, bool) {
-	tokenPriceCache.mu.Lock()
-	defer tokenPriceCache.mu.Unlock()
-	entry, exists := tokenPriceCache.cache[key]
-	if exists && time.Now().Before(cachedEntry.Timestamp) {
-		return cachedEntry.Data, true
-	}
-	delete(tokenPriceCache.cache, key) // Remove expired entry
-	return nil, false
+    tokenPriceCache.mu.Lock()
+    defer tokenPriceCache.mu.Unlock()
+    entry, exists := tokenPriceCache.cache[key]
+    if exists {
+        cachedEntry := entry.(CacheEntry)
+        if time.Now().Before(cachedEntry.Timestamp) {
+            return cachedEntry.Data, true
+        }
+    }
+    delete(tokenPriceCache.cache, key) // Remove expired entry
+    return nil, false
 }
 
 // Helper function to fetch token prices with retries
