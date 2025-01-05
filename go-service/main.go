@@ -168,10 +168,10 @@ var (
 
 
 // Global cache instance for stable token data
-var stableTokenCache = cache.New(1*time.Minute, 15*time.Minute) // Default expiration and cleanup interval
-var tokenPriceCache = cache.New(1*time.Minute, 15*time.Minute)
-var orderBookCache = cache.New(1*time.Minute, 15*time.Minute)
-
+// Cache Initialization
+var stableTokenCache = cache.New(5*time.Minute, 10*time.Minute)
+var tokenPriceCache = cache.New(5*time.Minute, 10*time.Minute)
+var orderBookCache = cache.New(5*time.Minute, 10*time.Minute)
 
 var (
 	hardcodedStableAddresses = []string{
@@ -609,22 +609,19 @@ func fallbackStableTokens() []Token {
 
 // Helper functions for caching
 func getFromStableTokenCache(key string) (interface{}, bool) {
-	// Retrieve the entry from go-cache
-	data, found := stableTokenCache.Get(key)
-	if !found {
-		log.Printf("Cache miss for key: %s", key)
-		return nil, false
-	}
-
-	log.Printf("Cache hit for key: %s", key)
-	return data, true
+    return stableTokenCache.Get(key)
 }
 
-// func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
-// 	// Add entry to go-cache with a specific expiration duration
-// 	stableTokenCache.Set(key, value, duration)
-// 	log.Printf("Added key: %s to cache with expiration: %v", key, duration)
-// }
+// Token Price Cache Functions
+func setToTokenPriceCache(key string, value interface{}) {
+    tokenPriceCache.Set(key, value, cache.DefaultExpiration)
+}
+
+func getFromTokenPriceCache(key string) (interface{}, bool) {
+    return tokenPriceCache.Get(key)
+}
+
+
 
 // Callback for cache expiration (optional but useful for debugging)
 func setupCacheExpirationLogging() {
@@ -651,32 +648,10 @@ func init() {
      log.Println("Uniswap and SushiSwap ABIs successfully loaded.")
 }
 
-func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
-	stableTokenCache.Set(key, value, duration)
-	defer stableTokenCache.Set(key, value, duration)
-	stableTokenCache.Set(key, value, cache.DefaultExpiration) = CacheEntry{
-		data:      value,
-		timestamp: time.Now().Add(duration),
-	}
+func setToStableTokenCache(key string, value interface{}) {
+    stableTokenCache.Set(key, value, cache.DefaultExpiration)
 }
 
-
-// Pop removes and returns the node with the highest priority
-// func (pq *PriorityQueue) Pop() interface{} {
-// 	old := *pq
-// 	n := len(old)
-// 	node := old[n-1]
-// 	old[n-1] = nil // Avoid memory leak
-// 	node.Index = -1
-// 	*pq = old[0 : n-1]
-// 	return node
-// }
-
-// // Update modifies the priority of a node in the queue
-// func (pq *PriorityQueue) Update(node *Node, priority float64) {
-// 	node.Priority = priority
-// 	heap.Fix(pq, node.Index)
-// }
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string) ([]string, *big.Float, error) {
@@ -831,40 +806,30 @@ func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 
 // Set a value in the cache
 func setToCache(key string, value interface{}) {
-	quoteCache.mu.Lock()
-	defer quoteCache.mu.Unlock()
-	if quoteCache.cache == nil { // Initialize the cache if nil
-		quoteCache.cache = make(map[string]interface{})
-	}
-	quoteCache.cache[key] = value
+    quoteCache.mu.Lock()
+    defer quoteCache.mu.Unlock()
+    quoteCache.cache[key] = value
 }
 
-// Get a value from the cache
-func getFromCache(key string) (interface{}, bool) {
-	quoteCache.mu.Lock()
-	defer quoteCache.mu.Unlock()
-	if quoteCache.cache == nil { // Check if the cache is initialized
-		return nil, false
-	}
-	value, exists := quoteCache.cache[key]
-	return value, exists
+func getFromCache(key string) (map[string]interface{}, bool) {
+    quoteCache.mu.Lock()
+    defer quoteCache.mu.Unlock()
+    value, exists := quoteCache.cache[key]
+    if !exists {
+        return nil, false
+    }
+    result, ok := value.(map[string]interface{})
+    return result, ok
 }
 
 // Get a value from the order book cache
 func getFromOrderBookCache(key string) (interface{}, bool) {
-    if orderBookCache == nil {
-        return nil, false
-    }
-    return orderBookCache.Get(key) // Ensure `orderBookCache` is properly initialized elsewhere
+    return orderBookCache.Get(key)
 }
 
 // Set a value in the order book cache
-func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
-    if orderBookCache == nil {
-        log.Println("Order book cache not initialized.")
-        return
-    }
-    orderBookCache.Set(key, value, duration)
+func setToOrderBookCache(key string, value interface{}) {
+    orderBookCache.Set(key, value, cache.DefaultExpiration)
 }
 
 // Adjust for decimals
@@ -875,35 +840,38 @@ func adjustForDecimals(amount *big.Int, decimals int) *big.Int {
 
 // Helper function for exponential backoff retries
 func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
-    operation := func() (interface{}, error) {
+    backoff := time.Second
+    for i := 0; i < 3; i++ {
         req, err := http.NewRequest("GET", url, nil)
         if err != nil {
-            return nil, err
+            return nil, fmt.Errorf("failed to create request: %v", err)
         }
-
         for key, value := range headers {
             req.Header.Set(key, value)
         }
 
-        client := &http.Client{}
-        resp, err := client.Do(req)
+        resp, err := http.DefaultClient.Do(req)
         if err != nil {
-            return nil, err
+            log.Printf("Request failed: %v. Retrying...", err)
+            time.Sleep(backoff)
+            backoff *= 2
+            continue
         }
         defer resp.Body.Close()
 
-        if resp.StatusCode != http.StatusOK {
-            return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+        if resp.StatusCode == http.StatusOK {
+            return ioutil.ReadAll(resp.Body)
         }
 
-        return ioutil.ReadAll(resp.Body)
+        if resp.StatusCode == 429 {
+            log.Println("Rate limit exceeded. Retrying...")
+            time.Sleep(backoff)
+            backoff *= 2
+        } else {
+            return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+        }
     }
-
-    result, err := Retry(operation, 3, time.Second)
-    if err != nil {
-        return nil, err
-    }
-    return result.([]byte), nil
+    return nil, fmt.Errorf("failed to fetch data after retries")
 }
 
 // Fetch a single quote with caching and retries
@@ -1523,62 +1491,23 @@ func sendTransaction(tx Transaction, token string) (*Receipt, error) {
 }
 
 // FetchTokenPrices fetches prices for tokens using concurrent API calls
-func FetchTokenPrices(tokenAddresses []string) (map[string]float64, error) {
-	if len(tokenAddresses) == 0 {
-		log.Println("No token addresses provided to FetchTokenPrices.")
-		return nil, nil
-	}
+func FetchTokenPrices(tokens []string) (map[string]float64, error) {
+    cacheKey := strings.Join(tokens, ",")
+    if cachedData, exists := getFromTokenPriceCache(cacheKey); exists {
+        return cachedData.(map[string]float64), nil
+    }
 
-	cacheKey := strings.Join(tokenAddresses, ",")
-	if cachedData, exists := cacheGetTokenPrices(cacheKey); exists {
-		log.Println("Using cached token prices.")
-		return cachedData.(map[string]float64), nil
-	}
-
-	prices := make(map[string]float64)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	// Divide token addresses into batches
-	batchSize := 4
-	for i := 0; i < len(tokenAddresses); i += batchSize {
-		batch := tokenAddresses[i:min(i+batchSize, len(tokenAddresses))]
-
-		wg.Add(1)
-		go func(batch []string) {
-			defer wg.Done()
-
-			url := fmt.Sprintf("https://api.1inch.dev/prices/v1.1/%s", strings.Join(batch, ","))
-			headers := map[string]string{
-				"Authorization": fmt.Sprintf("Bearer %s", getEnv("ONEINCH_API_KEY", "")),
-				"Accept":        "application/json",
-			}
-
-			responseData, err := fetchWithRetryTokenPrices(url, headers, time.Second)
-			if err != nil {
-				log.Printf("Error fetching token prices for batch %v: %v", batch, err)
-				return
-			}
-
-			var result map[string]float64
-			if err := json.Unmarshal(responseData, &result); err != nil {
-				log.Printf("Failed to parse token prices response: %v", err)
-				return
-			}
-
-			mu.Lock()
-			for key, value := range result {
-				prices[key] = value
-			}
-			mu.Unlock()
-		}(batch)
-	}
-
-	wg.Wait()
-
-	// Cache the fetched prices
-	cacheSetTokenPrices(cacheKey, prices, tokenPriceCacheDuration*time.Second)
-	return prices, nil
+    prices := make(map[string]float64)
+    for _, token := range tokens {
+        price, err := fetchTokenPrice(token)
+        if err != nil {
+            log.Printf("Failed to fetch price for token %s: %v", token, err)
+            continue
+        }
+        prices[token] = price
+    }
+    setToTokenPriceCache(cacheKey, prices)
+    return prices, nil
 }
 
 // FetchTokenPricesAcrossProtocols fetches prices for tokens across multiple protocols
@@ -1786,38 +1715,24 @@ func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
 
     for _, pair := range tokenPairs {
-        // Validate source and destination token addresses
-        if !common.IsHexAddress(pair.SrcToken) || !common.IsHexAddress(pair.DstToken) {
-            log.Printf("Skipping invalid token pair: %s -> %s", pair.SrcToken, pair.DstToken)
-            continue
-        }
-
-        // Fetch token prices and liquidity
         price, liquidity, err := fetchTokenPairData(pair.SrcToken, pair.DstToken, chainID)
         if err != nil {
-            log.Printf("Error fetching data for pair %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
+            log.Printf("Skipping pair %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
             continue
         }
-
-        // Compute edge weight based on adjustable metrics
-        weight := calculateWeight(price, liquidity)
 
         if graph.AdjacencyList[pair.SrcToken] == nil {
             graph.AdjacencyList[pair.SrcToken] = make(map[string]EdgeWeight)
         }
 
-        // Add weighted edge to the graph
         graph.AdjacencyList[pair.SrcToken][pair.DstToken] = EdgeWeight{
-            Weight:    weight,
+            Weight:    calculateWeight(price, liquidity),
             Liquidity: liquidity,
         }
-
-        log.Printf("Edge added: %s -> %s, Weight: %f, Liquidity: %f",
-            pair.SrcToken, pair.DstToken, weight, liquidity)
     }
-
     return graph, nil
 }
+
 
 // Dynamic weight calculation function
 func calculateWeight(price, liquidity *big.Float) *big.Float {
@@ -1914,47 +1829,33 @@ func calculateAverageLiquidity(tokens []string, chainID int, startToken string) 
 }
 
 func estimateLiquidity(chainID int, srcToken, dstToken string) (*big.Float, error) {
-	// Fetch the order book using fetchOrderBookDepth
-	orderBook, err := fetchOrderBookDepth(srcToken, dstToken, chainID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch order book for %s -> %s: %v", srcToken, dstToken, err)
-	}
+    orderBook, err := fetchOrderBookDepth(srcToken, dstToken, chainID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch order book: %v", err)
+    }
 
-	if len(orderBook) == 0 {
-		return nil, fmt.Errorf("no orders available for %s -> %s", srcToken, dstToken)
-	}
+    totalLiquidity := orderBookLiquidity(orderBook)
+    if totalLiquidity.Cmp(big.NewFloat(0)) <= 0 {
+        return nil, fmt.Errorf("no liquidity available for %s -> %s", srcToken, dstToken)
+    }
 
-	// Extract liquidity data from the order book
-	totalLiquidity := orderBookLiquidity(orderBook)
-	if totalLiquidity.Cmp(big.NewFloat(0)) <= 0 {
-		return nil, fmt.Errorf("invalid total liquidity for %s -> %s", srcToken, dstToken)
-	}
+    low := big.NewFloat(1e18) // Minimum trade size
+    high := big.NewFloat(1e24) // Maximum trade size
+    bestAmount := new(big.Float).Set(low)
 
-	// Binary search to find the best amount
-	low := big.NewFloat(1e18) // Minimum trade size
-	high := big.NewFloat(1e24)
-	bestAmount := new(big.Float).Set(low)
-
-	for low.Cmp(high) <= 0 {
-		mid := new(big.Float).Add(low, high).Quo(new(big.Float).Add(low, high), big.NewFloat(2))
-
-		adjustedAmount, err := adjustForSlippage(mid, totalLiquidity)
-		if err != nil {
-			log.Printf("Slippage adjustment failed for %s -> %s at amount %s: %v", srcToken, dstToken, mid.String(), err)
-			high.Sub(mid, big.NewFloat(1))
-			continue
-		}
-
-		if adjustedAmount.Cmp(big.NewFloat(0)) > 0 {
-			bestAmount.Set(mid)
-			low.Add(mid, big.NewFloat(1))
-		} else {
-			high.Sub(mid, big.NewFloat(1))
-		}
-	}
-
-	return bestAmount, nil
+    for low.Cmp(high) <= 0 {
+        mid := new(big.Float).Add(low, high).Quo(new(big.Float).SetInt64(2))
+        adjustedAmount, err := adjustForSlippage(mid, totalLiquidity)
+        if err != nil || adjustedAmount.Cmp(big.NewFloat(0)) <= 0 {
+            high = mid.Sub(mid, big.NewFloat(1))
+        } else {
+            bestAmount.Set(mid)
+            low = mid.Add(mid, big.NewFloat(1))
+        }
+    }
+    return bestAmount, nil
 }
+
 
 func orderBookLiquidity(orderBook []interface{}) *big.Float {
     totalLiquidity := big.NewFloat(0)
@@ -2102,43 +2003,6 @@ func max(a, b int) int {
 	}
 	return b
 }
-
-// func BuildGraph(tokenPairs []TokenPair, chainID int64) (Graph, error) {
-// 	graph := make(Graph)
-
-// 	for _, pair := range tokenPairs {
-// 		orders, err := fetchOrderBookDepth(pair.SrcToken, pair.DstToken, int(chainID))
-// 		if err != nil {
-// 			log.Printf("Error fetching order book for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
-// 			continue
-// 		}
-
-// 		if len(orders) == 0 {
-// 			log.Printf("No orders found for %s -> %s. Skipping.", pair.SrcToken, pair.DstToken)
-// 			continue
-// 		}
-
-// 		bestOrder, err := findBestOrder(orders)
-// 		if err != nil {
-// 			log.Printf("Error finding best order for %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
-// 			continue
-// 		}
-
-// 		// Calculate the weight (e.g., price or inverse liquidity)
-// 		makingAmount := bestOrder["makingAmount"].(float64) // Replace with actual parsing logic
-// 		takingAmount := bestOrder["takingAmount"].(float64)
-// 		weight := takingAmount / makingAmount
-
-// 		if _, exists := graph[pair.SrcToken]; !exists {
-// 			graph[pair.SrcToken] = make(map[string]float64)
-// 		}
-// 		graph[pair.SrcToken][pair.DstToken] = weight
-
-// 		log.Printf("Edge added: %s -> %s, weight: %f", pair.SrcToken, pair.DstToken, weight)
-// 	}
-
-// 	return graph, nil
-// }
 
 
 // Decode transaction data (replace this ABI decoding logic with your contract's ABI)
@@ -2655,12 +2519,13 @@ func generateSessionID() string {
 }
 
 func logMemoryUsage() {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
+    var memStats runtime.MemStats
+    runtime.ReadMemStats(&memStats)
 
-	log.Printf("Memory Usage: Alloc = %v KB, TotalAlloc = %v KB, Sys = %v KB, NumGC = %v",
-		memStats.Alloc/1024, memStats.TotalAlloc/1024, memStats.Sys/1024, memStats.NumGC)
+    log.Printf("Memory Usage: Alloc = %v KB, TotalAlloc = %v KB, Sys = %v KB, NumGC = %v",
+        memStats.Alloc/1024, memStats.TotalAlloc/1024, memStats.Sys/1024, memStats.NumGC)
 }
+
 
 
 
@@ -2749,17 +2614,17 @@ func monitorSystemHealth() {
 }
 
 func cleanupInactiveClients() {
-	clientsMutex.Lock()
-	defer clientsMutex.Unlock()
+    clientsMutex.Lock()
+    defer clientsMutex.Unlock()
 
-	for client := range wsClients {
-		if client.Context.Err() != nil { // Check if the context is done
-			log.Printf("Removing inactive WebSocket client.")
-			client.Conn.Close()
-			delete(wsClients, client)
-		}
-	}
+    for client := range wsClients {
+        if client.Context.Err() != nil { // Context canceled
+            client.Conn.Close()
+            delete(wsClients, client)
+        }
+    }
 }
+
 
 // Handle messages from a WebSocket client
 func handleMessages(client *WebSocketClient) {
