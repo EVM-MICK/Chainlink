@@ -65,6 +65,8 @@ var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per sec
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
 
+const oneInchPriceAPI = "https://api.1inch.dev/price/v1.1/42161"
+
 const UniswapV3RouterABI = `[
   {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
   {"inputs":[{"components":[{"internalType":"bytes","name":"path","type":"bytes"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"}],"internalType":"struct ISwapRouter.ExactInputParams","name":"params","type":"tuple"}],"name":"exactInput","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"},
@@ -1416,7 +1418,13 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Fallback directly to hardcoded stable token addresses
-    validStableTokenAddresses := filterValidAddresses(hardcodedStableAddresses)
+   // Convert hardcodedStableAddresses to StableToken format
+stableTokens := make([]StableToken, len(hardcodedStableAddresses))
+for i, addr := range hardcodedStableAddresses {
+    stableTokens[i] = StableToken{Address: addr}
+}
+validStableTokenAddresses := filterValidAddresses(stableTokens)
+
     if len(validStableTokenAddresses) == 0 {
         return nil, fmt.Errorf("no valid stable token addresses available")
     }
@@ -1429,7 +1437,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Calculate average liquidity to adjust the max hops
-    averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, int(chainID), startToken)
+   averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, chainID, startToken)
     if err != nil {
         log.Fatalf("Failed to calculate average liquidity: %v", err)
     }
@@ -1584,9 +1592,10 @@ func validateEnvVars(requiredVars []string) error {
 
 func sendTransaction(tx Transaction, token string) (*Receipt, error) {
 	// Validate required environment variables
-	if err := validateEnvVars(); err != nil {
-		return nil, fmt.Errorf("environment validation failed: %v", err)
-	}
+	requiredVars := []string{"ONEINCH_API_KEY", "INFURA_URL", "PRIVATE_KEY"}
+          if err := validateEnvVars(requiredVars); err != nil {
+              log.Fatalf("Environment validation failed: %v", err)
+        }
 
 	// Use shared Ethereum client
 	client, err := getEthClient()
@@ -1668,6 +1677,38 @@ func FetchTokenPrices(tokens []string) (map[string]float64, error) {
     return prices, nil
 }
 
+// Fetch token price from the 1inch API
+func fetchTokenPrice(token string) (float64, error) {
+	// Construct the API URL
+	url := fmt.Sprintf("%s/%s", oneInchPriceAPI, token)
+
+	// Add a delay to respect the 1rps rate limit
+	time.Sleep(time.Second)
+
+	// Make the API request
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch token price: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for non-200 status code
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return 0, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse the JSON response
+	var result struct {
+		Price float64 `json:"price"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to parse token price response: %w", err)
+	}
+
+	return result.Price, nil
+}
+
 // FetchTokenPricesAcrossProtocols fetches prices for tokens across multiple protocols
 func FetchTokenPricesAcrossProtocols(tokens []string, chainID int64) (map[string]map[string]interface{}, error) {
 	if len(tokens) == 0 {
@@ -1705,84 +1746,82 @@ func FetchTokenPricesAcrossProtocols(tokens []string, chainID int64) (map[string
 }
 
 func executeRoute(route []string, CAPITAL *big.Int) error {
-	const maxRetries = 3
-	const initialBackoff = time.Second
+    const maxRetries = 3
+    const initialBackoff = time.Second
 
-	var gasPrice *big.Int
-	var err error
+    var gasPrice *big.Int
+    var err error
 
-	// Step 1: Fetch gas price
-	if gasPrice, err = retryWithBackoff(maxRetries, initialBackoff, fetchGasPrice); err != nil {
-		return fmt.Errorf("failed to fetch gas price: %w", err)
-	}
+    // Step 1: Fetch gas price
+    if gasPrice, err = retryWithBackoff(maxRetries, initialBackoff, fetchGasPrice); err != nil {
+        return fmt.Errorf("failed to fetch gas price: %w", err)
+    }
 
-	// Step 2: Adjust trade size
-	scaledAmount, err := adjustTradeSizeForGas(CAPITAL, gasPrice)
-	if err != nil {
-		return fmt.Errorf("failed to adjust trade size: %w", err)
-	}
+    // Step 2: Adjust trade size
+    scaledAmount, err := adjustTradeSizeForGas(CAPITAL, gasPrice)
+    if err != nil {
+        return fmt.Errorf("failed to adjust trade size: %w", err)
+    }
 
-	// Step 3: Approve tokens
-	if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
-		return approveTokensNode(route, scaledAmount)
-	}); err != nil {
-		return fmt.Errorf("token approval failed: %w", err)
-	}
+    // Step 3: Approve tokens
+    if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
+        return approveTokensNode(route, scaledAmount)
+    }); err != nil {
+        return fmt.Errorf("token approval failed: %w", err)
+    }
 
-	// Step 4: Construct transaction parameters
-	params, err := constructParams(route, scaledAmount, nil)
-	if err != nil {
-		return fmt.Errorf("failed to construct transaction parameters: %w", err)
-	}
+    // Step 4: Construct transaction parameters
+    params, err := constructParams(route, scaledAmount, "")
+    if err != nil {
+        return fmt.Errorf("failed to construct transaction parameters: %w", err)
+    }
 
-	// Step 5: Estimate gas
-	var gasEstimate *big.Int
-	if gasEstimate, err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
-		return estimateGas(params)
-	}); err != nil {
-		return fmt.Errorf("gas estimation failed: %w", err)
-	}
+    // Step 5: Estimate gas
+    var gasEstimate *big.Int
+    if gasEstimate, err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
+        return estimateGas(route, CAPITAL)
+    }); err != nil {
+        return fmt.Errorf("gas estimation failed: %w", err)
+    }
 
-	// Step 6: Execute transaction
-	tx := Transaction{
-		From:     os.Getenv("WALLET_ADDRESS"),
-		To:       os.Getenv("CONTRACT_ADDRESS"),
-		Data:     params,
-		Gas:      gasEstimate,
-		GasPrice: gasPrice,
-	}
+    // Convert `gasEstimate` to `uint64`
+    gasLimit := gasEstimate.Uint64()
 
-	var receipt *Receipt
-	if receipt, err = retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
-		return sendTransaction(tx)
-	}); err != nil {
-		notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
-		return fmt.Errorf("transaction execution failed: %w", err)
-	}
+    // Step 6: Execute transaction
+    tx := Transaction{
+        From:     os.Getenv("WALLET_ADDRESS"),
+        To:       os.Getenv("CONTRACT_ADDRESS"),
+        Data:     params,
+        Gas:      gasLimit, // Use uint64 gas limit
+        GasPrice: gasPrice,
+    }
 
-	notifyNode("execution_success", fmt.Sprintf("Route executed: %v, TxHash: %s", route, receipt.TransactionHash))
-	log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
-	return nil
+    var receipt *Receipt
+    if receipt, err = retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+        return sendTransaction(tx, os.Getenv("CONTRACT_ADDRESS"))
+    }); err != nil {
+        notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
+        return fmt.Errorf("transaction execution failed: %w", err)
+    }
+
+    notifyNode("execution_success", fmt.Sprintf("Route executed: %v, TxHash: %s", route, receipt.TransactionHash))
+    log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
+    return nil
 }
 
+
 // retryWithBackoff retries a function with exponential backoff.
-func retryWithBackoff[T any](maxRetries int, initialBackoff time.Duration, fn func() (T, error)) (T, error) {
-	var result T
-	var err error
-	backoff := initialBackoff
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		result, err = fn()
-		if err == nil {
-			return result, nil
-		}
-
-		log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
-		time.Sleep(backoff)
-		backoff *= 2
-	}
-
-	return result, fmt.Errorf("all retries failed: %w", err)
+func retryWithBackoff(maxRetries int, initialBackoff time.Duration, fn func() (*big.Int, error)) (*big.Int, error) {
+    var result *big.Int
+    var err error
+    for i := 0; i < maxRetries; i++ {
+        result, err = fn()
+        if err == nil {
+            return result, nil
+        }
+        time.Sleep(initialBackoff * time.Duration(i+1))
+    }
+    return nil, err
 }
 
 
