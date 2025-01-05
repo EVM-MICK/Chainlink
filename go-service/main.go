@@ -596,7 +596,7 @@ func getStableTokenList(chainID int) ([]Token, error) {
 
 	// Cache the response and return
 	//setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
-        setToStableTokenCache("key", value, 10*time.Minute)
+        setToStableTokenCache(cacheKey, stableTokens, stableTokenCache)
 	log.Printf("Fetched stable token list: %+v", stableTokens)
 	return stableTokens, nil
 }
@@ -654,7 +654,7 @@ func init() {
 func setToStableTokenCache(key string, value interface{}, duration time.Duration) {
 	stableTokenCache.Set(key, value, duration)
 	defer stableTokenCache.Set(key, value, duration)
-	stableTokenCache.cache[key] = CacheEntry{
+	stableTokenCache.Set(key, value, cache.DefaultExpiration) = CacheEntry{
 		data:      value,
 		timestamp: time.Now().Add(duration),
 	}
@@ -769,40 +769,30 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 		}
 
 		// Adjust trade size for slippage
-		adjustedAmount, err := adjustForSlippage(amountIn, fromData.Liquidity)
-		if err != nil {
-			return nil, fmt.Errorf("slippage adjustment error: %v", err)
-		}
+                amountInFloat := new(big.Float).SetInt(amountIn) // Convert *big.Int to *big.Float
+                 // Example correction for lines 772-793
+                 adjustedAmount, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
+                if err != nil {
+                  return nil, fmt.Errorf("slippage adjustment error: %v", err)
+                }
 
-		// Calculate new amountIn after this hop
-		amountIn.Mul(adjustedAmount, toData.Price)
-		amountIn.Quo(amountIn, fromData.Price)
+        // Convert adjustedAmount back to *big.Int for further calculations
+        adjustedInt := new(big.Int)
+        adjustedAmount.Int(adjustedInt)
+ 
+        // Proceed with multiplication and division using *big.Float for consistency
+        amountInFloat := new(big.Float).SetInt(amountIn)
+        amountInFloat.Mul(amountInFloat, toData.Price)
+       amountInFloat.Quo(amountInFloat, fromData.Price)
 
-		// Ensure positive output remains
-		if amountIn.Cmp(big.NewFloat(0)) <= 0 {
-			return nil, fmt.Errorf("negative or zero output at hop: %s -> %s", fromToken, toToken)
-		}
+         // Convert final amountInFloat back to *big.Int
+       amountInFinal := new(big.Int)
+     amountInFloat.Int(amountInFinal)
 
-		// Accumulate gas cost
-		hopGasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate)) // Adjust gas per hop if needed
-		totalGasCost.Add(totalGasCost, hopGasCost)
-	}
-
-	// Convert results to big.Int for comparison
-	finalAmountIn := new(big.Int)
-	amountIn.Int(finalAmountIn)
-	finalGasCost := new(big.Int)
-	totalGasCost.Int(finalGasCost)
-
-	// Calculate profit
-	profit := new(big.Int).Sub(finalAmountIn, CAPITAL)
-	profit.Sub(profit, finalGasCost)
-
-	// Ensure profit is positive
-	if profit.Cmp(big.NewInt(0)) > 0 {
-		log.Printf("Profitable route: %v with profit: %s", route, profit.String())
-		return profit, nil
-	}
+// Ensure amount remains positive
+if amountInFinal.Cmp(big.NewInt(0)) <= 0 {
+    return nil, fmt.Errorf("negative or zero output at hop: %s -> %s", fromToken, toToken)
+}
 
 	log.Printf("Route %v did not meet the profit threshold.", route)
 	return nil, nil
@@ -837,7 +827,7 @@ func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
 
 	profitThreshold := new(big.Float).Add(totalCost, new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD))
 	result := new(big.Int)
-	profitThreshold.Int(result)
+	profitThreshold.Set(result)
 
 	log.Printf("Dynamic profit threshold: %s", result.String())
 	return result, nil
@@ -860,20 +850,13 @@ func getFromCache(key string) (interface{}, bool) {
 }
 
 func getFromOrderBookCache(key string) (interface{}, bool) {
-	orderBookCache.mu.Lock()
-	defer orderBookCache.mu.Unlock()
-	value, exists := orderBookCache.cache[key]
-	return value, exists
+    return orderBookCache.Get(key) // Use go-cache's Get method
 }
 
 func setToOrderBookCache(key string, value interface{}, duration time.Duration) {
-	orderBookCache.Set(key, value, duration)
-	defer orderBookCache.Set(key, value, duration)
-	orderBookCache.Set[key] = CacheEntry{
-		data:      value,
-		timestamp: time.Now().Add(duration),
-	}
+    orderBookCache.Set(key, value, duration) // Use go-cache's Set method
 }
+
 
 func adjustForDecimals(amount *big.Int, decimals int) *big.Int {
 	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
