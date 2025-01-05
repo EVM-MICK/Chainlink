@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"time"
+        "strconv"
 	"math"
 	"errors"
 
@@ -237,11 +238,9 @@ type OrderBookCache struct {
 }
 
 type CacheEntry struct {
-	data      interface{}
-	timestamp time.Time
+   Timestamp time.Time
+    Data      interface{}
 }
-
-
 
 // Cache duration in seconds
 //const cacheDuration = 600 // 10 minutes
@@ -1626,7 +1625,7 @@ func sendTransaction(tx Transaction, token string) (*Receipt, error) {
 	gasLimit := uint64(tx.Gas)
 
 	// Parse sender and receiver addresses
-	fromAddress := common.HexToAddress(tx.From)
+	//fromAddress := common.HexToAddress(tx.From)
 	toAddress := common.HexToAddress(tx.To)
 
 	// Create transaction data
@@ -1776,7 +1775,7 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     }
 
     // Step 3: Approve tokens
-    if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
+    if err = retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
         return approveTokensNode(route, scaledAmount)
     }); err != nil {
         return fmt.Errorf("token approval failed: %w", err)
@@ -1806,7 +1805,7 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
         GasPrice: gasPrice,
     }
 
-    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*big.Int, error) {
         return sendTransaction(tx, "token")
     })
     if err != nil {
@@ -1849,8 +1848,8 @@ func cacheGetTokenPrices(key string) (interface{}, bool) {
 	tokenPriceCache.mu.Lock()
 	defer tokenPriceCache.mu.Unlock()
 	entry, exists := tokenPriceCache.cache[key]
-	if exists && time.Now().Before(entry.timestamp) {
-		return entry.data, true
+	if exists && time.Now().Before(cachedEntry.Timestamp) {
+		return cachedEntry.Data, true
 	}
 	delete(tokenPriceCache.cache, key) // Remove expired entry
 	return nil, false
@@ -2034,7 +2033,7 @@ func calculateAverageLiquidity(tokens []string, chainID int64, startToken string
 	return big.NewFloat(0), nil
 }
 
-func estimateLiquidity(chainID int, srcToken, dstToken string) (*big.Float, error) {
+func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, error) {
     orderBook, err := fetchOrderBookDepth(srcToken, dstToken, chainID)
     if err != nil {
         return nil, fmt.Errorf("failed to fetch order book: %v", err)
