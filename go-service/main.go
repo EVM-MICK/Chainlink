@@ -78,7 +78,7 @@ const SushiSwapRouterABI = `[
 
 type InputData struct {
 	TokenPairs   []string `json:"tokenPairs"`
-	ChainID      int      `json:"chainId"`
+	ChainID      int64      `json:"chainId"`
 	StartToken   string   `json:"startToken"`
 	StartAmount  float64  `json:"startAmount"`
 	MaxHops      int      `json:"maxHops"`
@@ -546,7 +546,7 @@ func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration
 }
 
 // getStableTokenList fetches the stable token list or falls back to hardcoded tokens
-func getStableTokenList(chainID int) ([]Token, error) {
+func getStableTokenList(chainID int64) ([]Token, error) {
 	cacheKey := fmt.Sprintf("stableTokens:%d", chainID)
 
 	// Check cache for existing data
@@ -924,7 +924,7 @@ func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
 }
 
 // Fetch a single quote with caching and retries
-func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
+func fetchQuote(chainID int64, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
     // Construct the cache key
     cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
 
@@ -973,7 +973,7 @@ func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel,
 
 
 // Fetch multiple quotes concurrently with rate limiting
-func fetchMultipleQuotes(chainID int, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
+func fetchMultipleQuotes(chainID int64, tokenPairs [][2]string, amount string, complexityLevel, slippage int) ([]map[string]interface{}, error) {
     var wg sync.WaitGroup
     results := make([]map[string]interface{}, len(tokenPairs))
     errors := make([]error, len(tokenPairs))
@@ -1047,7 +1047,7 @@ func cacheGetOrderBook(key string) (interface{}, bool) {
 }
 
 // Fetch order book depth with retries and caching
-func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{}, error) {
+func fetchOrderBookDepth(srcToken, dstToken string, chainID int64) ([]interface{}, error) {
 	cacheKey := fmt.Sprintf("orderBook-%s-%s-%d", strings.ToLower(srcToken), strings.ToLower(dstToken), chainID)
 
 	// Check the cache first
@@ -1418,27 +1418,27 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
         }
 
 	// Fetch stable tokens dynamically or fallback to hardcoded list
-	stableTokens, err := getStableTokenList(int(chainID))
+	stableTokens, err := getStableTokenList(int64(chainID))
 	if err != nil {
 		log.Printf("Error fetching stable tokens: %v. Using fallback tokens.", err)
 		stableTokens = fallbackStableTokens() // Fallback to hardcoded tokens
 	}
 
 	// Filter valid stable token addresses
-	validStableTokenAddresses := filterValidAddresses(stableTokens)
+	validStableTokenAddresses := filterValidAddresses([]stableTokens)
 	if len(validStableTokenAddresses) == 0 {
 		return nil, fmt.Errorf("no valid stable token addresses available")
 	}
 
 	// Generate token pairs and build the graph using real-time data
 	tokenPairs := generateTokenPairs(validStableTokenAddresses)
-	graph, err := BuildGraph(tokenPairs, int(chainID))
+	graph, err := BuildGraph(tokenPairs, int64(chainID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build graph: %v", err)
 	}
 
 	// Calculate average liquidity to adjust the max hops
-	averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, int(chainID), startToken)
+	averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, int64(chainID), startToken)
 	if err != nil {
 		log.Fatalf("Failed to calculate average liquidity: %v", err)
 	}
@@ -1673,7 +1673,7 @@ func FetchTokenPrices(tokens []string) (map[string]float64, error) {
 }
 
 // FetchTokenPricesAcrossProtocols fetches prices for tokens across multiple protocols
-func FetchTokenPricesAcrossProtocols(tokens []string, chainID int) (map[string]map[string]interface{}, error) {
+func FetchTokenPricesAcrossProtocols(tokens []string, chainID int64) (map[string]map[string]interface{}, error) {
 	if len(tokens) == 0 {
 		log.Println("Token array is empty. Using fallback tokens...")
 		tokens = hardcodedStableAddresses
