@@ -532,13 +532,13 @@ func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration
 			return result, nil
 		}
 
-		log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
-		lastErr = err
-		time.Sleep(backoff)
-		backoff *= 2
+        log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
+        time.Sleep(backoff)
+        backoff *= 2
+
 	}
 
-	return nil, fmt.Errorf("operation failed after %d retries: %w", maxRetries, lastErr)
+	return nil, fmt.Errorf("operation failed after %d retries: %w", maxRetries, err)
 }
 
 // getStableTokenList fetches the stable token list or falls back to hardcoded tokens
@@ -758,7 +758,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     amountIn := new(big.Int).Set(CAPITAL)
     totalGasCost := new(big.Int) // Initialize for gas cost calculation
 
-    // Loop through route and compute trade flow
+    // Loop through the route to compute trade flow
     for i := 0; i < len(route)-1; i++ {
         fromToken := route[i]
         toToken := route[i+1]
@@ -774,16 +774,28 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         }
 
         // Adjust for slippage
-        adjustedAmount, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
+        adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
             return nil, fmt.Errorf("slippage adjustment failed for token %s: %v", fromToken, err)
         }
 
+        // Convert adjustedAmountFloat (*big.Float) to *big.Int
+        adjustedAmount := new(big.Int)
+        adjustedAmountFloat.Int(adjustedAmount)
+
         // Update the trading amount
-        amountIn = new(big.Int).Div(new(big.Int).Mul(new(big.Int).SetInt(adjustedAmount), toData.Price), fromData.Price)
+        priceRatio := new(big.Float).Quo(toData.Price, fromData.Price) // priceRatio = toPrice / fromPrice
+        tradeAmount := new(big.Float).Mul(new(big.Float).SetInt(adjustedAmount), priceRatio) // tradeAmount = adjustedAmount * priceRatio
+
+        // Convert tradeAmount (*big.Float) to *big.Int
+        amountIn = new(big.Int)
+        tradeAmount.Int(amountIn)
 
         // Calculate gas cost for this trade (use a constant gas limit per hop)
-        hopGasCost := calculateTotalGasCost(new(big.Int).Set(gasPrice), DefaultGasEstimate)
+        gasPriceInt := new(big.Int)
+        gasPrice.Int(gasPriceInt) // Convert *big.Float gasPrice to *big.Int
+
+        hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
 
         // Ensure remaining amount is positive
@@ -798,6 +810,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     // Log the route and profit for debugging
     log.Printf("Route evaluated: %v, Profit: %s wei", route, netProfit.String())
 
+    // Check against minimum profit threshold
     if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
         log.Printf("Route did not meet the profit threshold.")
         return nil, nil
@@ -909,21 +922,18 @@ func fetchWithRetries(url string, headers map[string]string) ([]byte, error) {
 // Fetch a single quote with caching and retries
 func fetchQuote(chainID int, srcToken, dstToken, amount string, complexityLevel, slippage int) (map[string]interface{}, error) {
     cacheKey := fmt.Sprintf("%s_%s_%s", srcToken, dstToken, amount)
-
-    // // Check cache first
-    // if cachedQuote, exists := getFromCache(cacheKey); exists {
-    //     log.Printf("Using cached quote for %s", cacheKey)
-    //     return cachedQuote.(map[string]interface{}), nil
-    // }
-
-
-if cachedQuote, ok := getFromCache["cacheKey"].(string); ok {
-    log.Println("Cached value:", value)
-     return cachedQuote.(map[string]interface{})
-} else {
-    log.Println("Value not found in cache or invalid type")
-}
-
+    cachedValue, exists := getFromCache(cacheKey) // Call the function properly.
+   
+  if exists {
+    if castValue, ok := cachedValue.(map[string]interface{}); ok {
+        // Safely use the value as a map if it matches the expected type.
+        log.Println("Cached value:", castValue)
+    } else {
+        log.Println("Cached value exists but is not of expected type")
+      }
+   } else {
+    log.Println("Value not found in cache")
+  }
     // Construct the request URL
     url := fmt.Sprintf(
         "https://api.1inch.dev/swap/v6.0/%d/quote?src=%s&dst=%s&amount=%s&complexityLevel=%d",
@@ -1098,6 +1108,8 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int) ([]interface{},
 
 // Helper function for HTTP GET with retries and parameters
 func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]byte, error) {
+      var result interface{}
+       var err error
 	operation := func() (interface{}, error) {
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", url, nil)
