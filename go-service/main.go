@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
         "github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+        "github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gorilla/websocket"
@@ -1723,41 +1724,6 @@ func fetchTokenPrice(token string) (float64, error) {
 	return result.Price, nil
 }
 
-// FetchTokenPricesAcrossProtocols fetches prices for tokens across multiple protocols
-func FetchTokenPricesAcrossProtocols(tokens []string, chainID int64) (map[string]map[string]interface{}, error) {
-	if len(tokens) == 0 {
-		log.Println("Token array is empty. Using fallback tokens...")
-		tokens = hardcodedStableAddresses
-	}
-
-	prices := make(map[string]map[string]interface{})
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	for _, token := range tokens {
-		wg.Add(1)
-		go func(token string) {
-			defer wg.Done()
-
-			priceData, err := FetchTokenPrices([]string{token})
-			if err != nil || len(priceData) == 0 {
-				log.Printf("No price data returned for %s. Skipping.", token)
-				return
-			}
-
-			mu.Lock()
-			prices[token] = map[string]interface{}{
-				"price":    priceData[token],
-				"symbol":   "UNKNOWN", // Replace with actual symbol if available
-				"decimals": 18,        // Replace with actual decimals if available
-			}
-			mu.Unlock()
-		}(token)
-	}
-
-	wg.Wait()
-	return prices, nil
-}
 
 func executeRoute(route []string, CAPITAL *big.Int) error {
     const maxRetries = 3
