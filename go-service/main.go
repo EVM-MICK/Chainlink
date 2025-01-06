@@ -462,15 +462,13 @@ func (rl *RateLimiter) Adjust(newCapacity int, newInterval time.Duration) {
 }
 
 // NewRateLimiter initializes a new rate limiter with 1 message per second.
-func NewRateLimiter(capacity int, refillInterval time.Duration) *RateLimiter {
+func NewRateLimiter(capacity int, interval time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		capacity: capacity,
 		tokens:   capacity,
-		interval: refillInterval,
+		interval: interval,
 		stop:     make(chan bool),
 	}
-
-	// Start the refill process in a separate Goroutine
 	go rl.refill()
 	return rl
 }
@@ -1594,16 +1592,14 @@ func getEthClient() (*ethclient.Client, error) {
 
 
 // Validate and fetch environment variables
-func validateEnvVars(requiredVars []string) error {
-	for _, key := range requiredVars {
-		value := strings.TrimSpace(os.Getenv(key))
-		if value == "" {
-			return fmt.Errorf("environment variable %s is not set or empty", key)
+func validateEnvVars(vars []string) error {
+	for _, key := range vars {
+		if os.Getenv(key) == "" {
+			return fmt.Errorf("missing environment variable: %s", key)
 		}
 	}
 	return nil
 }
-
 
 func sendTransaction(tx Transaction, token string) (*Receipt, error) {
 	// Validate required environment variables
@@ -2604,45 +2600,22 @@ func fetchPermit2Signature(token, spender, amount string) (*PermitDetails, error
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade to WebSocket: %v", err)
+		log.Printf("WebSocket upgrade error: %v", err)
 		return
 	}
 
-	// Extract or generate session ID
-	sessionID := r.URL.Query().Get("sessionID")
-	if sessionID == "" {
-		sessionID = generateSessionID() // Generate a unique session ID
+	client := &WebSocketClient{
+		Conn: conn, 
+		RateLimiter: rateLimiter, 
+		Disconnected: make(chan bool),
 	}
+	client.Context, client.CancelFunc = context.WithCancel(context.Background())
 
-	// Check for existing session
-	sessionMutex.Lock()
-	session, exists := wsSessions[sessionID]
-	if exists {
-		// Reuse the existing session
-		log.Printf("Reconnected to session %s", sessionID)
-		session.Client.Conn.Close() // Close old connection
-		session.Client.Conn = conn
-		session.Client.Context, session.Client.CancelFunc = context.WithCancel(context.Background())
-	} else {
-		// Create a new session
-		client := &WebSocketClient{Conn: conn, Context: context.WithCancel(context.Background())}
-		session = &WebSocketSession{
-			SessionID: sessionID,
-			Client:    client,
-			State:     make(map[string]interface{}),
-		}
-		wsSessions[sessionID] = session
-		log.Printf("New session created: %s", sessionID)
-	}
-	sessionMutex.Unlock()
+	clientsMutex.Lock()
+	wsClients[client] = true
+	clientsMutex.Unlock()
 
-	// Handle client messages
-	go handleClientMessages(session.Client)
-
-	// Send session ID to the client
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"sessionID":"%s"}`, sessionID))); err != nil {
-		log.Printf("Failed to send session ID: %v", err)
-	}
+	go handleMessages(client)
 }
 
 func generateSessionID() string {
@@ -2713,15 +2686,11 @@ func shutdownWebSocketServer() {
 	clientsMutex.Lock()
 	defer clientsMutex.Unlock()
 
-	log.Println("Shutting down WebSocket server. Closing all client connections...")
-
 	for client := range wsClients {
-		client.CancelFunc() // Signal all client contexts to cancel
-		client.Conn.Close() // Close WebSocket connection
-		delete(wsClients, wsClients[client])
+		client.Conn.Close()
+		client.CancelFunc()
 	}
-
-	log.Println("All client connections closed.")
+	log.Println("WebSocket server shut down.")
 }
 
 func monitorSystemHealth() {
@@ -2729,18 +2698,15 @@ func monitorSystemHealth() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Log active WebSocket clients and goroutines
 		clientsMutex.Lock()
 		activeClients := len(wsClients)
 		clientsMutex.Unlock()
-		log.Printf("System Health: Active WebSocket Clients: %d, Active Goroutines: %d",
-			activeClients, runtime.NumGoroutine())
 
-		// Log memory usage
-		logMemoryUsage()
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
 
-		// Log API rate limits
-		logAPILimits()
+		log.Printf("Active Clients: %d | Goroutines: %d | Memory Usage: Alloc=%vKB TotalAlloc=%vKB Sys=%vKB",
+			activeClients, runtime.NumGoroutine(), memStats.Alloc/1024, memStats.TotalAlloc/1024, memStats.Sys/1024)
 	}
 }
 
@@ -2760,50 +2726,47 @@ func cleanupInactiveClients() {
 // Handle messages from a WebSocket client
 func handleMessages(client *WebSocketClient) {
 	defer func() {
+		client.Disconnected <- true
 		clientsMutex.Lock()
-		delete(wsClients, wsClients[client])
+		delete(wsClients, client)
 		clientsMutex.Unlock()
-		client.RateLimiter.Stop() // Stop rate limiter for this client
+		client.RateLimiter.Stop()
 		client.Conn.Close()
-		log.Println("WebSocket client disconnected.")
+		log.Println("Client disconnected.")
 	}()
 
 	for {
-		_, message, err := client.Conn.ReadMessage()
+		_, msg, err := client.Conn.ReadMessage()
 		if err != nil {
-			log.Printf("Error reading message: %v", err)
-			client.Disconnected <- true
+			log.Printf("WebSocket read error: %v", err)
 			return
 		}
 
 		if !client.RateLimiter.Allow() {
-			log.Println("Rate limit exceeded. Dropping message.")
+			log.Println("Rate limit exceeded, dropping message.")
 			continue
 		}
 
-		// Broadcast the received message to the channel
-		broadcastChannel <- []byte(message)
+		broadcastChan <- msg
 	}
 }
+
 
 // Broadcast messages to all WebSocket clients
 func broadcastMessages() {
-	for message := range broadcastChannel {
+	for msg := range broadcastChan {
 		clientsMutex.Lock()
-
-		// Iterate over all clients and send messages
 		for client := range wsClients {
-			err := client.Conn.WriteMessage(websocket.TextMessage, []byte(message))
-			if err != nil {
-				log.Printf("Error broadcasting to client: %v. Removing client.", err)
+			if err := client.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				log.Printf("Error broadcasting message: %v", err)
 				client.Conn.Close()
-				delete(wsClients, wsClients[client]) // Remove stale client
+				delete(wsClients, client)
 			}
 		}
-
 		clientsMutex.Unlock()
 	}
 }
+
 
 // Broadcast opportunities to WebSocket clients
 func wsBroadcastManager() {
