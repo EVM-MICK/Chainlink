@@ -2841,20 +2841,11 @@ func wsBroadcastManager() {
 // Main function
 func main() {
 	// Required environment variables
-	requiredVars := []string{
-		"INFURA_WS_URL",     // WebSocket RPC URL for Ethereum
-		"NODE_API_URL",      // API endpoint for token approvals
-		"RPC_URL",           // RPC URL for Ethereum client
-		"PRIVATE_KEY",       // Private key for signing transactions
-		"WALLET_ADDRESS",    // Address of the wallet
-		"CONTRACT_ADDRESS",  // Address of the contract
-	}
-
-	// Validate environment variables
+	requiredVars := []string{"RPC_URL", "NODE_API_URL", "PRIVATE_KEY", "WALLET_ADDRESS"}
 	if err := validateEnvVars(requiredVars); err != nil {
-		log.Fatalf("Environment validation failed: %v", err)
+		log.Fatalf("Environment variables validation failed: %v", err)
 	}
-
+	
 	// Fetch and use validated variables
 	rpcURL := os.Getenv("INFURA_WS_URL")
 	nodeAPIURL := os.Getenv("NODE_API_URL")
@@ -2884,9 +2875,9 @@ func main() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
-		log.Println("Received shutdown signal, initiating cleanup...")
-		cancel()           // Signal goroutines to stop
-		shutdownWebSocketServer() // Cleanup WebSocket server
+		log.Println("Shutdown signal received, cleaning up resources...")
+		cancel()
+		shutdownWebSocketServer()
 	}()
 
 	// Start WebSocket server
@@ -2897,7 +2888,6 @@ func main() {
 	}()
 
 	// Start monitoring the mempool in a separate goroutine
-	// Monitor mempool in a separate goroutine with retry logic
 	go func() {
 		if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("INFURA_WS_URL")); err != nil {
 			log.Printf("Mempool monitoring terminated: %v", err)
@@ -2947,10 +2937,9 @@ func main() {
      // Monitor system health periodically
 	go monitorSystemHealth()
     
-       shutdownAll(ctx)
-	// Final log before starting HTTP server
-	log.Println("Starting HTTP server on :8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+      // Wait for shutdown
+	<-ctx.Done()
+	log.Println("System shutdown complete.")
 }
 
 // Helper function to validate token address
