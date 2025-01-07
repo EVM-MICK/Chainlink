@@ -26,7 +26,6 @@ const getAsync = promisify(redisClient.get).bind(redisClient)
 const REDIS_TTL = 60; // Cache data for 1 minute
 const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
-const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; // Go service endpoint
@@ -84,6 +83,7 @@ const permit2Abi = [
     },
     { "internalType": "bytes", "name": "signature", "type": "bytes" }
 ];
+const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 //const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 
 // State Variables
