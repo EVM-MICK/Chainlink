@@ -8,8 +8,10 @@ import PQueue from 'p-queue';
 import Redis from 'ioredis';
 import { ethers } from 'ethers';
 import cron from 'node-cron';
-import { Telegraf } from 'telegraf';
 import { promisify } from 'util';
+import pkg from 'telegraf';
+
+const { Telegraf } = pkg;
 
 // Initialize Redis cache
 const redisClient = redis.createClient();
