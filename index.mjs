@@ -15,6 +15,7 @@ dotenv.config();
 const { Telegraf } = pkg;
 
 // Initialize Redis cache
+const CHAIN_ID = 42161;
 const web3 = new Web3(process.env.INFURA_URL);
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
@@ -34,7 +35,6 @@ const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; //
 const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
 const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
-const CHAIN_ID = 42161;
 const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
 const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
 const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
