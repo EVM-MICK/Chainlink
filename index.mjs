@@ -16,40 +16,71 @@ const { Telegraf } = pkg;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
 const permit2Abi = [
-    // Add relevant parts of the ABI for Permit2
-    {
-        "inputs": [
-            {
-                "components": [
-                    {
-                        "internalType": "address",
-                        "name": "token",
-                        "type": "address"
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "amount",
-                        "type": "uint256"
-                    }
-                ],
-                "internalType": "struct ISignatureTransfer.TokenPermissions",
-                "name": "permitted",
-                "type": "tuple"
-            },
-            { "internalType": "uint256", "name": "nonce", "type": "uint256" },
-            { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
         ],
-        "internalType": "struct ISignatureTransfer.PermitTransferFrom",
-        "name": "permit",
+        "internalType": "struct ISignatureTransfer.TokenPermissions",
+        "name": "permitted",
         "type": "tuple"
-    },
-    {
-        "internalType": "address",
-        "name": "owner",
-        "type": "address"
-    },
-    { "internalType": "bytes", "name": "signature", "type": "bytes" }
+      },
+      { "internalType": "uint256", "name": "nonce", "type": "uint256" },
+      { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+    ],
+    "internalType": "struct ISignatureTransfer.PermitTransferFrom",
+    "name": "permit",
+    "type": "tuple"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "owner", "type": "address" }
+    ],
+    "name": "nonces",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "token", "type": "address" },
+      { "internalType": "address", "name": "spender", "type": "address" },
+      { "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "internalType": "uint256", "name": "nonce", "type": "uint256" },
+      { "internalType": "uint256", "name": "deadline", "type": "uint256" },
+      { "internalType": "bytes", "name": "signature", "type": "bytes" }
+    ],
+    "name": "permitTransferFrom",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "owner", "type": "address" },
+      { "internalType": "address", "name": "spender", "type": "address" }
+    ],
+    "name": "allowance",
+    "outputs": [
+      { "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
 ];
+
 const CHAIN_ID = 42161;
 const web3 = new Web3(process.env.INFURA_URL);
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
@@ -81,7 +112,7 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
 ];
 const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-const nonce = await permit2Contract.nonce(wallet.address); // Fetch current nonce
+const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
 
 // State Variables
 let consecutiveFailures = 0;
