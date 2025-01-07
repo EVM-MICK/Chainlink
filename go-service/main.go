@@ -2237,7 +2237,7 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	}
 
 	// Log unknown transaction
-	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex())
+	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex(), err)
 }
 
 // Process Uniswap-specific transactions
