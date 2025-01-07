@@ -91,10 +91,15 @@ const REDIS_HOST = process.env.REDIS_HOST || 'redis-14324.c232.us-east-1-2.ec2.r
 const REDIS_PORT = process.env.REDIS_PORT || 14324;
 const REDIS_USERNAME = process.env.REDIS_USERNAME || 'default';
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'mKdimdMjHQbVCzRx58wWRklG59fdsd4I';
-
-const setAsync = promisify(redisClient.set).bind(redisClient);
-const getAsync = promisify(redisClient.get).bind(redisClient)
 const REDIS_TTL = 60; // Cache data for 1 minute
+const redisClient = createClient({
+  username: REDIS_USERNAME,
+  password: REDIS_PASSWORD,
+  socket: {
+    host: REDIS_HOST,
+    port: REDIS_PORT,
+  },
+});
 const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
@@ -122,14 +127,8 @@ const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 // State Variables
 let consecutiveFailures = 0;
 
-const redisClient = createClient({
-  username: REDIS_USERNAME,
-  password: REDIS_PASSWORD,
-  socket: {
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-  },
-});
+const setAsync = promisify(redisClient.set).bind(redisClient);
+const getAsync = promisify(redisClient.get).bind(redisClient);
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
