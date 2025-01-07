@@ -883,20 +883,20 @@ async function runArbitrageBot() {
   const tokenAddresses = HARDCODED_STABLE_ADDRESSES;
 
   // Mempool Monitoring for Arbitrage Opportunities
-  monitorMempool(targetContracts, process.env.CHAIN_ID, async ({ txHash, profit, srcToken, dstToken, amountIn }) => {
-    log(`Mempool Arbitrage Opportunity Detected!`, 'info');
-    log(`Transaction Hash: ${txHash}, Profit: ${profit.toFixed()} USDT`);
-    log(`Route: ${srcToken} ➡️ ${dstToken}, Amount In: ${amountIn.toFixed()}`);
+  // monitorMempool(targetContracts, process.env.CHAIN_ID, async ({ txHash, profit, srcToken, dstToken, amountIn }) => {
+  //   log(`Mempool Arbitrage Opportunity Detected!`, 'info');
+  //   log(`Transaction Hash: ${txHash}, Profit: ${profit.toFixed()} USDT`);
+  //   log(`Route: ${srcToken} ➡️ ${dstToken}, Amount In: ${amountIn.toFixed()}`);
 
-    try {
-      const route = [srcToken, dstToken];
-      await executeRoute(route, amountIn); // Execute using Go backend
-      await sendTelegramMessage(`🚀 Executed mempool arbitrage! Profit: ${profit.toFixed()} USDT`);
-    } catch (error) {
-      log(`Error executing mempool arbitrage: ${error.message}`, 'error');
-      await sendTelegramMessage(`❌ Error in mempool arbitrage: ${error.message}`, true);
-    }
-  });
+  //   try {
+  //     const route = [srcToken, dstToken];
+  //     await executeRoute(route, amountIn); // Execute using Go backend
+  //     await sendTelegramMessage(`🚀 Executed mempool arbitrage! Profit: ${profit.toFixed()} USDT`);
+  //   } catch (error) {
+  //     log(`Error executing mempool arbitrage: ${error.message}`, 'error');
+  //     await sendTelegramMessage(`❌ Error in mempool arbitrage: ${error.message}`, true);
+  //   }
+  // });
 
   // Periodic Live Market Data Monitoring for Profitable Routes
   setInterval(async () => {
