@@ -2219,7 +2219,12 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 		}
 
 		log.Printf("Decoded Uniswap transaction: Method=%s, Args=%v", method.Name, args)
-		processUniswapTransaction(method.Name, args)
+
+		// Handle errors from processUniswapTransaction
+		err = processUniswapTransaction(method.Name, args)
+		if err != nil {
+			log.Printf("Error processing Uniswap transaction: %v", err)
+		}
 		return
 	}
 
@@ -2232,43 +2237,51 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 		}
 
 		log.Printf("Decoded SushiSwap transaction: Method=%s, Args=%v", method.Name, args)
-		processSushiSwapTransaction(method.Name, args)
+
+		// Handle errors from processSushiSwapTransaction
+		err = processSushiSwapTransaction(method.Name, args)
+		if err != nil {
+			log.Printf("Error processing SushiSwap transaction: %v", err)
+		}
 		return
 	}
 
 	// Log unknown transaction
-	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex(), err)
+	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex())
 }
 
+
 // Process Uniswap-specific transactions
-func processUniswapTransaction(methodName string, args map[string]interface{}) {
-	switch methodName {
-	case "exactInput":
-		params := args["params"].(map[string]interface{})
-		path := params["path"].([]byte) // Multi-hop path as a byte array
-		decodedPath, err := decodePath(path) // Decode path to token addresses
-                if err != nil {
-                 return fmt.Errorf("failed to decode path: %v", err)
-                }
-		amountIn := params["amountIn"].(*big.Int)
-		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+func processUniswapTransaction(methodName string, args map[string]interface{}) error {
+    switch methodName {
+    case "exactInput":
+        params := args["params"].(map[string]interface{})
+        path := params["path"].([]byte) // Multi-hop path as a byte array
+        decodedPath, err := decodePath(path) // Decode path to token addresses
+        if err != nil {
+            return fmt.Errorf("failed to decode path: %v", err)
+        }
+        amountIn := params["amountIn"].(*big.Int)
+        amountOutMinimum := params["amountOutMinimum"].(*big.Int)
 
-		log.Printf("Uniswap exactInput: Path=%v, AmountIn=%s, AmountOutMin=%s",
-			decodedPath, amountIn.String(), amountOutMinimum.String())
+        log.Printf("Uniswap exactInput: Path=%v, AmountIn=%s, AmountOutMin=%s",
+            decodedPath, amountIn.String(), amountOutMinimum.String())
 
-	case "exactInputSingle":
-		params := args["params"].(map[string]interface{})
-		tokenIn := params["tokenIn"].(common.Address)
-		tokenOut := params["tokenOut"].(common.Address)
-		amountIn := params["amountIn"].(*big.Int)
-		amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+    case "exactInputSingle":
+        params := args["params"].(map[string]interface{})
+        tokenIn := params["tokenIn"].(common.Address)
+        tokenOut := params["tokenOut"].(common.Address)
+        amountIn := params["amountIn"].(*big.Int)
+        amountOutMinimum := params["amountOutMinimum"].(*big.Int)
 
-		log.Printf("Uniswap exactInputSingle: TokenIn=%s, TokenOut=%s, AmountIn=%s, AmountOutMin=%s",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), amountOutMinimum.String())
+        log.Printf("Uniswap exactInputSingle: TokenIn=%s, TokenOut=%s, AmountIn=%s, AmountOutMin=%s",
+            tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), amountOutMinimum.String())
 
-	default:
-		log.Printf("Unhandled Uniswap method: %s", methodName)
-	}
+    default:
+        log.Printf("Unhandled Uniswap method: %s", methodName)
+    }
+
+    return nil
 }
 
 // Helper function to decode Uniswap V3 path
