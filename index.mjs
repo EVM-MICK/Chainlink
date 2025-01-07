@@ -20,7 +20,7 @@ const web3 = new Web3(process.env.INFURA_URL);
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
-//const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
+const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 const redisClient = new Redis(process.env.REDIS_URL); // Initialize with your Redis URL
 const setAsync = promisify(redisClient.set).bind(redisClient);
 const getAsync = promisify(redisClient.get).bind(redisClient)
@@ -84,7 +84,6 @@ const permit2Abi = [
     },
     { "internalType": "bytes", "name": "signature", "type": "bytes" }
 ];
-const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 //const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 
 // State Variables
