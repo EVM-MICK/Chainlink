@@ -81,7 +81,7 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
 ];
 const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
+const nonce = await permit2Contract.nonce(wallet.address); // Fetch current nonce
 
 // State Variables
 let consecutiveFailures = 0;
