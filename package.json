@@ -26,6 +26,7 @@
     "node-fetch": "^3.3.2",
     "graphql": "^16.6.0",
     "ioredis": "^5.4.2",
+    "redis": "^4.7.0",
     "graphql-request": "^5.2.0",
     "node-cron": "^3.0.2",
     "@flashbots/ethers-provider-bundle": "^1.0.0",
