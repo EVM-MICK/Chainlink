@@ -504,47 +504,47 @@ async function executeRoute(route, amount) {
 }
 
 // Function to process and send market data
-export async function processMarketData() {
-  console.log("Starting market data processing...");
+// export async function processMarketData() {
+//   console.log("Starting market data processing...");
 
-  try {
-    // Step 1: Fetch token prices
-    console.log("Fetching token prices...");
-    const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched successfully.");
+//   try {
+//     // Step 1: Fetch token prices
+//     console.log("Fetching token prices...");
+//     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+//     console.log("Token prices fetched successfully.");
 
-    // Step 2: Fetch liquidity data for all token pairs
-    console.log("Fetching liquidity data...");
-    const liquidityData = {};
-    for (const token of HARDCODED_STABLE_ADDRESSES) {
-      liquidityData[token] = await fetchAllLiquidityData(
-        token,
-        "100000000000" // $100,000 (scaled to 6 decimals for USDC/USDT/DAI)
-      );
-    }
-    console.log("Liquidity data fetched successfully.");
+//     // Step 2: Fetch liquidity data for all token pairs
+//     console.log("Fetching liquidity data...");
+//     const liquidityData = {};
+//     for (const token of HARDCODED_STABLE_ADDRESSES) {
+//       liquidityData[token] = await fetchAllLiquidityData(
+//         token,
+//         "100000000000" // $100,000 (scaled to 6 decimals for USDC/USDT/DAI)
+//       );
+//     }
+//     console.log("Liquidity data fetched successfully.");
 
-    // Step 3: Aggregate market data
-    const marketData = {
-      tokenPrices,
-      liquidity: liquidityData,
-    };
+//     // Step 3: Aggregate market data
+//     const marketData = {
+//       tokenPrices,
+//       liquidity: liquidityData,
+//     };
 
-    // Step 4: Cache the market data (optional but recommended)
-    console.log("Caching market data...");
-    const cacheKey = "marketData";
-    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60); // Cache for 60 seconds
-    console.log("Market data cached successfully.");
+//     // Step 4: Cache the market data (optional but recommended)
+//     console.log("Caching market data...");
+//     const cacheKey = "marketData";
+//     await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60); // Cache for 60 seconds
+//     console.log("Market data cached successfully.");
 
-    // Step 5: Send market data to Go backend
-    console.log("Sending market data to Go backend...");
-    await sendMarketDataToGo(marketData);
-    console.log("Market data sent successfully to Go backend.");
-  } catch (error) {
-    console.error("Error in processing market data:", error.message);
-    // Optional: Notify a monitoring system or retry based on error type
-  }
-}
+//     // Step 5: Send market data to Go backend
+//     console.log("Sending market data to Go backend...");
+//     await sendMarketDataToGo(marketData);
+//     console.log("Market data sent successfully to Go backend.");
+//   } catch (error) {
+//     console.error("Error in processing market data:", error.message);
+//     // Optional: Notify a monitoring system or retry based on error type
+//   }
+// }
 
 // Retry helper function
 // async function retry(fn, retries, delay) {
