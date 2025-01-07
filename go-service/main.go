@@ -33,13 +33,13 @@ import (
 	"github.com/gorilla/websocket"
         "github.com/patrickmn/go-cache"
 	"github.com/ethereum/go-ethereum/crypto"
-        "github.com/joho/godotenv"
-        "github.com/shirou/gopsutil/v4/mem"
-        "github.com/deckarep/golang-set/v2"
-        "golang.org/x/crypto/pbkdf2"
-        "golang.org/x/crypto/scrypt"
-        "golang.org/x/crypto/sha3"
-        "golang.org/x/sys/unix"
+        //"github.com/joho/godotenv"
+        //"github.com/shirou/gopsutil/v4/mem"
+        //"github.com/deckarep/golang-set/v2"
+        //"golang.org/x/crypto/pbkdf2"
+        //"golang.org/x/crypto/scrypt"
+        //"golang.org/x/crypto/sha3"
+        //"golang.org/x/sys/unix"
 )
 
 type RetryFunction func() (interface{}, error)
@@ -1170,42 +1170,94 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
-	// Example REST API handler logic
-	chainID := int64(42161) // Ethereum Mainnet
-	startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+	var req struct {
+		ChainID         int64                    `json:"chainId"`
+		StartToken      string                   `json:"startToken"`
+		StartAmount     string                   `json:"startAmount"`
+		MaxHops         int                      `json:"maxHops"`
+		ProfitThreshold string                   `json:"profitThreshold"`
+		TokenPrices     map[string]float64       `json:"tokenPrices"`
+		Liquidity       []map[string]interface{} `json:"liquidity"`
+	}
 
-	dstToken := r.URL.Query().Get("dstToken")
-	if !isValidTokenAddress(dstToken) {
-		http.Error(w, "Invalid destination token address", http.StatusBadRequest)
+	// Parse JSON body
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		log.Printf("Error decoding request body: %v", err)
 		return
 	}
 
-	tokenPairs := []TokenPair{
-		{SrcToken: startToken, DstToken: dstToken},
+	// Validate required fields
+	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
+		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
+		log.Println("Invalid input parameters detected in the request.")
+		return
 	}
 
-	graph, err := BuildGraph(tokenPairs, chainID)
+	// Parse Start Amount
+	startAmount := new(big.Int)
+	if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
+		log.Println("Invalid startAmount format or value.")
+		return
+	}
+
+	// Parse Profit Threshold
+	profitThreshold := new(big.Int)
+	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
+		log.Println("Invalid profitThreshold format or value.")
+		return
+	}
+
+	// Validate and adjust Start Token Decimals
+	tokenDecimals := getTokenDecimals(req.StartToken)
+	if tokenDecimals < 0 {
+		http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
+		log.Printf("Invalid token decimals for token: %s", req.StartToken)
+		return
+	}
+
+	adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
+	if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
+		http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
+		log.Println("Invalid adjusted startAmount.")
+		return
+	}
+
+	// Log inputs for debugging
+	log.Printf("Request data: ChainID=%d, StartToken=%s, MaxHops=%d, ProfitThreshold=%s, TokenPrices=%v, Liquidity=%v",
+		req.ChainID, req.StartToken, req.MaxHops, profitThreshold.String(), req.TokenPrices, req.Liquidity)
+
+	// Compute profitable routes based on passed TokenPrices and Liquidity
+	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
 	if err != nil {
-		log.Printf("Error building graph: %v", err)
-		http.Error(w, "Failed to build graph", http.StatusInternalServerError)
+		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
+		log.Printf("Error computing profitable routes: %v", err)
 		return
 	}
 
-	path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
+	// Further filter routes
+	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
 	if err != nil {
-		log.Printf("Error computing optimal route: %v", err)
-		http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
+		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
+		log.Printf("Error filtering profitable routes: %v", err)
 		return
 	}
 
-	log.Printf("Optimal route: %v, Total cost: %f", path, cost)
+	// Respond with the computed and filtered routes
 	w.Header().Set("Content-Type", "application/json")
-	response := map[string]interface{}{
-		"path": path,
-		"cost": cost,
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"routes": filteredRoutes,
+	}); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		log.Printf("Error encoding response: %v", err)
+		return
 	}
-	json.NewEncoder(w).Encode(response)
+
+	log.Println("Successfully computed and returned filtered routes.")
 }
+
 
 
 // fetchTokenDecimalsFromBlockchain queries the blockchain to retrieve token decimals
