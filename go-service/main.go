@@ -2334,15 +2334,15 @@ func shutdownAll(ctx context.Context) {
 
 
 // Monitor mempool for pending transactions
-
 func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-       wg.Add(1)
+	wg.Add(1)
 	defer wg.Done()
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Mempool monitoring stopped due to context cancellation.")
-			return nil, fmt.Errorf("An error occurred")
+			return nil
 		default:
 			// Retry connection and subscription
 			err := monitorMempool(ctx, targetContracts, rpcURL)
@@ -2354,64 +2354,62 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 	}
 }
 
-// Main function for monitoring mempool with retryable connection and subscription logic
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-    ch := make(chan *types.Transaction) // Correctly initialize the channel
-    var clientResult interface{}
-    var err error
+	ch := make(chan string) // Correctly initialize the channel as chan string
+	var clientResult interface{}
+	var err error
 
-    // Retry logic for connecting to Ethereum client
-    clientResult, err = Retry(func() (interface{}, error) {
-        return ethclient.Dial(rpcURL)
-    }, 3, 2*time.Second)
-    if err != nil {
-        return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
-    }
+	// Retry logic for connecting to Ethereum client
+	clientResult, err = Retry(func() (interface{}, error) {
+		return ethclient.Dial(rpcURL)
+	}, 3, 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
+	}
 
-    client := clientResult.(*ethclient.Client)
-    defer client.Close()
-    log.Println("Connected to Ethereum client. Monitoring mempool...")
+	client := clientResult.(*ethclient.Client)
+	defer client.Close()
+	log.Println("Connected to Ethereum client. Monitoring mempool...")
 
-    rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
-    if err != nil {
-        return fmt.Errorf("failed to connect to RPC client: %v", err)
-    }
+	rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
+	if err != nil {
+		return fmt.Errorf("failed to connect to RPC client: %v", err)
+	}
 
-    for {
-        // Retry logic for subscribing to pending transactions
-        sub, err := rpcClient.Subscribe(ctx, ch, "newPendingTransactions")
-        if err != nil {
-            log.Printf("Failed to subscribe to pending transactions: %v. Retrying...", err)
-            time.Sleep(5 * time.Second) // Delay before retry
-            continue
-        }
+	for {
+		// Retry logic for subscribing to pending transactions
+		sub, err := rpcClient.Subscribe(ctx, ch, "newPendingTransactions")
+		if err != nil {
+			log.Printf("Failed to subscribe to pending transactions: %v. Retrying...", err)
+			time.Sleep(5 * time.Second) // Delay before retry
+			continue
+		}
 
-        log.Println("Subscribed to newPendingTransactions")
+		log.Println("Subscribed to newPendingTransactions")
 
-        // Process transactions as they arrive
-        for {
-            select {
-            case err := <-sub.Err():
-                log.Printf("Subscription error: %v. Retrying subscription...", err)
-                sub.Unsubscribe()
-                break // Exit the inner loop to retry subscription
-            case txHash := <-ch:
-                // Fetch transaction details using txHash
-                tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
-                if err != nil {
-                    log.Printf("Failed to fetch transaction details for hash %s: %v", txHash, err)
-                    continue
-                }
-                go processTransaction(client, tx, targetContracts)
-            case <-ctx.Done():
-                log.Println("Shutting down mempool monitoring...")
-                sub.Unsubscribe()
-                return nil
-            }
-        }
-    }
+		// Process transactions as they arrive
+		for {
+			select {
+			case err := <-sub.Err():
+				log.Printf("Subscription error: %v. Retrying subscription...", err)
+				sub.Unsubscribe()
+				break // Exit the inner loop to retry subscription
+			case txHash := <-ch: // Now txHash is of type string
+				// Fetch transaction details using txHash
+				tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
+				if err != nil {
+					log.Printf("Failed to fetch transaction details for hash %s: %v", txHash, err)
+					continue
+				}
+				go processTransaction(client, tx, targetContracts)
+			case <-ctx.Done():
+				log.Println("Shutting down mempool monitoring...")
+				sub.Unsubscribe()
+				return nil
+			}
+		}
+	}
 }
-
 
 
 func approveTokensNode(route []string, amount *big.Int) error {
