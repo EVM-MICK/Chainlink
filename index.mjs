@@ -6,6 +6,7 @@ import { BigNumber } from 'bignumber.js';
 import retry from 'async-retry';
 import PQueue from 'p-queue';
 import Redis from 'ioredis';
+import { createClient } from 'redis';
 import { Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from 'node-cron';
 import { promisify } from 'util';
@@ -86,7 +87,11 @@ const web3 = new Web3(process.env.INFURA_URL);
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
-const redisClient = new Redis(process.env.REDIS_URL); // Initialize with your Redis URL
+const REDIS_HOST = process.env.REDIS_HOST || 'redis-14324.c232.us-east-1-2.ec2.redns.redis-cloud.com';
+const REDIS_PORT = process.env.REDIS_PORT || 14324;
+const REDIS_USERNAME = process.env.REDIS_USERNAME || 'default';
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'mKdimdMjHQbVCzRx58wWRklG59fdsd4I';
+
 const setAsync = promisify(redisClient.set).bind(redisClient);
 const getAsync = promisify(redisClient.get).bind(redisClient)
 const REDIS_TTL = 60; // Cache data for 1 minute
@@ -117,7 +122,14 @@ const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 // State Variables
 let consecutiveFailures = 0;
 
-
+const redisClient = createClient({
+  username: REDIS_USERNAME,
+  password: REDIS_PASSWORD,
+  socket: {
+    host: REDIS_HOST,
+    port: REDIS_PORT,
+  },
+});
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
@@ -188,6 +200,17 @@ async function fetchNonce() {
     throw error;
   }
 }
+
+// Connect to Redis
+(async () => {
+  try {
+    await redisClient.connect();
+    console.log('Connected to Redis');
+  } catch (err) {
+    console.error('Error connecting to Redis:', err);
+    process.exit(1);
+  }
+})();
 
 async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
