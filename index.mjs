@@ -6,7 +6,7 @@ import { BigNumber } from 'bignumber.js';
 import retry from 'async-retry';
 import PQueue from 'p-queue';
 import Redis from 'ioredis';
-import { ethers } from 'ethers';
+import { Wallet, JsonRpcProvider } from "ethers";
 import cron from 'node-cron';
 import { promisify } from 'util';
 import pkg from 'telegraf';
@@ -17,7 +17,8 @@ const { Telegraf } = pkg;
 // Initialize Redis cache
 const web3 = new Web3(process.env.INFURA_URL);
 const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, new ethers.providers.JsonRpcProvider(process.env.INFURA_URL));
+const provider = new JsonRpcProvider(process.env.INFURA_URL);
+const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
 const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 const redisClient = redis.createClient();
 const setAsync = promisify(redisClient.set).bind(redisClient);
