@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"container/heap"
-        "crypto/ecdsa"
+        //"crypto/ecdsa"
 	"math/big"
 	"sync"
 	"io/ioutil"
@@ -25,7 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-        "github.com/ethereum/go-ethereum/accounts/abi/bind"
+        //"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
         "github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/core/types"
