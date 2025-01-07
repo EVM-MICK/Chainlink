@@ -71,7 +71,6 @@ var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
 var rateLimiter = NewRateLimiter(5, time.Second)
 const oneInchPriceAPI = "https://api.1inch.dev/price/v1.1/42161"
-var broadcastChan = make(chan []byte)
 
 const UniswapV3RouterABI = `[
   {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
@@ -164,6 +163,7 @@ var hardcodedStableTokens = []Token{
 
 // WebSocket clients map and lock
 var (
+        broadcastChan = make(chan []byte)
 	wsClients = make(map[*WebSocketClient]bool)
 	clientsMutex sync.Mutex
 	upgrader = websocket.Upgrader{
@@ -1730,7 +1730,7 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
     }
 
     // Step 3: Approve tokens
-    if err = retryWithBackoff(maxRetries, initialBackoff, func() error {
+    if err := retryWithBackoffError(maxRetries, initialBackoff, func() error {
         return approveTokensNode(route, scaledAmount)
     }); err != nil {
         return fmt.Errorf("token approval failed: %w", err)
@@ -1758,18 +1758,18 @@ func executeRoute(route []string, CAPITAL *big.Int) error {
         Gas:      gasEstimate.Uint64(),
         GasPrice: gasPrice,
     }
-receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
-    return sendTransaction(tx, "token")
-})
-if err != nil {
-    notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
-    return fmt.Errorf("transaction execution failed: %w", err)
-}
+    receipt, err := retryWithBackoff(maxRetries, initialBackoff, func() (*Receipt, error) {
+        return sendTransaction(tx, "token")
+    })
+    if err != nil {
+        notifyNode("execution_error", fmt.Sprintf("Error executing route: %v", err))
+        return fmt.Errorf("transaction execution failed: %w", err)
+    }
 
-log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
-
+    log.Printf("Transaction successful. Hash: %s", receipt.TransactionHash)
     return nil
 }
+
 
 
 // retryWithBackoff retries a function with exponential backoff.
@@ -1786,6 +1786,13 @@ func retryWithBackoff[T any](maxRetries int, initialBackoff time.Duration, fn fu
     return result, err
 }
 
+// Wrapper for `error`-only Functions:
+func retryWithBackoffError(maxRetries int, initialBackoff time.Duration, fn func() error) error {
+    _, err := retryWithBackoff(maxRetries, initialBackoff, func() (struct{}, error) {
+        return struct{}{}, fn()
+    })
+    return err
+}
 
 // Helper function to set cache with expiration for token prices
 func cacheSetTokenPrices(key string, value interface{}, duration time.Duration) {
@@ -2349,74 +2356,62 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 
 // Main function for monitoring mempool with retryable connection and subscription logic
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-        // Declare variables
-    ch := make(chan *types.Transaction)
-    var subResult interface{}
+    ch := make(chan *types.Transaction) // Correctly initialize the channel
     var clientResult interface{}
     var err error
-	// Retry logic for connecting to Ethereum client
-	clientResult, err = Retry(func() (interface{}, error) {
-		return ethclient.Dial(rpcURL)
-	}, 3, 2*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
-	}
 
-	client := clientResult.(*ethclient.Client)
-	defer client.Close()
-	log.Println("Connected to Ethereum client. Monitoring mempool...")
+    // Retry logic for connecting to Ethereum client
+    clientResult, err = Retry(func() (interface{}, error) {
+        return ethclient.Dial(rpcURL)
+    }, 3, 2*time.Second)
+    if err != nil {
+        return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
+    }
 
-	for {
-		// Retry logic for subscribing to pending transactions
-		subResult, err = Retry(func() (interface{}, error) {
-			pendingTxs := make(chan *types.Transaction)
-			rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
-if err != nil {
-    return fmt.Errorf("failed to connect to RPC client: %v", err)
+    client := clientResult.(*ethclient.Client)
+    defer client.Close()
+    log.Println("Connected to Ethereum client. Monitoring mempool...")
+
+    rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
+    if err != nil {
+        return fmt.Errorf("failed to connect to RPC client: %v", err)
+    }
+
+    for {
+        // Retry logic for subscribing to pending transactions
+        sub, err := rpcClient.Subscribe(ctx, ch, "newPendingTransactions")
+        if err != nil {
+            log.Printf("Failed to subscribe to pending transactions: %v. Retrying...", err)
+            time.Sleep(5 * time.Second) // Delay before retry
+            continue
+        }
+
+        log.Println("Subscribed to newPendingTransactions")
+
+        // Process transactions as they arrive
+        for {
+            select {
+            case err := <-sub.Err():
+                log.Printf("Subscription error: %v. Retrying subscription...", err)
+                sub.Unsubscribe()
+                break // Exit the inner loop to retry subscription
+            case txHash := <-ch:
+                // Fetch transaction details using txHash
+                tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
+                if err != nil {
+                    log.Printf("Failed to fetch transaction details for hash %s: %v", txHash, err)
+                    continue
+                }
+                go processTransaction(client, tx, targetContracts)
+            case <-ctx.Done():
+                log.Println("Shutting down mempool monitoring...")
+                sub.Unsubscribe()
+                return nil
+            }
+        }
+    }
 }
-sub, err := rpcClient.Subscribe(ctx, ch, "newHeads")
-if err != nil {
-    return fmt.Errorf("failed to subscribe to newHeads: %v", err)
-}
 
-			if err != nil {
-				return nil, err
-			}
-			return struct {
-				Sub       ethereum.Subscription
-				PendingTx chan *types.Transaction
-			}{Sub: sub, PendingTx: pendingTxs}, nil
-		}, 3, 2*time.Second)
-		if err != nil {
-			log.Printf("Failed to subscribe to pending transactions after retries: %v", err)
-			time.Sleep(5 * time.Second) // Delay before retrying the entire loop
-			continue
-		}
-
-		subscriptionData := subResult.(struct {
-			Sub       ethereum.Subscription
-			PendingTx chan *types.Transaction
-		})
-		sub := subscriptionData.Sub
-		pendingTxs := subscriptionData.PendingTx
-
-		// Process transactions as they arrive
-		for {
-			select {
-			case err := <-sub.Err():
-				log.Printf("Subscription error: %v. Retrying subscription...", err)
-				sub.Unsubscribe()
-				break // Exit the inner loop to retry subscription
-			case tx := <-pendingTxs:
-				go processTransaction(client, tx, targetContracts)
-			case <-ctx.Done():
-				log.Println("Shutting down mempool monitoring...")
-				sub.Unsubscribe()
-				return nil
-			}
-		}
-	}
-}
 
 
 func approveTokensNode(route []string, amount *big.Int) error {
@@ -2749,15 +2744,18 @@ func handleMessages(client *WebSocketClient) {
 // Broadcast messages to all WebSocket clients
 func broadcastMessages() {
 	for msg := range broadcastChan {
-		clientsMutex.Lock()
+		clientsMutex.Lock() // Lock the clients map for safe access
 		for client := range wsClients {
+			// Attempt to write the message to the WebSocket connection
 			if err := client.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				log.Printf("Error broadcasting message: %v", err)
+
+				// Close the connection and remove the client from the map
 				client.Conn.Close()
 				delete(wsClients, client)
 			}
 		}
-		clientsMutex.Unlock()
+		clientsMutex.Unlock() // Unlock after iterating
 	}
 }
 
@@ -2771,28 +2769,34 @@ func wsBroadcastManager() {
             continue
         }
 
+        clientsMutex.Lock() // Lock to safely iterate over wsClients
         for client := range wsClients {
-            func(client *websocket.Conn) {
-                  wsConn := client.Conn
+            wsConn := client.Conn
+            func(wsConn *websocket.Conn) {
                 defer func() {
                     if r := recover(); r != nil {
                         log.Printf("Recovered from panic while sending WebSocket message: %v", r)
-                        client.Close()
-                        delete(wsClients, wsClients[client])
+                        wsConn.Close()
+                        clientsMutex.Lock()
+                        delete(wsClients, client)
+                        clientsMutex.Unlock()
                     }
                 }()
 
                 // Attempt to send the message to the WebSocket client
-                err := client.WriteMessage(websocket.TextMessage, data)
-                if err != nil {
+                if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
                     log.Printf("WebSocket send error: %v", err)
-                    client.Close()
-                    delete(wsClients, wsClients[client])
+                    wsConn.Close()
+                    clientsMutex.Lock()
+                    delete(wsClients, client)
+                    clientsMutex.Unlock()
                 }
-            }(client)
+            }(wsConn)
         }
+        clientsMutex.Unlock()
     }
 }
+
 
 
 // Main function
