@@ -878,55 +878,45 @@ export async function notifyMonitoringSystem(message) {
 async function runArbitrageBot() {
   log('Starting arbitrage bot...');
 
-  // Define target contracts and token addresses
-  const targetContracts = ['targetContractAddress1', 'targetContractAddress2'];
+  // Define token addresses to monitor
   const tokenAddresses = HARDCODED_STABLE_ADDRESSES;
 
-  // Mempool Monitoring for Arbitrage Opportunities
-  // monitorMempool(targetContracts, process.env.CHAIN_ID, async ({ txHash, profit, srcToken, dstToken, amountIn }) => {
-  //   log(`Mempool Arbitrage Opportunity Detected!`, 'info');
-  //   log(`Transaction Hash: ${txHash}, Profit: ${profit.toFixed()} USDT`);
-  //   log(`Route: ${srcToken} ➡️ ${dstToken}, Amount In: ${amountIn.toFixed()}`);
-
-  //   try {
-  //     const route = [srcToken, dstToken];
-  //     await executeRoute(route, amountIn); // Execute using Go backend
-  //     await sendTelegramMessage(`🚀 Executed mempool arbitrage! Profit: ${profit.toFixed()} USDT`);
-  //   } catch (error) {
-  //     log(`Error executing mempool arbitrage: ${error.message}`, 'error');
-  //     await sendTelegramMessage(`❌ Error in mempool arbitrage: ${error.message}`, true);
-  //   }
-  // });
-
-  // Periodic Live Market Data Monitoring for Profitable Routes
+  // Periodic Live Market Data Fetching
   setInterval(async () => {
-    log('Running periodic profitable route discovery...', 'info');
+    log('Running periodic market data discovery...', 'info');
 
     try {
       // Fetch gas price and log it
       const gasPrice = await fetchGasPrice();
       log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`, 'info');
 
-      // Fetch live token prices for HARDCODED_STABLE_ADDRESSES
+      // Fetch live token prices and liquidity for HARDCODED_STABLE_ADDRESSES
       const tokenPrices = await fetchTokenPrices(tokenAddresses);
       log(`Live token prices: ${JSON.stringify(tokenPrices)}`, 'info');
 
-      // Call Go backend for route evaluation
+      const liquidityData = await fetchLiquidityForAllPairs(tokenAddresses);
+      log(`Liquidity data fetched: ${JSON.stringify(liquidityData)}`, 'info');
+
+      // Combine data into a payload
+      const marketData = {
+        gasPrice: gasPrice.toFixed(),
+        tokenPrices,
+        liquidity: liquidityData,
+      };
+
+      // Send market data to Go backend for evaluation
       const response = await retryRequest(() =>
-        axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { tokenPrices })
+        axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData)
       );
 
-      if (response.status === 200 && response.data.profit > 0) {
-        const { route, amount } = response.data;
-        log(`Executing live arbitrage: Route: ${route.join(' ➡️ ')}, Profit: ${response.data.profit}`, 'info');
-        await executeRoute(route, amount); // Execute using Go backend
-        await sendTelegramMessage(`🚀 Executed live arbitrage! Profit: ${response.data.profit} USDT`);
+      if (response.status === 200 && response.data.status === 'success') {
+        log('Market data sent to Go backend successfully.', 'info');
       } else {
-        log('No profitable routes found in live market data.', 'info');
+        log(`Go backend returned error: ${response.data.message}`, 'warn');
       }
     } catch (error) {
-      log(`Error in live market data monitoring: ${error.message}`, 'error');
-      await sendTelegramMessage(`❌ Error in live market data monitoring: ${error.message}`, true);
+      log(`Error in periodic market data discovery: ${error.message}`, 'error');
+      await sendTelegramMessage(`❌ Error in market data discovery: ${error.message}`, true);
     }
   }, 5 * 60 * 1000); // Run every 5 minutes
 
