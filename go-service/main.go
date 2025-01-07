@@ -12,6 +12,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+        "os/signal"
+        "syscall"
         "bytes"
 	"strings"
 	"time"
