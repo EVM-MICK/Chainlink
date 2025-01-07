@@ -31,7 +31,7 @@ const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, new ethers.providers.JsonRpcProvider(process.env.INFURA_URL));
 const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-const CACHE_DURATION = 5 * 60; // 5 minutes in seconds
+const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
 const CHAIN_ID = 42161;
 const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
 const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
@@ -172,16 +172,16 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 
 
 // Redis Cache Helper
-async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
-  const cached = await redis.get(key);
-  if (cached) {
-    return JSON.parse(cached);
-  }
+// async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
+//   const cached = await redis.get(key);
+//   if (cached) {
+//     return JSON.parse(cached);
+//   }
 
-  const data = await fetchFn();
-  await redis.setex(key, duration, JSON.stringify(data));
-  return data;
-}
+//   const data = await fetchFn();
+//   await redis.setex(key, duration, JSON.stringify(data));
+//   return data;
+// }
 
 // Fetch Functions
 async function fetchGasPrice() {
