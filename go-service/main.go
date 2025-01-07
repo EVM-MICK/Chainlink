@@ -2214,7 +2214,7 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	if method, err := uniswapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
-			log.Printf("Failed to decode Uniswap transaction: %v")
+			log.Printf("Failed to decode Uniswap transaction: %v", err)
 			return
 		}
 
@@ -2227,7 +2227,7 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	if method, err := sushiSwapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
-			log.Printf("Failed to decode SushiSwap transaction: %v")
+			log.Printf("Failed to decode SushiSwap transaction: %v",, err)
 			return
 		}
 
