@@ -198,7 +198,8 @@ function log(message, level = 'info') {
 
 (async () => {
   try {
-    const nonce = await permit2Contract.methods.nonces(account.address).call();
+    const account = wallet.address; // Ensure `wallet` is defined correctly
+    const nonce = await permit2Contract.methods.nonces(account).call();
     console.log("Nonce fetched successfully:", nonce);
   } catch (error) {
     console.error("Error fetching nonce:", error);
@@ -695,32 +696,31 @@ export async function processMarketData() {
 }
 // Mempool Monitoring and Live Data Retrieval
 async function monitorMempool(targetContracts) {
-  const connectWebSocket = () => {
-    const web3 = new Web3(new Web3.providers.WebsocketProvider(INFURA_WS_URL));
-    console.log('WebSocket connection established.');
+  const web3 = new Web3(process.env.INFURA_WS_URL);
 
-    web3.eth.subscribe('pendingTransactions', async (error, txHash) => {
-      if (error) {
-        console.error(`WebSocket subscription error: ${error.message}`);
-        return;
-      }
+  console.log('Starting block polling...');
 
-      try {
-        // Fetch transaction details using the transaction hash
-        const tx = await web3.eth.getTransaction(txHash);
-        if (!tx) {
-          console.warn(`Transaction ${txHash} not found. Skipping.`);
-          return;
-        }
+  web3.eth.subscribe('newBlockHeaders', async (error, blockHeader) => {
+    if (error) {
+      console.error(`Error subscribing to newBlockHeaders: ${error.message}`);
+      addErrorToSummary(error, 'Block Subscription');
+      return;
+    }
 
-        // Ensure the transaction involves a target contract
+    console.log(`New block received: ${blockHeader.number}`);
+
+    try {
+      // Fetch full block details
+      const block = await web3.eth.getBlock(blockHeader.number, true);
+
+      for (const tx of block.transactions) {
         if (tx.to && targetContracts.includes(tx.to.toLowerCase())) {
-          console.log(`Transaction detected targeting monitored contract: ${txHash}`);
+          console.log(`Transaction detected targeting monitored contract: ${tx.hash}`);
 
-          // Extract tokens from the transaction (implement this function for Web3 if needed)
+          // Implement token extraction logic
           const detectedTokens = extractTokensFromTransaction(tx);
 
-          // Filter tokens to HARDCODED_STABLE_ADDRESSES
+          // Filter tokens to relevant stable addresses
           const relevantTokens = detectedTokens.filter((token) =>
             HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
           );
@@ -728,57 +728,94 @@ async function monitorMempool(targetContracts) {
           if (relevantTokens.length > 0) {
             console.log(`Relevant tokens detected: ${relevantTokens.join(', ')}`);
 
-            // Fetch live prices for the relevant tokens using shared caching
+            // Fetch token prices
             const tokenPrices = await fetchTokenPrices(relevantTokens);
             console.log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`);
 
-            // Call Go backend to evaluate profitability
+            // Call backend to evaluate transaction profitability
             const response = await retryRequest(() =>
-              axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash, tokenPrices })
+              axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash: tx.hash, tokenPrices })
             );
 
             if (response.status === 200 && response.data.profit > 0) {
-              console.log(`Profitable transaction detected: ${txHash}`);
+              console.log(`Profitable transaction detected: ${tx.hash}`);
               await executeRoute(response.data.route, response.data.amount);
               await sendTelegramMessage(
-                `🚀 Profitable transaction executed from mempool!\nProfit: ${response.data.profit} USDT`
+                `🚀 Profitable transaction executed from block polling!\nProfit: ${response.data.profit} USDT`
               );
             } else {
-              console.log(`Unprofitable transaction detected: ${txHash}`);
+              console.log(`Unprofitable transaction detected: ${tx.hash}`);
             }
           } else {
-            console.log(`No relevant tokens detected in transaction: ${txHash}`);
+            console.log(`No relevant tokens detected in transaction: ${tx.hash}`);
           }
         }
-      } catch (err) {
-        console.error(`Error processing transaction ${txHash}: ${err.message}`);
-        consecutiveFailures++;
-        checkCircuitBreaker();
-        addErrorToSummary(err, `Transaction: ${txHash}`);
       }
-    });
+    } catch (err) {
+      console.error(`Error processing block ${blockHeader.number}: ${err.message}`);
+      addErrorToSummary(err, `Block ${blockHeader.number}`);
+    }
+  });
 
-    // Handle WebSocket closure and reconnection
-    web3.currentProvider.on('close', () => {
-      console.warn('WebSocket connection closed. Reconnecting...');
-      setTimeout(connectWebSocket, 5000); // Retry after 5 seconds
-    });
+  // Handle WebSocket reconnections
+  web3.currentProvider.on('close', () => {
+    console.warn('WebSocket connection closed. Reconnecting...');
+    setTimeout(() => monitorMempool(targetContracts), 5000);
+  });
 
-    web3.currentProvider.on('error', (err) => {
-      console.error(`WebSocket error: ${err.message}`);
-      addErrorToSummary(err, 'WebSocket Error');
-    });
+  web3.currentProvider.on('error', (err) => {
+    console.error(`WebSocket error: ${err.message}`);
+    addErrorToSummary(err, 'WebSocket Error');
+  });
+}
 
-    // Ping the WebSocket connection to keep it alive
-    setInterval(() => {
-      web3.eth.net.isListening().catch((err) => {
-        console.error(`WebSocket ping failed: ${err.message}`);
-        addErrorToSummary(err, 'WebSocket Ping');
+/**
+ * Extract tokens from a transaction's input data.
+ * @param {Object} tx - Transaction object.
+ * @param {Array<string>} stableAddresses - Array of stable token contract addresses to monitor.
+ * @param {Object} abi - ABI object for decoding transaction data.
+ * @returns {Array<string>} - List of detected token addresses.
+ */
+function extractTokensFromTransaction(tx, stableAddresses, abi) {
+  try {
+    const detectedTokens = [];
+    if (!tx.input || tx.input === "0x") {
+      return detectedTokens; // No input data, return empty array
+    }
+
+    // Decode input data using ABI
+    const decodedInput = decodeTransactionInput(tx.input, abi);
+    if (decodedInput) {
+      // Iterate through decoded inputs to find token addresses
+      Object.values(decodedInput).forEach((value) => {
+        if (typeof value === "string" && stableAddresses.includes(value.toLowerCase())) {
+          detectedTokens.push(value.toLowerCase());
+        }
       });
-    }, 30000);
-  };
+    }
 
-  connectWebSocket();
+    return [...new Set(detectedTokens)]; // Remove duplicates
+  } catch (err) {
+    console.error(`Error extracting tokens from transaction: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Decode transaction input data using ABI.
+ * @param {string} input - Hexadecimal transaction input data.
+ * @param {Object} abi - ABI object for decoding.
+ * @returns {Object|null} - Decoded input data or null if decoding fails.
+ */
+function decodeTransactionInput(input, abi) {
+  try {
+    const contract = new web3.eth.Contract(abi);
+    const decodedData = contract.decodeTransaction(input);
+    return decodedData.params || null;
+  } catch (err) {
+    console.error(`Error decoding transaction input: ${err.message}`);
+    return null;
+  }
 }
 
 export async function notifyMonitoringSystem(message) {
