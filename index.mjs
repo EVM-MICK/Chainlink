@@ -27,8 +27,6 @@ const getAsync = promisify(redisClient.get).bind(redisClient)
 const REDIS_TTL = 60; // Cache data for 1 minute
 const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
-const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
-const queue = new PQueue({ concurrency: 1 });
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; // Go service endpoint
@@ -41,6 +39,8 @@ const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
+const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
+const queue = new PQueue({ concurrency: 1 });
 const HARDCODED_STABLE_ADDRESSES = [
     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",//usdt
     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",//usdc
