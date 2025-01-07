@@ -83,7 +83,7 @@ const permit2Abi = [
     { "internalType": "bytes", "name": "signature", "type": "bytes" }
 ];
 
-const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
+//const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
 
 // State Variables
 let consecutiveFailures = 0;
