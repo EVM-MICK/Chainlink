@@ -14,6 +14,8 @@ import pkg from 'telegraf';
 
 dotenv.config();
 const { Telegraf } = pkg;
+
+const INFURA_WS_URL = process.env.INFURA_WS_URL;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
 const permit2Abi = [
@@ -83,7 +85,8 @@ const permit2Abi = [
 ];
 
 const CHAIN_ID = 42161;
-const web3 = new Web3(process.env.INFURA_URL);
+const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
@@ -121,9 +124,12 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",//weth
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
 ];
-const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-//const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
+// Initialize Permit2 contract instance
+const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
 
+// Add private key to Web3 wallet
+const account = web3.eth.accounts.privateKeyToAccount(PRIVATE_KEY);
+web3.eth.accounts.wallet.add(account);
 // State Variables
 let consecutiveFailures = 0;
 
@@ -189,16 +195,14 @@ function log(message, level = 'info') {
   }
 }
 
-async function fetchNonce() {
+(async () => {
   try {
-    const nonce = await permit2Contract.nonces(wallet.address);
-    console.log("Nonce fetched successfully:", nonce.toString());
-    return nonce;
+    const nonce = await permit2Contract.methods.nonces(account.address).call();
+    console.log("Nonce fetched successfully:", nonce);
   } catch (error) {
     console.error("Error fetching nonce:", error);
-    throw error;
   }
-}
+})();
 
 // Connect to Redis
 (async () => {
@@ -690,85 +694,90 @@ export async function processMarketData() {
 }
 // Mempool Monitoring and Live Data Retrieval
 async function monitorMempool(targetContracts) {
-    const connectWebSocket = () => {
-        const provider = new ethers.WebSocketProvider(process.env.INFURA_WS_URL);
-        log('WebSocket connection established.');
+  const connectWebSocket = () => {
+    const web3 = new Web3(new Web3.providers.WebsocketProvider(INFURA_WS_URL));
+    console.log('WebSocket connection established.');
 
-        provider.on('pending', async (txHash) => {
-            try {
-                // Fetch transaction details using txHash
-                const tx = await provider.getTransaction(txHash);
-                if (!tx) {
-                    log(`Transaction ${txHash} not found or null. Skipping...`, 'warn');
-                    return;
-                }
+    web3.eth.subscribe('pendingTransactions', async (error, txHash) => {
+      if (error) {
+        console.error(`WebSocket subscription error: ${error.message}`);
+        return;
+      }
 
-                // Ensure the transaction involves a target contract
-                if (tx.to && targetContracts.includes(tx.to.toLowerCase())) {
-                    log(`Transaction detected targeting monitored contract: ${txHash}`);
+      try {
+        // Fetch transaction details using the transaction hash
+        const tx = await web3.eth.getTransaction(txHash);
+        if (!tx) {
+          console.warn(`Transaction ${txHash} not found. Skipping.`);
+          return;
+        }
 
-                    // Extract tokens from the transaction
-                    const detectedTokens = extractTokensFromTransaction(tx);
+        // Ensure the transaction involves a target contract
+        if (tx.to && targetContracts.includes(tx.to.toLowerCase())) {
+          console.log(`Transaction detected targeting monitored contract: ${txHash}`);
 
-                    // Filter tokens to HARDCODED_STABLE_ADDRESSES
-                    const relevantTokens = detectedTokens.filter((token) =>
-                        HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
-                    );
+          // Extract tokens from the transaction (implement this function for Web3 if needed)
+          const detectedTokens = extractTokensFromTransaction(tx);
 
-                    if (relevantTokens.length > 0) {
-                        log(`Relevant tokens detected: ${relevantTokens.join(', ')}`);
+          // Filter tokens to HARDCODED_STABLE_ADDRESSES
+          const relevantTokens = detectedTokens.filter((token) =>
+            HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
+          );
 
-                        // Fetch live prices for the relevant tokens using shared caching
-                        const tokenPrices = await fetchTokenPrices(relevantTokens);
-                        log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`);
+          if (relevantTokens.length > 0) {
+            console.log(`Relevant tokens detected: ${relevantTokens.join(', ')}`);
 
-                        // Call Go backend to evaluate profitability
-                        const response = await retryRequest(() =>
-                            axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash, tokenPrices })
-                        );
+            // Fetch live prices for the relevant tokens using shared caching
+            const tokenPrices = await fetchTokenPrices(relevantTokens);
+            console.log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`);
 
-                        if (response.status === 200 && response.data.profit > 0) {
-                            log(`Profitable transaction detected: ${txHash}`);
-                            await executeRoute(response.data.route, response.data.amount);
-                            await sendTelegramMessage(
-                                `🚀 Profitable transaction executed from mempool!\nProfit: ${response.data.profit} USDT`
-                            );
-                        } else {
-                            log(`Unprofitable transaction detected: ${txHash}`);
-                        }
-                    } else {
-                        log(`No relevant tokens detected in transaction: ${txHash}`);
-                    }
-                }
-            } catch (err) {
-                log(`Error processing transaction ${txHash}: ${err.message}`, 'error');
-                consecutiveFailures++;
-                checkCircuitBreaker();
-                addErrorToSummary(err, `Transaction: ${txHash}`);
+            // Call Go backend to evaluate profitability
+            const response = await retryRequest(() =>
+              axios.post(`${process.env.GO_BACKEND_URL}/evaluate`, { txHash, tokenPrices })
+            );
+
+            if (response.status === 200 && response.data.profit > 0) {
+              console.log(`Profitable transaction detected: ${txHash}`);
+              await executeRoute(response.data.route, response.data.amount);
+              await sendTelegramMessage(
+                `🚀 Profitable transaction executed from mempool!\nProfit: ${response.data.profit} USDT`
+              );
+            } else {
+              console.log(`Unprofitable transaction detected: ${txHash}`);
             }
-        });
+          } else {
+            console.log(`No relevant tokens detected in transaction: ${txHash}`);
+          }
+        }
+      } catch (err) {
+        console.error(`Error processing transaction ${txHash}: ${err.message}`);
+        consecutiveFailures++;
+        checkCircuitBreaker();
+        addErrorToSummary(err, `Transaction: ${txHash}`);
+      }
+    });
 
-        // Handle WebSocket closure and errors
-        provider._websocket.on('close', () => {
-            log('WebSocket connection closed. Reconnecting...', 'warn');
-            setTimeout(connectWebSocket, 5000); // Retry after 5 seconds
-        });
+    // Handle WebSocket closure and reconnection
+    web3.currentProvider.on('close', () => {
+      console.warn('WebSocket connection closed. Reconnecting...');
+      setTimeout(connectWebSocket, 5000); // Retry after 5 seconds
+    });
 
-        provider._websocket.on('error', (err) => {
-            log(`WebSocket error: ${err.message}`, 'error');
-            addErrorToSummary(err, 'WebSocket Error');
-        });
+    web3.currentProvider.on('error', (err) => {
+      console.error(`WebSocket error: ${err.message}`);
+      addErrorToSummary(err, 'WebSocket Error');
+    });
 
-        // Send heartbeat pings to keep WebSocket alive
-        setInterval(() => {
-            provider.send('ping', []).catch((err) => {
-                log(`Failed to send WebSocket ping: ${err.message}`, 'error');
-                addErrorToSummary(err, 'WebSocket Ping');
-            });
-        }, 30000);
-    };
+    // Ping the WebSocket connection to keep it alive
+    setInterval(() => {
+      web3.eth.net.isListening().catch((err) => {
+        console.error(`WebSocket ping failed: ${err.message}`);
+        addErrorToSummary(err, 'WebSocket Ping');
+      });
+    }, 30000);
+  };
 
-    connectWebSocket();
+  connectWebSocket();
 }
 
 export async function notifyMonitoringSystem(message) {
