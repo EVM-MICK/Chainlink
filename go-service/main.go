@@ -173,7 +173,6 @@ var (
 	}
 )
 
-
 // Global cache instance for stable token data
 // Cache Initialization
 var stableTokenCache = cache.New(5*time.Minute, 10*time.Minute)
@@ -1169,92 +1168,43 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ChainID        int64                      `json:"chainId"`
-		StartToken     string                     `json:"startToken"`
-		StartAmount    string                     `json:"startAmount"`
-		MaxHops        int                        `json:"maxHops"`
-		ProfitThreshold string                    `json:"profitThreshold"`
-		TokenPrices    map[string]float64         `json:"tokenPrices"`
-		Liquidity      []map[string]interface{}   `json:"liquidity"`
+	// Example REST API handler logic
+	chainID := int64(42161) // Ethereum Mainnet
+	startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+
+	dstToken := r.URL.Query().Get("dstToken")
+	if !isValidTokenAddress(dstToken) {
+		http.Error(w, "Invalid destination token address", http.StatusBadRequest)
+		return
 	}
 
-	// Parse JSON body
-	err := json.NewDecoder(r.Body).Decode(&req)
+	tokenPairs := []TokenPair{
+		{SrcToken: startToken, DstToken: dstToken},
+	}
+
+	graph, err := BuildGraph(tokenPairs, chainID)
 	if err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		log.Printf("Error decoding request body: %v", err)
+		log.Printf("Error building graph: %v", err)
+		http.Error(w, "Failed to build graph", http.StatusInternalServerError)
 		return
 	}
 
-	// Input validation
-	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
-		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
-		log.Println("Invalid input parameters detected in the request.")
-		return
-	}
-
-	startAmount := new(big.Int)
-	if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
-		log.Println("Invalid startAmount format or value.")
-		return
-	}
-
-	profitThreshold := new(big.Int)
-	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
-		log.Println("Invalid profitThreshold format or value.")
-		return
-	}
-
-	// Validate token decimals
-	tokenDecimals := getTokenDecimals(req.StartToken)
-	if tokenDecimals < 0 {
-		http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
-		log.Printf("Invalid token decimals for token: %s", req.StartToken)
-		return
-	}
-
-	// Check if the start amount aligns with token decimals
-	adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
-	if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
-		log.Println("Invalid adjusted startAmount.")
-		return
-	}
-
-	// Log received market data for debugging
-	log.Printf("Received market data: TokenPrices=%v, Liquidity=%v", req.TokenPrices, req.Liquidity)
-
-	// Compute profitable routes based on market data
-	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
+	path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
 	if err != nil {
-		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
-		log.Printf("Error computing profitable routes: %v", err)
+		log.Printf("Error computing optimal route: %v", err)
+		http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
 		return
 	}
 
-	// Further filter routes based on request parameters
-	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
-	if err != nil {
-		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
-		log.Printf("Error filtering profitable routes: %v", err)
-		return
-	}
-
-	// Respond with the final filtered routes
+	log.Printf("Optimal route: %v, Total cost: %f", path, cost)
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"routes": filteredRoutes,
-	}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		log.Printf("Error encoding response: %v", err)
-		return
+	response := map[string]interface{}{
+		"path": path,
+		"cost": cost,
 	}
-
-	log.Println("Successfully computed and returned filtered routes.")
+	json.NewEncoder(w).Encode(response)
 }
+
 
 // fetchTokenDecimalsFromBlockchain queries the blockchain to retrieve token decimals
 func fetchTokenDecimalsFromBlockchain(tokenAddress string) (int, error) {
@@ -2664,7 +2614,7 @@ func handleClientMessages(client *WebSocketClient) {
 			}
 
 			// Handle valid messages (e.g., broadcast)
-			broadcastChannel <- []byte(message) // Correct type for byte array.
+			broadcastChan <- []byte(message) // Correct type for byte array.
 		}
 	}
 }
@@ -2800,45 +2750,23 @@ func wsBroadcastManager() {
 
 // Main function
 func main() {
-    rateLimiter = NewRateLimiter(5, time.Second)
-    broadcastChan = make(chan []byte)
-	// Required environment variables
+	// Validate required environment variables
 	requiredVars := []string{"RPC_URL", "NODE_API_URL", "PRIVATE_KEY", "WALLET_ADDRESS"}
 	if err := validateEnvVars(requiredVars); err != nil {
 		log.Fatalf("Environment variables validation failed: %v", err)
 	}
-	
-	// Fetch and use validated variables
-	rpcURL := os.Getenv("INFURA_WS_URL")
-	nodeAPIURL := os.Getenv("NODE_API_URL")
 
-	// Parse Uniswap and SushiSwap ABIs
-	uniswapABI, err := abi.JSON(strings.NewReader(UniswapV3RouterABI))
-	if err != nil {
-		log.Fatalf("Failed to parse Uniswap V3 Router ABI: %v", err)
-	}
-
-	sushiSwapABI, err := abi.JSON(strings.NewReader(SushiSwapRouterABI))
-	if err != nil {
-		log.Fatalf("Failed to parse SushiSwap Router ABI: %v", err)
-	}
-
-	// Define target contracts
-	targetContracts := map[string]bool{
-		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
-		"0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
-	}
-
-       // Graceful shutdown handling
+	// Context with cancel function for graceful shutdown
 	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancel()
+	defer cancelFunc()
 
+	// Handle OS signals for graceful shutdown
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
 		log.Println("Shutdown signal received, cleaning up resources...")
-		cancel()
+		cancelFunc()
 		shutdownWebSocketServer()
 	}()
 
@@ -2849,60 +2777,32 @@ func main() {
 		log.Fatal(http.ListenAndServe(":8080", nil))
 	}()
 
-	// Start monitoring the mempool in a separate goroutine
+	// Define target contracts for mempool monitoring
+	targetContracts := map[string]bool{
+		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
+		"0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
+	}
+
+	// Start monitoring the mempool
 	go func() {
-		if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("INFURA_WS_URL")); err != nil {
+		if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("RPC_URL")); err != nil {
 			log.Printf("Mempool monitoring terminated: %v", err)
-			cancel() // Trigger shutdown on failure
+			cancelFunc()
 		}
 	}()
 
-	// Start the REST API server for route generation and dynamic graph building
-	http.HandleFunc("/generate-routes", func(w http.ResponseWriter, r *http.Request) {
-		// Example REST API handler logic
-		chainID := int64(42161) // Ethereum Mainnet
-		startToken := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+	// Start REST API server for route generation
+	http.HandleFunc("/generate-routes", generateRoutesHandler)
 
-		dstToken := r.URL.Query().Get("dstToken")
-		if !isValidTokenAddress(dstToken) {
-			http.Error(w, "Invalid destination token address", http.StatusBadRequest)
-			return
-		}
-
-		tokenPairs := []TokenPair{
-			{SrcToken: startToken, DstToken: dstToken},
-		}
-
-		graph, err := BuildGraph(tokenPairs, chainID)
-		if err != nil {
-			log.Printf("Error building graph: %v", err)
-			http.Error(w, "Failed to build graph", http.StatusInternalServerError)
-			return
-		}
-
-		path, cost, err := ComputeOptimalRoute(graph, startToken, dstToken)
-		if err != nil {
-			log.Printf("Error computing optimal route: %v", err)
-			http.Error(w, "Failed to compute optimal route", http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("Optimal route: %v, Total cost: %f", path, cost)
-		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{
-			"path": path,
-			"cost": cost,
-		}
-		json.NewEncoder(w).Encode(response)
-	})
-
-     // Monitor system health periodically
+	// Monitor system health periodically
 	go monitorSystemHealth()
-    
-      // Wait for shutdown
+
+	// Wait for shutdown
 	<-ctx.Done()
 	log.Println("System shutdown complete.")
 }
+
+
 
 // Helper function to validate token address
 func isValidTokenAddress(address string) bool {
