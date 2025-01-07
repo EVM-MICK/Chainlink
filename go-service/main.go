@@ -2355,7 +2355,7 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 }
 
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-	ch := make(chan string) // Correctly initialize the channel as chan string
+	ch := make(chan string) // Channel type for transaction hashes
 	var clientResult interface{}
 	var err error
 
@@ -2378,7 +2378,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 
 	for {
 		// Retry logic for subscribing to pending transactions
-		sub, err := rpcClient.Subscribe(ctx, ch, "newPendingTransactions")
+		sub, err := rpcClient.Subscribe(ctx, "newPendingTransactions", ch) // Correct argument order
 		if err != nil {
 			log.Printf("Failed to subscribe to pending transactions: %v. Retrying...", err)
 			time.Sleep(5 * time.Second) // Delay before retry
@@ -2394,7 +2394,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 				log.Printf("Subscription error: %v. Retrying subscription...", err)
 				sub.Unsubscribe()
 				break // Exit the inner loop to retry subscription
-			case txHash := <-ch: // Now txHash is of type string
+			case txHash := <-ch: // txHash is of type string
 				// Fetch transaction details using txHash
 				tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
 				if err != nil {
@@ -2410,6 +2410,7 @@ func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL
 		}
 	}
 }
+
 
 
 func approveTokensNode(route []string, amount *big.Int) error {
