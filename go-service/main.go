@@ -2329,7 +2329,6 @@ func shutdownAll(ctx context.Context) {
 // Monitor mempool for pending transactions
 
 func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-      ch := make(chan *types.Transaction)
        wg.Add(1)
 	defer wg.Done()
 	for {
@@ -2351,6 +2350,7 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 // Main function for monitoring mempool with retryable connection and subscription logic
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
         // Declare variables
+    ch := make(chan *types.Transaction)
     var subResult interface{}
     var clientResult interface{}
     var err error
