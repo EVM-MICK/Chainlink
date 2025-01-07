@@ -69,8 +69,9 @@ var (
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
-
+var rateLimiter = NewRateLimiter(5, time.Second)
 const oneInchPriceAPI = "https://api.1inch.dev/price/v1.1/42161"
+var broadcastChan = make(chan []byte)
 
 const UniswapV3RouterABI = `[
   {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH9","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
@@ -151,7 +152,6 @@ var clientOnce sync.Once
 // Global WebSocket Broadcast Channel
 var wsBroadcast = make(chan ArbitrageOpportunity)
 // BroadcastChannel for messages
-var broadcastChannel = make(chan []byte)
 
 // Hardcoded stable token addresses
 var hardcodedStableTokens = []Token{
@@ -164,9 +164,9 @@ var hardcodedStableTokens = []Token{
 
 // WebSocket clients map and lock
 var (
-	wsClients    = make(map[*WebSocketClient]bool)
+	wsClients = make(map[*WebSocketClient]bool)
 	clientsMutex sync.Mutex
-	upgrader     = websocket.Upgrader{
+	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
@@ -260,13 +260,6 @@ type QuoteCache struct {
 var quoteCache = QuoteCache{
 	cache: make(map[string]interface{}),
 }
-
-
-// var upgrader = websocket.Upgrader{
-// 	CheckOrigin: func(r *http.Request) bool {
-// 		return true
-// 	},
-// }
 
 type RateLimitTracker struct {
 	Used      int
@@ -531,23 +524,22 @@ func (rl *RateLimiter) Stop() {
 
 // Retry retries a function with exponential backoff.
 func Retry(operation RetryFunction, maxRetries int, initialBackoff time.Duration) (interface{}, error) {
-	backoff := initialBackoff
+    backoff := initialBackoff
     var result interface{}
     var err error
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		result, err = operation()
-		if err == nil {
-			return result, nil
-		}
+    for attempt := 1; attempt <= maxRetries; attempt++ {
+        result, err = operation()
+        if err == nil {
+            return result, nil
+        }
 
         log.Printf("Retry attempt %d/%d failed: %v", attempt, maxRetries, err)
         time.Sleep(backoff)
         backoff *= 2
+    }
 
-	}
-
-	return nil, fmt.Errorf("operation failed after %d retries: %w", maxRetries, err)
+    return nil, fmt.Errorf("operation failed after %d retries: %w", maxRetries, err)
 }
 
 // getStableTokenList fetches the stable token list or falls back to hardcoded tokens
@@ -2211,7 +2203,7 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	if method, err := uniswapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
-			log.Printf("Failed to decode Uniswap transaction: %v", err)
+			log.Printf("Failed to decode Uniswap transaction: %v")
 			return
 		}
 
@@ -2224,7 +2216,7 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	if method, err := sushiSwapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
-			log.Printf("Failed to decode SushiSwap transaction: %v", err)
+			log.Printf("Failed to decode SushiSwap transaction: %v")
 			return
 		}
 
@@ -2337,13 +2329,14 @@ func shutdownAll(ctx context.Context) {
 // Monitor mempool for pending transactions
 
 func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+      ch := make(chan *types.Transaction)
        wg.Add(1)
 	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Mempool monitoring stopped due to context cancellation.")
-			return nil
+			return nil, fmt.Errorf("An error occurred")
 		default:
 			// Retry connection and subscription
 			err := monitorMempool(ctx, targetContracts, rpcURL)
@@ -2643,7 +2636,7 @@ func monitorClientConnection(client *WebSocketClient) {
 
 	// Cleanup resources
 	clientsMutex.Lock()
-	delete(wsClients, wsClients[client])
+        delete(wsClients, client)
 	clientsMutex.Unlock()
 
 	client.RateLimiter.Stop()
@@ -2717,7 +2710,8 @@ func cleanupInactiveClients() {
     for client := range wsClients {
         if client.Context.Err() != nil { // Context canceled
             client.Conn.Close()
-            delete(wsClients, wsClients[client])
+            delete(wsClients, client)
+
         }
     }
 }
@@ -2803,6 +2797,8 @@ func wsBroadcastManager() {
 
 // Main function
 func main() {
+    rateLimiter = NewRateLimiter(5, time.Second)
+    broadcastChan = make(chan []byte)
 	// Required environment variables
 	requiredVars := []string{"RPC_URL", "NODE_API_URL", "PRIVATE_KEY", "WALLET_ADDRESS"}
 	if err := validateEnvVars(requiredVars); err != nil {
