@@ -13,41 +13,8 @@ import pkg from 'telegraf';
 
 dotenv.config();
 const { Telegraf } = pkg;
-
-// Initialize Redis cache
-const CHAIN_ID = 42161;
-const web3 = new Web3(process.env.INFURA_URL);
-//const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
-const provider = new JsonRpcProvider(process.env.INFURA_URL);
-const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
-const redisClient = new Redis(process.env.REDIS_URL); // Initialize with your Redis URL
-const setAsync = promisify(redisClient.set).bind(redisClient);
-const getAsync = promisify(redisClient.get).bind(redisClient)
-const REDIS_TTL = 60; // Cache data for 1 minute
-const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
-const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
-// Constants and Configuration
-const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; // Go service endpoint
-const RETRY_LIMIT = 3;
-const RETRY_DELAY = 1000;
-const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
-const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
-const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
-const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
-const errorSummary = new Map();
-const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
-const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
-const queue = new PQueue({ concurrency: 1 });
-const HARDCODED_STABLE_ADDRESSES = [
-    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",//usdt
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",//usdc
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",//dai
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",//weth
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
-];
-
+// Initialize Redis cache
 const permit2Abi = [
     // Add relevant parts of the ABI for Permit2
     {
@@ -83,8 +50,38 @@ const permit2Abi = [
     },
     { "internalType": "bytes", "name": "signature", "type": "bytes" }
 ];
+const CHAIN_ID = 42161;
+const web3 = new Web3(process.env.INFURA_URL);
+//const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
+const provider = new JsonRpcProvider(process.env.INFURA_URL);
+const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
+const redisClient = new Redis(process.env.REDIS_URL); // Initialize with your Redis URL
+const setAsync = promisify(redisClient.set).bind(redisClient);
+const getAsync = promisify(redisClient.get).bind(redisClient)
+const REDIS_TTL = 60; // Cache data for 1 minute
+const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
+const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
+// Constants and Configuration
+const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; // Go service endpoint
+const RETRY_LIMIT = 3;
+const RETRY_DELAY = 1000;
+const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
+const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
+const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
+const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
+const errorSummary = new Map();
+const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
+const queue = new PQueue({ concurrency: 1 });
+const HARDCODED_STABLE_ADDRESSES = [
+    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",//usdt
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",//usdc
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",//dai
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",//weth
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
+];
 const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-//const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
+const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
 
 // State Variables
 let consecutiveFailures = 0;
