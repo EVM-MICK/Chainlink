@@ -769,54 +769,54 @@ async function monitorMempool(targetContracts) {
   });
 }
 
-/**
- * Extract tokens from a transaction's input data.
- * @param {Object} tx - Transaction object.
- * @param {Array<string>} stableAddresses - Array of stable token contract addresses to monitor.
- * @param {Object} abi - ABI object for decoding transaction data.
- * @returns {Array<string>} - List of detected token addresses.
- */
-function extractTokensFromTransaction(tx, stableAddresses, abi) {
-  try {
-    const detectedTokens = [];
-    if (!tx.input || tx.input === "0x") {
-      return detectedTokens; // No input data, return empty array
-    }
+// /**
+//  * Extract tokens from a transaction's input data.
+//  * @param {Object} tx - Transaction object.
+//  * @param {Array<string>} stableAddresses - Array of stable token contract addresses to monitor.
+//  * @param {Object} abi - ABI object for decoding transaction data.
+//  * @returns {Array<string>} - List of detected token addresses.
+//  */
+// function extractTokensFromTransaction(tx, stableAddresses, abi) {
+//   try {
+//     const detectedTokens = [];
+//     if (!tx.input || tx.input === "0x") {
+//       return detectedTokens; // No input data, return empty array
+//     }
 
-    // Decode input data using ABI
-    const decodedInput = decodeTransactionInput(tx.input, abi);
-    if (decodedInput) {
-      // Iterate through decoded inputs to find token addresses
-      Object.values(decodedInput).forEach((value) => {
-        if (typeof value === "string" && stableAddresses.includes(value.toLowerCase())) {
-          detectedTokens.push(value.toLowerCase());
-        }
-      });
-    }
+//     // Decode input data using ABI
+//     const decodedInput = decodeTransactionInput(tx.input, abi);
+//     if (decodedInput) {
+//       // Iterate through decoded inputs to find token addresses
+//       Object.values(decodedInput).forEach((value) => {
+//         if (typeof value === "string" && stableAddresses.includes(value.toLowerCase())) {
+//           detectedTokens.push(value.toLowerCase());
+//         }
+//       });
+//     }
 
-    return [...new Set(detectedTokens)]; // Remove duplicates
-  } catch (err) {
-    console.error(`Error extracting tokens from transaction: ${err.message}`);
-    return [];
-  }
-}
+//     return [...new Set(detectedTokens)]; // Remove duplicates
+//   } catch (err) {
+//     console.error(`Error extracting tokens from transaction: ${err.message}`);
+//     return [];
+//   }
+// }
 
-/**
- * Decode transaction input data using ABI.
- * @param {string} input - Hexadecimal transaction input data.
- * @param {Object} abi - ABI object for decoding.
- * @returns {Object|null} - Decoded input data or null if decoding fails.
- */
-function decodeTransactionInput(input, abi) {
-  try {
-    const contract = new web3.eth.Contract(abi);
-    const decodedData = contract.decodeTransaction(input);
-    return decodedData.params || null;
-  } catch (err) {
-    console.error(`Error decoding transaction input: ${err.message}`);
-    return null;
-  }
-}
+// /**
+//  * Decode transaction input data using ABI.
+//  * @param {string} input - Hexadecimal transaction input data.
+//  * @param {Object} abi - ABI object for decoding.
+//  * @returns {Object|null} - Decoded input data or null if decoding fails.
+//  */
+// function decodeTransactionInput(input, abi) {
+//   try {
+//     const contract = new web3.eth.Contract(abi);
+//     const decodedData = contract.decodeTransaction(input);
+//     return decodedData.params || null;
+//   } catch (err) {
+//     console.error(`Error decoding transaction input: ${err.message}`);
+//     return null;
+//   }
+// }
 
 export async function notifyMonitoringSystem(message) {
   const monitoringServiceUrl = process.env.MONITORING_SERVICE_URL;
