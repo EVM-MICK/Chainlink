@@ -2250,39 +2250,75 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex())
 }
 
-
 // Process Uniswap-specific transactions
 func processUniswapTransaction(methodName string, args map[string]interface{}) error {
-    switch methodName {
-    case "exactInput":
-        params := args["params"].(map[string]interface{})
-        path := params["path"].([]byte) // Multi-hop path as a byte array
-        decodedPath, err := decodePath(path) // Decode path to token addresses
-        if err != nil {
-            return fmt.Errorf("failed to decode path: %v", err)
-        }
-        amountIn := params["amountIn"].(*big.Int)
-        amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+	switch methodName {
+	case "exactInput":
+		params, ok := args["params"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid params for exactInput")
+		}
 
-        log.Printf("Uniswap exactInput: Path=%v, AmountIn=%s, AmountOutMin=%s",
-            decodedPath, amountIn.String(), amountOutMinimum.String())
+		path, ok := params["path"].([]byte)
+		if !ok {
+			return fmt.Errorf("invalid path for exactInput")
+		}
 
-    case "exactInputSingle":
-        params := args["params"].(map[string]interface{})
-        tokenIn := params["tokenIn"].(common.Address)
-        tokenOut := params["tokenOut"].(common.Address)
-        amountIn := params["amountIn"].(*big.Int)
-        amountOutMinimum := params["amountOutMinimum"].(*big.Int)
+		decodedPath, err := decodePath(path)
+		if err != nil {
+			return fmt.Errorf("failed to decode path: %v", err)
+		}
 
-        log.Printf("Uniswap exactInputSingle: TokenIn=%s, TokenOut=%s, AmountIn=%s, AmountOutMin=%s",
-            tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), amountOutMinimum.String())
+		amountIn, ok := params["amountIn"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountIn for exactInput")
+		}
 
-    default:
-        log.Printf("Unhandled Uniswap method: %s", methodName)
-    }
+		amountOutMinimum, ok := params["amountOutMinimum"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountOutMinimum for exactInput")
+		}
 
-    return nil
+		log.Printf("Uniswap exactInput: Path=%v, AmountIn=%s, AmountOutMin=%s",
+			decodedPath, amountIn.String(), amountOutMinimum.String())
+
+	case "exactInputSingle":
+		params, ok := args["params"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid params for exactInputSingle")
+		}
+
+		tokenIn, ok := params["tokenIn"].(common.Address)
+		if !ok {
+			return fmt.Errorf("invalid tokenIn for exactInputSingle")
+		}
+
+		tokenOut, ok := params["tokenOut"].(common.Address)
+		if !ok {
+			return fmt.Errorf("invalid tokenOut for exactInputSingle")
+		}
+
+		amountIn, ok := params["amountIn"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountIn for exactInputSingle")
+		}
+
+		amountOutMinimum, ok := params["amountOutMinimum"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountOutMinimum for exactInputSingle")
+		}
+
+		log.Printf("Uniswap exactInputSingle: TokenIn=%s, TokenOut=%s, AmountIn=%s, AmountOutMin=%s",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), amountOutMinimum.String())
+
+	default:
+		log.Printf("Unhandled Uniswap method: %s", methodName)
+		return fmt.Errorf("unhandled method: %s", methodName)
+	}
+
+	return nil
 }
+
 
 // Helper function to decode Uniswap V3 path
 func decodePath(path []byte) ([]string, error) {
@@ -2301,31 +2337,54 @@ func decodePath(path []byte) ([]string, error) {
 
 
 // Process SushiSwap-specific transactions
-func processSushiSwapTransaction(methodName string, args map[string]interface{}) {
+func processSushiSwapTransaction(methodName string, args map[string]interface{}) error {
 	switch methodName {
 	case "swapExactTokensForTokens":
-		amountIn := args["amountIn"].(*big.Int)
-		amountOutMin := args["amountOutMin"].(*big.Int)
-		path := args["path"].([]common.Address)
+		amountIn, ok := args["amountIn"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountIn for swapExactTokensForTokens")
+		}
 
-		decodedPath := decodePathSushi(path) // Decode path to token addresses
+		amountOutMin, ok := args["amountOutMin"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountOutMin for swapExactTokensForTokens")
+		}
 
+		path, ok := args["path"].([]common.Address)
+		if !ok {
+			return fmt.Errorf("invalid path for swapExactTokensForTokens")
+		}
+
+		decodedPath := decodePathSushi(path)
 		log.Printf("SushiSwap swapExactTokensForTokens: AmountIn=%s, AmountOutMin=%s, Path=%v",
 			amountIn.String(), amountOutMin.String(), decodedPath)
 
 	case "swapTokensForExactTokens":
-		amountOut := args["amountOut"].(*big.Int)
-		amountInMax := args["amountInMax"].(*big.Int)
-		path := args["path"].([]common.Address)
+		amountOut, ok := args["amountOut"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountOut for swapTokensForExactTokens")
+		}
 
-		decodedPath := decodePathSushi(path) // Decode path to token addresses
+		amountInMax, ok := args["amountInMax"].(*big.Int)
+		if !ok {
+			return fmt.Errorf("invalid amountInMax for swapTokensForExactTokens")
+		}
 
+		path, ok := args["path"].([]common.Address)
+		if !ok {
+			return fmt.Errorf("invalid path for swapTokensForExactTokens")
+		}
+
+		decodedPath := decodePathSushi(path)
 		log.Printf("SushiSwap swapTokensForExactTokens: AmountOut=%s, AmountInMax=%s, Path=%v",
 			amountOut.String(), amountInMax.String(), decodedPath)
 
 	default:
 		log.Printf("Unhandled SushiSwap method: %s", methodName)
+		return fmt.Errorf("unhandled method: %s", methodName)
 	}
+
+	return nil
 }
 
 // Helper function to decode SushiSwap path
