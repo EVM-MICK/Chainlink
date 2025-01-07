@@ -112,10 +112,12 @@ const HARDCODED_STABLE_ADDRESSES = [
     "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
 ];
 const permit2Contract = new Contract(PERMIT2_ADDRESS, permit2Abi, wallet);
-const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
+//const nonce = await permit2Contract.nonces(wallet.address); // Fetch current nonce
 
 // State Variables
 let consecutiveFailures = 0;
+
+
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
@@ -173,6 +175,17 @@ function log(message, level = 'info') {
   if (process.env.DEBUG === 'true' || level === 'error') {
     const timestamp = new Date().toISOString();
     console[level === 'error' ? 'error' : 'log'](`[${timestamp}] [${level.toUpperCase()}] ${message}`);
+  }
+}
+
+async function fetchNonce() {
+  try {
+    const nonce = await permit2Contract.nonces(wallet.address);
+    console.log("Nonce fetched successfully:", nonce.toString());
+    return nonce;
+  } catch (error) {
+    console.error("Error fetching nonce:", error);
+    throw error;
   }
 }
 
