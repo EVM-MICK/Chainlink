@@ -547,19 +547,19 @@ export async function processMarketData() {
 }
 
 // Retry helper function
-async function retry(fn, retries, delay) {
-  let lastError;
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      console.warn(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  throw lastError; // Rethrow the last error after all retries fail
-}
+// async function retry(fn, retries, delay) {
+//   let lastError;
+//   for (let attempt = 1; attempt <= retries; attempt++) {
+//     try {
+//       return await fn();
+//     } catch (error) {
+//       lastError = error;
+//       console.warn(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
+//       await new Promise((resolve) => setTimeout(resolve, delay));
+//     }
+//   }
+//   throw lastError; // Rethrow the last error after all retries fail
+// }
 
 
 
