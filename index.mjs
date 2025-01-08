@@ -163,23 +163,6 @@ validateEnvVars([
 ]);
 
 
-async function sendErrorSummary() {
-  if (errorSummary.size === 0) {
-    return; // No errors to summarize
-  }
-
-  let summaryMessage = '*Error Summary:*\n';
-  errorSummary.forEach((count, error) => {
-    summaryMessage += `- ${error}: ${count} occurrences\n`;
-  });
-
-  await sendTelegramMessage(summaryMessage, true);
-  errorSummary.clear(); // Reset the summary map after sending
-}
-
-// Schedule periodic error summaries
-setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
-
 // Helper function to construct 1inch API URLs
 /**
  * Generic function to make HTTP GET requests using Axios.
@@ -534,6 +517,23 @@ async function handleCriticalError(error, context = '') {
     await sendTelegramMessage(`*Critical Error*:\n${error.message}\nContext: ${context}`, true);
   }
 }
+
+async function sendErrorSummary() {
+  if (errorSummary.size === 0) {
+    return; // No errors to summarize
+  }
+
+  let summaryMessage = '*Error Summary:*\n';
+  errorSummary.forEach((count, error) => {
+    summaryMessage += `- ${error}: ${count} occurrences\n`;
+  });
+
+  await sendTelegramMessage(summaryMessage, true);
+  errorSummary.clear(); // Reset the summary map after sending
+}
+
+// Schedule periodic error summaries
+setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
 
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
