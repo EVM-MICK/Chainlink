@@ -573,66 +573,6 @@ async function executeRoute(route, amount) {
   }
 }
 
-// Function to process and send market data
-// export async function processMarketData() {
-//   console.log("Starting market data processing...");
-
-//   try {
-//     // Step 1: Fetch token prices
-//     console.log("Fetching token prices...");
-//     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-//     console.log("Token prices fetched successfully.");
-
-//     // Step 2: Fetch liquidity data for all token pairs
-//     console.log("Fetching liquidity data...");
-//     const liquidityData = {};
-//     for (const token of HARDCODED_STABLE_ADDRESSES) {
-//       liquidityData[token] = await fetchAllLiquidityData(
-//         token,
-//         "100000000000" // $100,000 (scaled to 6 decimals for USDC/USDT/DAI)
-//       );
-//     }
-//     console.log("Liquidity data fetched successfully.");
-
-//     // Step 3: Aggregate market data
-//     const marketData = {
-//       tokenPrices,
-//       liquidity: liquidityData,
-//     };
-
-//     // Step 4: Cache the market data (optional but recommended)
-//     console.log("Caching market data...");
-//     const cacheKey = "marketData";
-//     await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60); // Cache for 60 seconds
-//     console.log("Market data cached successfully.");
-
-//     // Step 5: Send market data to Go backend
-//     console.log("Sending market data to Go backend...");
-//     await sendMarketDataToGo(marketData);
-//     console.log("Market data sent successfully to Go backend.");
-//   } catch (error) {
-//     console.error("Error in processing market data:", error.message);
-//     // Optional: Notify a monitoring system or retry based on error type
-//   }
-// }
-
-// Retry helper function
-// async function retry(fn, retries, delay) {
-//   let lastError;
-//   for (let attempt = 1; attempt <= retries; attempt++) {
-//     try {
-//       return await fn();
-//     } catch (error) {
-//       lastError = error;
-//       console.warn(`Attempt ${attempt} failed. Retrying in ${delay}ms...`);
-//       await new Promise((resolve) => setTimeout(resolve, delay));
-//     }
-//   }
-//   throw lastError; // Rethrow the last error after all retries fail
-// }
-
-
-
 
 // Main function
 export async function processMarketData() {
@@ -769,54 +709,6 @@ async function monitorMempool(targetContracts) {
   });
 }
 
-// /**
-//  * Extract tokens from a transaction's input data.
-//  * @param {Object} tx - Transaction object.
-//  * @param {Array<string>} stableAddresses - Array of stable token contract addresses to monitor.
-//  * @param {Object} abi - ABI object for decoding transaction data.
-//  * @returns {Array<string>} - List of detected token addresses.
-//  */
-// function extractTokensFromTransaction(tx, stableAddresses, abi) {
-//   try {
-//     const detectedTokens = [];
-//     if (!tx.input || tx.input === "0x") {
-//       return detectedTokens; // No input data, return empty array
-//     }
-
-//     // Decode input data using ABI
-//     const decodedInput = decodeTransactionInput(tx.input, abi);
-//     if (decodedInput) {
-//       // Iterate through decoded inputs to find token addresses
-//       Object.values(decodedInput).forEach((value) => {
-//         if (typeof value === "string" && stableAddresses.includes(value.toLowerCase())) {
-//           detectedTokens.push(value.toLowerCase());
-//         }
-//       });
-//     }
-
-//     return [...new Set(detectedTokens)]; // Remove duplicates
-//   } catch (err) {
-//     console.error(`Error extracting tokens from transaction: ${err.message}`);
-//     return [];
-//   }
-// }
-
-// /**
-//  * Decode transaction input data using ABI.
-//  * @param {string} input - Hexadecimal transaction input data.
-//  * @param {Object} abi - ABI object for decoding.
-//  * @returns {Object|null} - Decoded input data or null if decoding fails.
-//  */
-// function decodeTransactionInput(input, abi) {
-//   try {
-//     const contract = new web3.eth.Contract(abi);
-//     const decodedData = contract.decodeTransaction(input);
-//     return decodedData.params || null;
-//   } catch (err) {
-//     console.error(`Error decoding transaction input: ${err.message}`);
-//     return null;
-//   }
-// }
 
 export async function notifyMonitoringSystem(message) {
   const monitoringServiceUrl = process.env.MONITORING_SERVICE_URL;
