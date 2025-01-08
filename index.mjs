@@ -889,18 +889,7 @@ async function runArbitrageBot() {
 
 setInterval(async () => {
   console.log("Running periodic market data processing...");
- try {
   await processMarketData();
-
-  if (response.status === 200 && response.data.status === 'success') {
-        log('Market data sent to Go backend successfully.', 'info');
-      } else {
-        log(`Go backend returned error: ${response.data.message}`, 'warn');
-      }
-  } catch (error) {
-      log(`Error in periodic market data discovery: ${error.message}`, 'error');
-      await sendTelegramMessage(`❌ Error in market data discovery: ${error.message}`, true);
-    }
   }, 5 * 60 * 1000); // Every 5 minutes
 
 
