@@ -134,6 +134,7 @@ const account = web3.eth.accounts.privateKeyToAccount(PRIVATE_KEY);
 web3.eth.accounts.wallet.add(account);
 // State Variables
 let consecutiveFailures = 0;
+let lastRequestTimestamp = 0; // Track the timestamp of the last API request
 
 const setAsync = promisify(redisClient.set).bind(redisClient);
 const getAsync = promisify(redisClient.get).bind(redisClient);
@@ -202,8 +203,6 @@ function log(message, level = 'info') {
   }
 }
 
-
-
 // Connect to Redis
 (async () => {
   try {
@@ -214,6 +213,83 @@ function log(message, level = 'info') {
     process.exit(1);
   }
 })();
+
+redisClient.on('error', (err) => {
+  console.error('Redis connection error:', err);
+});
+
+async function fetchNonce() {
+  let nonce = null;
+
+  try {
+    if (!wallet.address) {
+      console.warn('Wallet address is not configured. Skipping nonce retrieval.');
+    } else {
+      nonce = await web3.eth.getTransactionCount(wallet.address, 'pending');
+      console.log(`Nonce fetched for wallet ${wallet.address}:`, nonce);
+    }
+  } catch (error) {
+    console.error(`Error fetching nonce for wallet ${wallet?.address || 'unknown address'}:`, error.message);
+    // Proceed without crashing
+  }
+
+  return nonce;
+}
+
+// Usage
+(async () => {
+  const nonce = await fetchNonce();
+  if (nonce !== null) {
+    console.log(`Using nonce: ${nonce}`);
+  } else {
+    console.log('Skipping operations that depend on nonce.');
+  }
+})();
+
+/**
+ * Function to handle retry requests with 1 RPS throttling and exponential backoff.
+ * @param {Function} fn - The function to execute (e.g., an API call).
+ * @param {number} retries - The maximum number of retry attempts.
+ * @param {number} delay - The base delay in milliseconds.
+ * @returns {Promise<any>} - The result of the function call.
+ */
+async function rateLimitedRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // Throttle requests to maintain 1 RPS
+      const now = Date.now();
+      const timeSinceLastRequest = now - lastRequestTimestamp;
+
+      if (timeSinceLastRequest < delay) {
+        const waitTime = delay - timeSinceLastRequest;
+        console.log(`Throttling: Waiting ${waitTime}ms before next request...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+
+      lastRequestTimestamp = Date.now(); // Update the timestamp for this request
+      return await fn(); // Execute the function
+    } catch (err) {
+      if (err.response?.status === 429) {
+        // Handle rate limit error
+        const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
+        console.warn(`Rate-limited. Retrying after ${retryAfter} seconds...`);
+        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+      } else if (attempt === retries) {
+        // Throw error if max retries reached
+        console.error(`Request failed after ${retries} retries:`, err.message);
+        throw err;
+      } else {
+        // Exponential backoff for other errors
+        const backoff = delay * Math.pow(2, attempt - 1); // Exponential increase in delay
+        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms due to error: ${err.message}`);
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+
+  throw new Error('Maximum retry attempts exceeded.');
+}
+
 
 async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -365,59 +441,38 @@ async function cachedFetchPrices(tokenAddresses) {
 
 
 async function fetchTokenPrices(tokens) {
-  console.log("Fetching prices for tokens:", tokens);
+  const endpoint = `prices?tokens=${tokens.join(",")}`;
+  const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/${endpoint}`;
 
-  if (!tokens || tokens.length === 0) {
-    console.warn("No tokens provided for price fetch.");
-    return {};
-  }
-
-  // Remove duplicates and sort tokens for consistent request formatting
-  const uniqueTokens = [...new Set(tokens)].sort();
-  console.log("Unique tokens:", uniqueTokens);
-
-  try {
-    // Delegate to cached fetch function
-    const prices = await cachedFetchPrices(uniqueTokens);
-    console.log("Token prices fetched:", prices);
-    return prices;
-  } catch (error) {
-    console.error("Error in fetchTokenPrices:", error.message);
-    throw error;
-  }
+  return rateLimitedRequest(async () => {
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+    });
+    return response.data;
+  });
 }
+
 
 
 // Fetch liquidity data for a token pair using 1inch Swap API
 async function fetchLiquidityData(fromToken, toToken, amount) {
-  const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
-  const url = constructApiUrl("quote", {
+  const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/quote`;
+  const params = {
     fromTokenAddress: fromToken,
     toTokenAddress: toToken,
     amount,
-    slippage: "1", // 1% slippage
     disableEstimate: "false",
-  });
+  };
 
-  return cachedFetch(cacheKey, async () => {
-    try {
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch liquidity data: ${response.statusText}`);
-      }
-
-      const liquidityData = await response.json();
-      console.log(`Liquidity Data for ${fromToken} -> ${toToken}:`, liquidityData);
-      return liquidityData;
-    } catch (err) {
-      console.error("Error fetching liquidity data:", err.message);
-      throw err;
-    }
+  return rateLimitedRequest(async () => {
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+      params,
+    });
+    return response.data;
   });
 }
+
 
 /**
  * Fetch liquidity data for all stable tokens relative to a base token.
