@@ -197,15 +197,15 @@ function log(message, level = 'info') {
   }
 }
 
-(async () => {
-  try {
-    const account = wallet.address; // Ensure `wallet` is defined correctly
-    const nonce = await permit2Contract.methods.nonces(account).call();
-    console.log("Nonce fetched successfully:", nonce);
-  } catch (error) {
-    console.error("Error fetching nonce:", error);
-  }
-})();
+// (async () => {
+//   try {
+//     const account = wallet.address; // Ensure `wallet` is defined correctly
+//     const nonce = await permit2Contract.methods.nonces(account).call();
+//     console.log("Nonce fetched successfully:", nonce);
+//   } catch (error) {
+//     console.error("Error fetching nonce:", error);
+//   }
+// })();
 
 // Connect to Redis
 (async () => {
