@@ -2884,6 +2884,24 @@ func wsBroadcastManager() {
     }
 }
 
+func enableCORS(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Allow requests from all origins (you can restrict this if needed)
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        
+        // Handle preflight (OPTIONS) requests
+        if r.Method == "OPTIONS" {
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+
+        // Call the next handler
+        next(w, r)
+    }
+}
+
 
 
 // Main function
@@ -2909,11 +2927,20 @@ func main() {
 	}()
 
 	// Start WebSocket server
-	http.HandleFunc("/ws", wsHandler)
-	go func() {
-		log.Println("WebSocket server listening on :8080/ws")
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
+        //http.HandleFunc("/ws", wsHandler)
+       // Register your route and apply CORS middleware
+         // go func() {
+	// 	log.Println("WebSocket server listening on :8080/ws")
+	// 	log.Fatal(http.ListenAndServe(":8080", nil))
+	// }()
+        // Start the HTTP server
+
+	http.HandleFunc("/process-market-data", enableCORS(generateRoutesHandler))
+	port := ":8080" // or any desired port
+	log.Printf("Server running on port %s...", port)
+	if err := http.ListenAndServe(port, nil); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 
 	// Define target contracts for mempool monitoring
 	targetContracts := map[string]bool{
