@@ -1886,18 +1886,20 @@ func generateTokenPairs(tokens []string) []TokenPair {
 
 func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
-
     for _, pair := range tokenPairs {
+        if !isTokenHardcoded(pair.SrcToken) || !isTokenHardcoded(pair.DstToken) {
+            log.Printf("Skipping non-hardcoded token pair: %s -> %s", pair.SrcToken, pair.DstToken)
+            continue
+        }
+        // Fetch price and liquidity data
         price, liquidity, err := fetchTokenPairData(pair.SrcToken, pair.DstToken, chainID)
         if err != nil {
             log.Printf("Skipping pair %s -> %s: %v", pair.SrcToken, pair.DstToken, err)
             continue
         }
-
         if graph.AdjacencyList[pair.SrcToken] == nil {
             graph.AdjacencyList[pair.SrcToken] = make(map[string]EdgeWeight)
         }
-
         graph.AdjacencyList[pair.SrcToken][pair.DstToken] = EdgeWeight{
             Weight:    calculateWeight(price, liquidity),
             Liquidity: liquidity,
@@ -1905,7 +1907,6 @@ func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
     }
     return graph, nil
 }
-
 
 // Dynamic weight calculation function
 func calculateWeight(price, liquidity *big.Float) *big.Float {
