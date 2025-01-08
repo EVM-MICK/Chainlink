@@ -350,57 +350,46 @@ async function cachedFetch(key, fetchFn) {
 
 // Caching Helper
 async function cachedFetchPrices(tokenAddresses) {
-    const cacheKey = `prices:${tokenAddresses.join(',')}`;
-    const cachedPrices = await redis.get(cacheKey);
-
-    if (cachedPrices) {
-        log(`Cache hit for token prices: ${tokenAddresses.join(',')}`);
-        return JSON.parse(cachedPrices);
-    }
-
-    // Fetch prices from 1inch API
     const url = `https://api.1inch.dev/price/v1.1/42161/${tokenAddresses.join(',')}`;
-return cachedFetch(cacheKey, async () => {
-    try {
-        const response = await fetch(url, {
-            headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-        });
-
-        if (!response.ok) {
-            log(`1inch API request failed with status: ${response.statusText}`, 'error');
-            throw new Error(`Failed to fetch prices: ${response.statusText}`);
+    return cachedFetch(`prices:${tokenAddresses.join(',')}`, async () => {
+        try {
+            const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+            });
+            if (!response.ok) {
+                console.error(`Error: ${response.status} - ${response.statusText}`);
+                throw new Error(`Failed to fetch prices: ${response.statusText}`);
+            }
+            const data = await response.json();
+            console.log('Fetched token prices:', data);
+            return data;
+        } catch (error) {
+            console.error('Failed to fetch token prices:', error.message);
+            throw error;
         }
-
-        const prices = await response.json();
-        await redis.setex(cacheKey, 60, JSON.stringify(prices)); // Cache for 1 minute
-        log(`Fetched token prices and updated cache: ${JSON.stringify(prices)}`);
-        return prices;
-    } catch (error) {
-        log(`Error fetching token prices from 1inch API: ${error.message}`, 'error');
-        throw error;
-    }
-});
+    });
 }
 
 async function fetchTokenPrices(tokens) {
+    console.log('Fetching prices for tokens:', tokens);
     if (tokens.length === 0) {
-        log('No tokens provided for price fetch.', 'warn');
+        console.warn('No tokens provided for price fetch.');
         return {};
     }
 
-    // Remove duplicates and sort tokens for consistent caching
     const uniqueTokens = [...new Set(tokens)].sort();
+    console.log('Unique tokens:', uniqueTokens);
 
     try {
         const prices = await cachedFetchPrices(uniqueTokens);
-        log(`Successfully fetched prices for tokens: ${uniqueTokens.join(', ')}`);
+        console.log('Token prices fetched:', prices);
         return prices;
     } catch (error) {
-        log(`Failed to fetch prices for tokens: ${uniqueTokens.join(',')}. Error: ${error.message}`, 'error');
-        addErrorToSummary(error, `Token Prices Fetch: ${uniqueTokens.join(',')}`);
+        console.error('Error in fetchTokenPrices:', error.message);
         throw error;
     }
 }
+
 
 // Fetch liquidity data for a token pair using 1inch Swap API
 async function fetchLiquidityData(fromToken, toToken, amount) {
