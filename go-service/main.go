@@ -33,13 +33,6 @@ import (
 	"github.com/gorilla/websocket"
         "github.com/patrickmn/go-cache"
 	"github.com/ethereum/go-ethereum/crypto"
-        //"github.com/joho/godotenv"
-        //"github.com/shirou/gopsutil/v4/mem"
-        //"github.com/deckarep/golang-set/v2"
-        //"golang.org/x/crypto/pbkdf2"
-        //"golang.org/x/crypto/scrypt"
-        //"golang.org/x/crypto/sha3"
-        //"golang.org/x/sys/unix"
 )
 
 type RetryFunction func() (interface{}, error)
@@ -2203,26 +2196,29 @@ func decodeTransactionData(data string, routerType string) (string, string, *big
 
 // Process a transaction to identify arbitrage opportunities
 func processTransaction(client *ethclient.Client, tx *types.Transaction, targetContracts map[string]bool) {
+	// Validate the transaction target address
 	toAddress := tx.To()
 	if toAddress == nil {
+		log.Println("Transaction does not have a target address. Skipping.")
 		return
 	}
 
-	// Check if the transaction targets a relevant contract
+	// Check if the transaction interacts with a relevant target contract
 	if _, exists := targetContracts[toAddress.Hex()]; !exists {
+		log.Printf("Transaction target address %s is not in the target contracts. Skipping.", toAddress.Hex())
 		return
 	}
 
-	// Extract transaction input data
+	// Extract the input data from the transaction
 	inputData := tx.Data()
 	if len(inputData) < 4 {
-		log.Println("Transaction data too short to decode")
+		log.Println("Transaction data too short to decode. Skipping.")
 		return
 	}
 
-	methodSig := inputData[:4] // First 4 bytes are the method ID
+	methodSig := inputData[:4] // First 4 bytes are the method signature
 
-	// Attempt decoding with Uniswap ABI
+	// Attempt to decode using Uniswap ABI
 	if method, err := uniswapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
@@ -2232,15 +2228,14 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 
 		log.Printf("Decoded Uniswap transaction: Method=%s, Args=%v", method.Name, args)
 
-		// Handle errors from processUniswapTransaction
-		err = processUniswapTransaction(method.Name, args)
-		if err != nil {
+		// Process Uniswap-specific transactions
+		if err := processUniswapTransaction(method.Name, args); err != nil {
 			log.Printf("Error processing Uniswap transaction: %v", err)
 		}
 		return
 	}
 
-	// Attempt decoding with SushiSwap ABI
+	// Attempt to decode using SushiSwap ABI
 	if method, err := sushiSwapABI.MethodById(methodSig); err == nil {
 		args := make(map[string]interface{})
 		if err := method.Inputs.UnpackIntoMap(args, inputData[4:]); err != nil {
@@ -2250,15 +2245,14 @@ func processTransaction(client *ethclient.Client, tx *types.Transaction, targetC
 
 		log.Printf("Decoded SushiSwap transaction: Method=%s, Args=%v", method.Name, args)
 
-		// Handle errors from processSushiSwapTransaction
-		err = processSushiSwapTransaction(method.Name, args)
-		if err != nil {
+		// Process SushiSwap-specific transactions
+		if err := processSushiSwapTransaction(method.Name, args); err != nil {
 			log.Printf("Error processing SushiSwap transaction: %v", err)
 		}
 		return
 	}
 
-	// Log unknown transaction
+	// Log any transaction that could not be decoded
 	log.Printf("Unknown transaction targeting contract: %s", toAddress.Hex())
 }
 
@@ -2426,15 +2420,22 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 	wg.Add(1)
 	defer wg.Done()
 
+	log.Println("Starting mempool monitoring with retry and fallback mechanism...")
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Mempool monitoring stopped due to context cancellation.")
 			return nil
 		default:
-			// Retry connection and subscription
+			// Try to monitor using WebSocket notifications
 			err := monitorMempool(ctx, targetContracts, rpcURL)
 			if err != nil {
+				if isWebSocketNotSupportedError(err) {
+					// Fallback to HTTP polling if WebSocket is not supported
+					log.Println("WebSocket notifications not supported. Falling back to HTTP polling...")
+					return monitorMempoolWithPolling(ctx, targetContracts, rpcURL)
+				}
 				log.Printf("Error in mempool monitoring: %v. Retrying...", err)
 				time.Sleep(5 * time.Second) // Delay before retry
 			}
@@ -2442,63 +2443,96 @@ func monitorMempoolWithRetry(ctx context.Context, targetContracts map[string]boo
 	}
 }
 
+
 func monitorMempool(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
-	ch := make(chan string) // Channel type for transaction hashes
-	var clientResult interface{}
-	var err error
+	ch := make(chan string)
 
-	// Retry logic for connecting to Ethereum client
-	clientResult, err = Retry(func() (interface{}, error) {
-		return ethclient.Dial(rpcURL)
-	}, 3, 2*time.Second)
+	// Connect to Ethereum client
+	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
-		return fmt.Errorf("failed to connect to Ethereum client after retries: %v", err)
+		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
 	}
-
-	client := clientResult.(*ethclient.Client)
 	defer client.Close()
-	log.Println("Connected to Ethereum client. Monitoring mempool...")
 
-	rpcClient, err := rpc.Dial(os.Getenv("RPC_URL"))
+	log.Println("Attempting to subscribe to mempool via WebSocket...")
+
+	rpcClient, err := rpc.Dial(rpcURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to RPC client: %v", err)
 	}
 
+	// Subscribe to pending transactions
+	sub, err := rpcClient.Subscribe(ctx, "newPendingTransactions", ch)
+	if err != nil {
+		log.Printf("WebSocket subscription failed: %v", err)
+		return fmt.Errorf("notifications not supported: %v", err)
+	}
+	defer sub.Unsubscribe()
+
+	log.Println("Successfully subscribed to newPendingTransactions.")
+
 	for {
-		// Retry logic for subscribing to pending transactions
-		sub, err := rpcClient.Subscribe(ctx, "newPendingTransactions", ch) // Correct argument order
-		if err != nil {
-			log.Printf("Failed to subscribe to pending transactions: %v. Retrying...", err)
-			time.Sleep(5 * time.Second) // Delay before retry
-			continue
-		}
-
-		log.Println("Subscribed to newPendingTransactions")
-
-		// Process transactions as they arrive
-		for {
-			select {
-			case err := <-sub.Err():
-				log.Printf("Subscription error: %v. Retrying subscription...", err)
-				sub.Unsubscribe()
-				break // Exit the inner loop to retry subscription
-			case txHash := <-ch: // txHash is of type string
-				// Fetch transaction details using txHash
-				tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
-				if err != nil {
-					log.Printf("Failed to fetch transaction details for hash %s: %v", txHash, err)
-					continue
-				}
-				go processTransaction(client, tx, targetContracts)
-			case <-ctx.Done():
-				log.Println("Shutting down mempool monitoring...")
-				sub.Unsubscribe()
-				return nil
+		select {
+		case err := <-sub.Err():
+			log.Printf("Subscription error: %v. Retrying subscription...", err)
+			return err
+		case txHash := <-ch:
+			// Process the transaction
+			tx, _, err := client.TransactionByHash(ctx, common.HexToHash(txHash))
+			if err != nil {
+				log.Printf("Failed to fetch transaction details for hash %s: %v", txHash, err)
+				continue
 			}
+			go processTransaction(client, tx, targetContracts)
+		case <-ctx.Done():
+			log.Println("Stopping WebSocket subscription due to context cancellation.")
+			return nil
 		}
 	}
 }
 
+func isWebSocketNotSupportedError(err error) bool {
+	return strings.Contains(err.Error(), "notifications not supported")
+}
+
+func monitorMempoolWithPolling(ctx context.Context, targetContracts map[string]bool, rpcURL string) error {
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Ethereum client: %v", err)
+	}
+	defer client.Close()
+
+	log.Println("Starting mempool monitoring using HTTP polling...")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Mempool monitoring stopped due to context cancellation.")
+			return nil
+		default:
+			if err := pollPendingTransactions(ctx, client, targetContracts); err != nil {
+				log.Printf("Error polling pending transactions: %v", err)
+			}
+			time.Sleep(5 * time.Second) // Delay between polling cycles
+		}
+	}
+}
+
+func pollPendingTransactions(ctx context.Context, client *ethclient.Client, targetContracts map[string]bool) error {
+	// Fetch the latest block
+	block, err := client.BlockByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch latest block: %v", err)
+	}
+
+	// Iterate through all transactions in the block
+	for _, tx := range block.Transactions() {
+		go processTransaction(client, tx, targetContracts)
+	}
+
+	log.Printf("Processed %d transactions from block %s", len(block.Transactions()), block.Hash().Hex())
+	return nil
+}
 
 
 func approveTokensNode(route []string, amount *big.Int) error {
@@ -2758,15 +2792,17 @@ func handleClientMessages(client *WebSocketClient) {
 }
 
 func shutdownWebSocketServer() {
-	clientsMutex.Lock()
-	defer clientsMutex.Unlock()
+    clientsMutex.Lock()
+    defer clientsMutex.Unlock()
 
-	for client := range wsClients {
-		client.Conn.Close()
-		client.CancelFunc()
-	}
-	log.Println("WebSocket server shut down.")
+    for client := range wsClients {
+        client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+        client.Conn.Close()
+        delete(wsClients, client)
+    }
+    log.Println("WebSocket server shut down.")
 }
+
 
 func monitorSystemHealth() {
 	ticker := time.NewTicker(30 * time.Second)
@@ -2926,22 +2962,15 @@ func main() {
 		shutdownWebSocketServer()
 	}()
 
-	// Start WebSocket server
-        //http.HandleFunc("/ws", wsHandler)
-       // Register your route and apply CORS middleware
-         // go func() {
-	// 	log.Println("WebSocket server listening on :8080/ws")
-	// 	log.Fatal(http.ListenAndServe(":8080", nil))
-	// }()
-        // Start the HTTP server
-
+	// Define the `/process-market-data` route with CORS middleware
 	http.HandleFunc("/process-market-data", enableCORS(generateRoutesHandler))
-	port := ":8080" // or any desired port
+
+	// Start the HTTP server
+	port := ":8080" // Adjust as needed
 	log.Printf("Server running on port %s...", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-
 	// Define target contracts for mempool monitoring
 	targetContracts := map[string]bool{
 		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
@@ -2950,11 +2979,11 @@ func main() {
 
 	// Start monitoring the mempool
 	go func() {
-		if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("RPC_URL")); err != nil {
-			log.Printf("Mempool monitoring terminated: %v", err)
-			cancelFunc()
-		}
-	}()
+	if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("RPC_URL")); err != nil {
+		log.Printf("Mempool monitoring terminated: %v", err)
+		cancelFunc()
+	}
+    }()
 
 	// Start REST API server for route generation
 	http.HandleFunc("/generate-routes", generateRoutesHandler)
