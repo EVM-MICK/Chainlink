@@ -163,6 +163,30 @@ validateEnvVars([
   "CHAIN_ID",
 ]);
 
+async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
+  try {
+    // Check Redis for cached data
+    const cachedData = await getAsync(key);
+    if (cachedData) {
+      console.log(`Cache hit for ${key}`);
+      return JSON.parse(cachedData);
+    }
+
+    // Fetch fresh data
+    const data = await fetchFn();
+    console.log(`Fetched data for ${key}:`, JSON.stringify(data, null, 2));
+
+    // Cache the data for the specified duration
+    await setAsync(key, JSON.stringify(data), "EX", duration);
+    console.log(`Cached data for ${key} for ${duration} seconds.`);
+    return data;
+  } catch (error) {
+    console.error(`Error fetching or caching data for ${key}:`, error.message);
+    throw error;
+  }
+}
+
+
 
 // Helper function to construct 1inch API URLs
 /**
@@ -439,40 +463,43 @@ async function cachedFetchPrices(tokenAddresses) {
   });
 }
 
-
 async function fetchTokenPrices(tokens) {
-  const endpoint = `prices?tokens=${tokens.join(",")}`;
-  const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/${endpoint}`;
+  const cacheKey = `tokenPrices:${tokens.join(",")}`;
 
-  return rateLimitedRequest(async () => {
-    const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+  return fetchAndCache(cacheKey, async () => {
+    const endpoint = `prices?tokens=${tokens.join(",")}`;
+    const url = `${API_BASE_URL}/${endpoint}`;
+    const response = await rateLimitedRequest(async () => {
+      return axios.get(url, {
+        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+      });
     });
     return response.data;
   });
 }
-
-
 
 // Fetch liquidity data for a token pair using 1inch Swap API
 async function fetchLiquidityData(fromToken, toToken, amount) {
-  const url = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}/quote`;
-  const params = {
-    fromTokenAddress: fromToken,
-    toTokenAddress: toToken,
-    amount,
-    disableEstimate: "false",
-  };
+  const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
 
-  return rateLimitedRequest(async () => {
-    const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-      params,
+  return fetchAndCache(cacheKey, async () => {
+    const url = `${API_BASE_URL}/quote`;
+    const params = {
+      fromTokenAddress: fromToken,
+      toTokenAddress: toToken,
+      amount,
+      disableEstimate: "false",
+    };
+
+    const response = await rateLimitedRequest(async () => {
+      return axios.get(url, {
+        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+        params,
+      });
     });
     return response.data;
   });
 }
-
 
 /**
  * Fetch liquidity data for all stable tokens relative to a base token.
@@ -481,61 +508,53 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
  * @returns {Promise<Array>} - Array of liquidity data for each token pair.
  */
 async function fetchAllLiquidityData(baseToken, amount) {
-  try {
-    console.log(`Fetching liquidity data for base token: ${baseToken}`);
+  console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-    // Fetch liquidity data for all tokens except the base token
-    const liquidityData = await Promise.all(
-      HARDCODED_STABLE_ADDRESSES.map(async (token) => {
-        if (token !== baseToken) {
-          try {
-            const data = await fetchLiquidityData(baseToken, token, amount);
-            console.log(`Liquidity fetched for ${baseToken} -> ${token}:`, data);
-            return { baseToken, targetToken: token, data };
-          } catch (error) {
-            console.error(`Error fetching liquidity for ${baseToken} -> ${token}:`, error.message);
-            return null; // Gracefully handle individual token fetch failures
-          }
+  const liquidityData = await Promise.all(
+    HARDCODED_STABLE_ADDRESSES.map(async (targetToken) => {
+      if (targetToken !== baseToken) {
+        try {
+          const data = await fetchLiquidityData(baseToken, targetToken, amount);
+          console.log(`Liquidity data for ${baseToken} -> ${targetToken}:`, JSON.stringify(data, null, 2));
+          return { baseToken, targetToken, data };
+        } catch (error) {
+          console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
+          return null;
         }
-        return null; // Skip if the token is the same as the baseToken
-      })
-    );
+      }
+      return null;
+    })
+  );
 
-    return liquidityData.filter((entry) => entry !== null); // Filter out null results
-  } catch (error) {
-    console.error(`Error fetching all liquidity data: ${error.message}`);
-    throw error;
-  }
+  return liquidityData.filter((entry) => entry !== null);
 }
 
 
 // Main function to gather all critical data
-/**
- * Gather all market data, including token prices and liquidity information.
- * @returns {Promise<Object>} - Combined market data.
- */
+
 async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
     // Step 1: Fetch token prices
     console.log("Fetching token prices...");
-    const prices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched successfully:", prices);
+    const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+    console.log("Token prices fetched successfully:", JSON.stringify(tokenPrices, null, 2));
 
-    // Step 2: Fetch liquidity data for USDC as the base token
+    // Step 2: Fetch liquidity data for all token pairs
+    console.log("Fetching liquidity data...");
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-    const amount = "100000000000"; // $100,000 in USDC (assuming 6 decimals)
-    console.log(`Fetching liquidity data for base token ${baseToken}...`);
+    const amount = "100000000000"; // $100,000 in USDC
     const liquidityData = await fetchAllLiquidityData(baseToken, amount);
 
-    // Step 3: Combine market data
+    // Step 3: Compile market data
     const marketData = {
-      prices,
+      chainId: CHAIN_ID,
+      prices: tokenPrices,
       liquidity: liquidityData,
     };
 
-    console.log("Combined market data:", marketData);
+    console.log("Compiled market data:", JSON.stringify(marketData, null, 2));
     return marketData;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
@@ -543,13 +562,14 @@ async function gatherMarketData() {
   }
 }
 
+
 // Error Handling and Notifications
 async function sendTelegramMessage(message, isCritical = false) {
-    const chatId = isCritical ? process.env.TELEGRAM_CHAT_ID;
+    //const chatId = isCritical ? process.env.TELEGRAM_CHAT_ID;
 
     try {
         await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            chat_id: chatId,
+            chat_id: process.env.TELEGRAM_CHAT_ID,
             text: message,
             parse_mode: "Markdown",
         });
@@ -588,7 +608,7 @@ async function sendErrorSummary() {
 }
 
 // Schedule periodic error summaries
-setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
+//setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
 
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
@@ -648,12 +668,22 @@ function checkCircuitBreaker() {
 // Function to send data to the Go backend for computation
 async function sendMarketDataToGo(marketData) {
   try {
-    const response = await axios.post(`${GO_BACKEND_URL}/generate-routes`, marketData);
-    console.log("Go backend response:", response.data);
-  } catch (err) {
-    console.error("Failed to send market data to Go backend:", err.message);
+    console.log("Sending market data to Go backend...");
+    const response = await retryRequest(async () => {
+      return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData);
+    });
+
+    if (response.status === 200) {
+      console.log("Market data successfully sent to Go backend:", response.data);
+    } else {
+      console.error(`Go backend responded with error: ${response.statusText}`);
+    }
+  } catch (error) {
+    console.error("Failed to send market data to Go backend:", error.message);
+    throw error;
   }
 }
+
 
 // Integration with Go Backend
 async function executeRoute(route, amount) {
@@ -675,63 +705,20 @@ async function executeRoute(route, amount) {
 
 
 // Main function
-export async function processMarketData() {
-  console.log("Starting market data processing...");
-
+async function processMarketData() {
   try {
-    // Step 1: Fetch token prices with retry logic
-    console.log("Fetching token prices...");
-    const tokenPrices = await retry(
-      () => fetchTokenPrices(HARDCODED_STABLE_ADDRESSES),
-      3, // Max retries
-      1000 // Retry delay in ms
-    );
-    console.log("Token prices fetched successfully.");
+    const marketData = await gatherMarketData();
 
-    // Step 2: Fetch liquidity data for all token pairs with retry logic
-    console.log("Fetching liquidity data...");
-    const liquidityData = {};
-    for (const token of HARDCODED_STABLE_ADDRESSES) {
-      liquidityData[token] = await retry(
-        () => fetchAllLiquidityData(token, "100000000000"), // $100,000 scaled to 6 decimals
-        3, // Max retries
-        1000 // Retry delay in ms
-      );
-    }
-    console.log("Liquidity data fetched successfully.");
-
-    // Step 3: Aggregate market data
-    const marketData = {
-      tokenPrices,
-      liquidity: liquidityData,
-    };
-
-    // Step 4: Cache the market data
-    console.log("Caching market data...");
+    // Cache compiled market data
     const cacheKey = "marketData";
-    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60); // Cache for 60 seconds
+    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
     console.log("Market data cached successfully.");
 
-    // Step 5: Send market data to Go backend
-    console.log("Sending market data to Go backend...");
-    await retry(
-      () => sendMarketDataToGo(marketData),
-      3, // Max retries
-      2000 // Retry delay in ms
-    );
-    console.log("Market data sent successfully to Go backend.");
+    // Send data to Go backend
+    await sendMarketDataToGo(marketData);
   } catch (error) {
-    // Log the error
     console.error("Error in processing market data:", error.message);
-
-    // Step 6: Notify the monitoring system
-    const notificationMessage = `Market data processing error: ${error.message}`;
-    try {
-      await notifyMonitoringSystem(notificationMessage);
-      console.log("Monitoring system notified successfully.");
-    } catch (monitoringError) {
-      console.error("Failed to notify monitoring system:", monitoringError.message);
-    }
+    await sendTelegramMessage(`❌ Error in market data processing: ${error.message}`, true);
   }
 }
 
@@ -896,55 +883,26 @@ export async function notifyMonitoringSystem(message) {
 async function runArbitrageBot() {
   log('Starting arbitrage bot...');
 
-  const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-  const startAmount = CAPITAL.toFixed(); // Convert BigNumber to string
-  const profitThreshold = MIN_PROFIT.toFixed(); // Convert BigNumber to string
+  // const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
+  // const startAmount = CAPITAL.toFixed(); // Convert BigNumber to string
+  // const profitThreshold = MIN_PROFIT.toFixed(); // Convert BigNumber to string
 
-  setInterval(async () => {
-    log('Running periodic market data discovery...', 'info');
+setInterval(async () => {
+  console.log("Running periodic market data processing...");
+ try {
+  await processMarketData();
 
-    try {
-      // Step 1: Fetch gas price (optional for Go payload)
-      const gasPrice = await fetchGasPrice();
-      log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`, 'info');
-
-      // Step 2: Fetch live token prices
-      const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-      log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`, 'info');
-
-      // Step 3: Fetch liquidity data
-      const liquidityData = await fetchLiquidityForAllPairs(startToken, startAmount);
-      log(`Fetched liquidity data: ${JSON.stringify(liquidityData)}`, 'info');
-
-      // Step 4: Prepare payload for Go backend
-      const marketData = {
-        chainId: CHAIN_ID,
-        startToken,
-        startAmount,
-        maxHops: MAX_HOPS,
-        profitThreshold,
-        tokenPrices,
-        liquidity: liquidityData,
-      };
-
-      log('Prepared market data:', 'info');
-      log(JSON.stringify(marketData), 'info');
-
-      // Step 5: Send data to Go backend
-      const response = await retryRequest(() =>
-        axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData)
-      );
-
-      if (response.status === 200 && response.data.status === 'success') {
+  if (response.status === 200 && response.data.status === 'success') {
         log('Market data sent to Go backend successfully.', 'info');
       } else {
         log(`Go backend returned error: ${response.data.message}`, 'warn');
       }
-    } catch (error) {
+  } catch (error) {
       log(`Error in periodic market data discovery: ${error.message}`, 'error');
       await sendTelegramMessage(`❌ Error in market data discovery: ${error.message}`, true);
     }
-  }, 5 * 60 * 1000); // Run every 5 minutes
+  }, 5 * 60 * 1000); // Every 5 minutes
+
 
   // Health check for Go backend
   cron.schedule('* * * * *', async () => {
