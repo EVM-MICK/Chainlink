@@ -635,6 +635,32 @@ export async function processMarketData() {
     }
   }
 }
+
+
+async function fetchLiquidityForAllPairs(baseToken, amount) {
+  try {
+    const liquidityData = await Promise.all(
+      HARDCODED_STABLE_ADDRESSES.map(async (targetToken) => {
+        if (targetToken !== baseToken) {
+          const data = await fetchLiquidityData(baseToken, targetToken, amount);
+          return {
+            fromToken: baseToken,
+            toToken: targetToken,
+            liquidity: data, // Replace with actual liquidity values
+          };
+        }
+        return null;
+      })
+    );
+
+    return liquidityData.filter((entry) => entry !== null);
+  } catch (error) {
+    log(`Error fetching liquidity data: ${error.message}`, 'error');
+    throw error;
+  }
+}
+
+
 // Mempool Monitoring and Live Data Retrieval
 async function monitorMempool(targetContracts) {
   const web3 = new Web3(process.env.INFURA_WS_URL);
@@ -771,39 +797,43 @@ export async function notifyMonitoringSystem(message) {
 async function runArbitrageBot() {
   log('Starting arbitrage bot...');
 
-  // Define token addresses to monitor
-  const tokenAddresses = HARDCODED_STABLE_ADDRESSES;
-  const StartToken =  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-  // Periodic Live Market Data Fetching
+  const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
+  const startAmount = CAPITAL.toFixed(); // Convert BigNumber to string
+  const profitThreshold = MIN_PROFIT.toFixed(); // Convert BigNumber to string
+
   setInterval(async () => {
     log('Running periodic market data discovery...', 'info');
 
     try {
-      // Fetch gas price and log it
+      // Step 1: Fetch gas price (optional for Go payload)
       const gasPrice = await fetchGasPrice();
       log(`Current gas price: ${gasPrice.dividedBy(1e9).toFixed(2)} Gwei`, 'info');
 
-      // Fetch live token prices and liquidity for HARDCODED_STABLE_ADDRESSES
-      const tokenPrices = await fetchTokenPrices(tokenAddresses);
-      log(`Live token prices: ${JSON.stringify(tokenPrices)}`, 'info');
+      // Step 2: Fetch live token prices
+      const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+      log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`, 'info');
 
-      const liquidityData = await fetchLiquidityForAllPairs(tokenAddresses);
-      log(`Liquidity data fetched: ${JSON.stringify(liquidityData)}`, 'info');
+      // Step 3: Fetch liquidity data
+      const liquidityData = await fetchLiquidityForAllPairs(startToken, startAmount);
+      log(`Fetched liquidity data: ${JSON.stringify(liquidityData)}`, 'info');
 
-      // Combine data into a payload
+      // Step 4: Prepare payload for Go backend
       const marketData = {
-        CHAIN_ID,
-        StartToken,
-        CAPITAL,
-        MAX_HOPS,
-        MIN_PROFIT,
+        chainId: CHAIN_ID,
+        startToken,
+        startAmount,
+        maxHops: MAX_HOPS,
+        profitThreshold,
         tokenPrices,
         liquidity: liquidityData,
       };
 
-      // Send market data to Go backend for evaluation
+      log('Prepared market data:', 'info');
+      log(JSON.stringify(marketData), 'info');
+
+      // Step 5: Send data to Go backend
       const response = await retryRequest(() =>
-        axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData)
+        axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData)
       );
 
       if (response.status === 200 && response.data.status === 'success') {
@@ -817,10 +847,10 @@ async function runArbitrageBot() {
     }
   }, 5 * 60 * 1000); // Run every 5 minutes
 
-  // Periodic Health Check for Go Backend
+  // Health check for Go backend
   cron.schedule('* * * * *', async () => {
     try {
-      const response = await axios.get(`${process.env.GO_BACKEND_URL}/health`);
+      const response = await axios.get(`${GO_BACKEND_URL}/health`);
       if (response.status !== 200) {
         throw new Error('Go backend health check failed');
       }
@@ -830,7 +860,6 @@ async function runArbitrageBot() {
     }
   });
 }
-
 
 // Start Bot
 runArbitrageBot();
