@@ -107,10 +107,11 @@ const redisClient = createClient({
 const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
-const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://localhost:8080"; // Go service endpoint
+const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "https://chainlink-production-b42d.up.railway.app"; // Go service endpoint
 const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
 const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
+const MAX_HOPS = 3;
 const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
 const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
 const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -772,7 +773,7 @@ async function runArbitrageBot() {
 
   // Define token addresses to monitor
   const tokenAddresses = HARDCODED_STABLE_ADDRESSES;
-
+  const StartToken =  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
   // Periodic Live Market Data Fetching
   setInterval(async () => {
     log('Running periodic market data discovery...', 'info');
@@ -791,7 +792,11 @@ async function runArbitrageBot() {
 
       // Combine data into a payload
       const marketData = {
-        gasPrice: gasPrice.toFixed(),
+        CHAIN_ID,
+        StartToken,
+        CAPITAL,
+        MAX_HOPS,
+        MIN_PROFIT,
         tokenPrices,
         liquidity: liquidityData,
       };
