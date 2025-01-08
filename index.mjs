@@ -1,16 +1,16 @@
-import dotenv from 'dotenv';
-import fetch from 'node-fetch'; // Ensure you have node-fetch installed
-import axios from 'axios';
-import Web3 from 'web3';
-import { BigNumber } from 'bignumber.js';
-import retry from 'async-retry';
-import PQueue from 'p-queue';
-import Redis from 'ioredis';
-import { createClient } from 'redis';
+import dotenv from "dotenv";
+import fetch from "node-fetch"; // Ensure you have node-fetch installed
+import axios from "axios";
+import Web3 from "web3";
+import { BigNumber } from "bignumber.js";
+import retry from "async-retry";
+import PQueue from "p-queue";
+import Redis from "ioredis";
+import { createClient } from "redis";
 import { Wallet, JsonRpcProvider, Contract } from "ethers";
-import cron from 'node-cron';
-import { promisify } from 'util';
-import pkg from 'telegraf';
+import cron from "node-cron";
+import { promisify } from "util";
+import pkg from "telegraf";
 
 dotenv.config();
 const { Telegraf } = pkg;
@@ -114,7 +114,7 @@ const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
 const MAX_HOPS = 3;
 const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
 const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
-const TELEGRAM_BOT = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+const TELEGRAM_BOT = Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
