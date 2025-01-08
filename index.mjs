@@ -181,13 +181,35 @@ async function sendErrorSummary() {
 setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
 
 // Helper function to construct 1inch API URLs
-function constructApiUrl(endpoint, params) {
-  const url = new URL(`${API_BASE_URL}/${endpoint}`);
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.append(key, value);
-  });
-  return url.toString();
+/**
+ * Generic function to make HTTP GET requests using Axios.
+ * @param {string} endpoint - The API endpoint to call.
+ * @param {object} params - Query parameters to include in the request.
+ * @returns {Promise<object>} - The response data from the API.
+ */
+async function constructApiUrl(endpoint, params = {}) {
+  const url = `${API_BASE_URL}/${endpoint}`;
+  const config = {
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    params,
+    paramsSerializer: {
+      indexes: null, // Prevents arrays from being serialized with square brackets
+    },
+  };
+
+  try {
+    const response = await axios.get(url, config);
+    console.log("API Response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("HTTP Call Error:", error.message);
+    throw error;
+  }
 }
+
+
 
 // Utility Functions
 function log(message, level = 'info') {
@@ -350,44 +372,44 @@ function extractTokensFromTransaction(tx) {
 
 // Caching Helper
 async function cachedFetchPrices(tokenAddresses) {
-    const url = `https://api.1inch.dev/price/v1.1/42161/${tokenAddresses.join(',')}`;
-    return cachedFetch(`prices:${tokenAddresses.join(',')}`, async () => {
-        try {
-            const response = await fetch(url, {
-                headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-            });
-            if (!response.ok) {
-                console.error(`Error: ${response.status} - ${response.statusText}`);
-                throw new Error(`Failed to fetch prices: ${response.statusText}`);
-            }
-            const data = await response.json();
-            console.log('Fetched token prices:', data);
-            return data;
-        } catch (error) {
-            console.error('Failed to fetch token prices:', error.message);
-            throw error;
-        }
-    });
+  const cacheKey = `prices:${tokenAddresses.join(",")}`;
+  const endpoint = tokenAddresses.join(",");
+
+  // Use the cache or fetch fresh data if expired
+  return cachedFetch(cacheKey, async () => {
+    try {
+      const data = await httpCall(endpoint);
+      console.log("Fetched token prices from API:", data);
+      return data;
+    } catch (error) {
+      console.error("Error fetching token prices:", error.message);
+      throw error;
+    }
+  });
 }
 
+
 async function fetchTokenPrices(tokens) {
-    console.log('Fetching prices for tokens:', tokens);
-    if (tokens.length === 0) {
-        console.warn('No tokens provided for price fetch.');
-        return {};
-    }
+  console.log("Fetching prices for tokens:", tokens);
 
-    const uniqueTokens = [...new Set(tokens)].sort();
-    console.log('Unique tokens:', uniqueTokens);
+  if (!tokens || tokens.length === 0) {
+    console.warn("No tokens provided for price fetch.");
+    return {};
+  }
 
-    try {
-        const prices = await cachedFetchPrices(uniqueTokens);
-        console.log('Token prices fetched:', prices);
-        return prices;
-    } catch (error) {
-        console.error('Error in fetchTokenPrices:', error.message);
-        throw error;
-    }
+  // Remove duplicates and sort tokens for consistent request formatting
+  const uniqueTokens = [...new Set(tokens)].sort();
+  console.log("Unique tokens:", uniqueTokens);
+
+  try {
+    // Delegate to cached fetch function
+    const prices = await cachedFetchPrices(uniqueTokens);
+    console.log("Token prices fetched:", prices);
+    return prices;
+  } catch (error) {
+    console.error("Error in fetchTokenPrices:", error.message);
+    throw error;
+  }
 }
 
 
