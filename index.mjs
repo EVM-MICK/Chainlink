@@ -422,46 +422,74 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
   });
 }
 
-// Fetch liquidity for all stable tokens in HARDCODED_STABLE_ADDRESSES
+/**
+ * Fetch liquidity data for all stable tokens relative to a base token.
+ * @param {string} baseToken - The base token address (e.g., USDC).
+ * @param {string} amount - The amount in base token units (e.g., $100,000 in smallest units).
+ * @returns {Promise<Array>} - Array of liquidity data for each token pair.
+ */
 async function fetchAllLiquidityData(baseToken, amount) {
-  const liquidityData = await Promise.all(
-    HARDCODED_STABLE_ADDRESSES.map(async (token) => {
-      if (token !== baseToken) {
-        return fetchLiquidityData(baseToken, token, amount);
-      }
-      return null;
-    })
-  );
-
-  return liquidityData.filter((data) => data !== null);
-}
-
-// Main function to gather all critical data
-async function gatherMarketData() {
   try {
-    console.log("Fetching token prices...");
-    const prices = await fetchTokenPrices();
+    console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-    console.log("Fetching liquidity data for USDC...");
-    const liquidityData = await fetchAllLiquidityData(
-      "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
-      "100000000000" // $100,000 in USDC (assuming 6 decimals)
+    // Fetch liquidity data for all tokens except the base token
+    const liquidityData = await Promise.all(
+      HARDCODED_STABLE_ADDRESSES.map(async (token) => {
+        if (token !== baseToken) {
+          try {
+            const data = await fetchLiquidityData(baseToken, token, amount);
+            console.log(`Liquidity fetched for ${baseToken} -> ${token}:`, data);
+            return { baseToken, targetToken: token, data };
+          } catch (error) {
+            console.error(`Error fetching liquidity for ${baseToken} -> ${token}:`, error.message);
+            return null; // Gracefully handle individual token fetch failures
+          }
+        }
+        return null; // Skip if the token is the same as the baseToken
+      })
     );
 
-    // Combine data to be passed to Go script
+    return liquidityData.filter((entry) => entry !== null); // Filter out null results
+  } catch (error) {
+    console.error(`Error fetching all liquidity data: ${error.message}`);
+    throw error;
+  }
+}
+
+
+// Main function to gather all critical data
+/**
+ * Gather all market data, including token prices and liquidity information.
+ * @returns {Promise<Object>} - Combined market data.
+ */
+async function gatherMarketData() {
+  try {
+    console.log("Starting to gather market data...");
+
+    // Step 1: Fetch token prices
+    console.log("Fetching token prices...");
+    const prices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+    console.log("Token prices fetched successfully:", prices);
+
+    // Step 2: Fetch liquidity data for USDC as the base token
+    const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
+    const amount = "100000000000"; // $100,000 in USDC (assuming 6 decimals)
+    console.log(`Fetching liquidity data for base token ${baseToken}...`);
+    const liquidityData = await fetchAllLiquidityData(baseToken, amount);
+
+    // Step 3: Combine market data
     const marketData = {
       prices,
       liquidity: liquidityData,
     };
 
-    console.log("Combined Market Data:", marketData);
+    console.log("Combined market data:", marketData);
     return marketData;
-  } catch (err) {
-    console.error("Error gathering market data:", err.message);
-    throw err;
+  } catch (error) {
+    console.error("Error gathering market data:", error.message);
+    throw error;
   }
 }
-
 
 // Error Handling and Notifications
 function sendTelegramMessage(message, isCritical = false) {
