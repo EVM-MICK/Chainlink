@@ -243,16 +243,16 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 
 
 // Redis Cache Helper
-// async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
-//   const cached = await redis.get(key);
-//   if (cached) {
-//     return JSON.parse(cached);
-//   }
+async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
+  const cached = await redis.get(key);
+  if (cached) {
+    return JSON.parse(cached);
+  }
 
-//   const data = await fetchFn();
-//   await redis.setex(key, duration, JSON.stringify(data));
-//   return data;
-// }
+  const data = await fetchFn();
+  await redis.setex(key, duration, JSON.stringify(data));
+  return data;
+}
 
 // Fetch Functions
 async function fetchGasPrice() {
@@ -338,15 +338,15 @@ function extractTokensFromTransaction(tx) {
 }
 
 // Function to cache and fetch data from Redis
-async function cachedFetch(key, fetchFn) {
-  const cachedData = await redis.get(key);
-  if (cachedData) {
-    return JSON.parse(cachedData);
-  }
-  const freshData = await fetchFn();
-  await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
-  return freshData;
-}
+// async function cachedFetch(key, fetchFn) {
+//   const cachedData = await redis.get(key);
+//   if (cachedData) {
+//     return JSON.parse(cachedData);
+//   }
+//   const freshData = await fetchFn();
+//   await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
+//   return freshData;
+// }
 
 // Caching Helper
 async function cachedFetchPrices(tokenAddresses) {
