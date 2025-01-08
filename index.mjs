@@ -506,9 +506,22 @@ async function gatherMarketData() {
 }
 
 // Error Handling and Notifications
-function sendTelegramMessage(message, isCritical = false) {
-  const chatId = isCritical ? process.env.TELEGRAM_CHAT_ID : process.env.TELEGRAM_CHAT_ID;
-  return TELEGRAM_BOT.telegram.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+async function sendTelegramMessage(message, isCritical = false) {
+    const chatId = isCritical ? process.env.TELEGRAM_CRITICAL_CHAT_ID : process.env.TELEGRAM_CHAT_ID;
+
+    try {
+        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            chat_id: chatId,
+            text: message,
+            parse_mode: "Markdown",
+        });
+        console.log("Telegram message sent:", message);
+    } catch (error) {
+        console.error("Failed to send Telegram message:", {
+            message: error.message,
+            stack: error.stack,
+        });
+    }
 }
 
 async function handleCriticalError(error, context = '') {
