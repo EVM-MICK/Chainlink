@@ -370,7 +370,7 @@ async function cachedFetchPrices(tokenAddresses) {
   // Use the cache or fetch fresh data if expired
   return cachedFetch(cacheKey, async () => {
     try {
-      const data = await httpCall(endpoint);
+      const data = await constructApiUrl(endpoint);
       console.log("Fetched token prices from API:", data);
       return data;
     } catch (error) {
