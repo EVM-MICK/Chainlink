@@ -135,9 +135,8 @@ web3.eth.accounts.wallet.add(account);
 // State Variables
 let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
-
-const setAsync = promisify(redisClient.set).bind(redisClient);
-const getAsync = promisify(redisClient.get).bind(redisClient);
+const setAsync = redisClient.set.bind(redisClient);
+const getAsync = redisClient.get.bind(redisClient);
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
@@ -566,10 +565,11 @@ async function gatherMarketData() {
 // Error Handling and Notifications
 async function sendTelegramMessage(message, isCritical = false) {
     //const chatId = isCritical ? process.env.TELEGRAM_CHAT_ID;
+    const chatId = isCritical ? process.env.TELEGRAM_CRITICAL_CHAT_ID : process.env.TELEGRAM_CHAT_ID;
 
     try {
         await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            chat_id: process.env.TELEGRAM_CHAT_ID,
+            chat_id: chatId,
             text: message,
             parse_mode: "Markdown",
         });
