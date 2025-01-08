@@ -338,6 +338,17 @@ func loadABI(abiString string) abi.ABI {
 	return parsedABI
 }
 
+// isTokenHardcoded checks if a given token address is in the hardcoded list
+func isTokenHardcoded(tokenAddress string) bool {
+	for _, addr := range hardcodedStableAddresses {
+		if strings.EqualFold(addr, tokenAddress) { // Case-insensitive comparison
+			return true
+		}
+	}
+	return false
+}
+
+
 func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
       // Declare result and err
     var result interface{}
