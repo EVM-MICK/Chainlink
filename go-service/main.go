@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"container/heap"
-        //"crypto/ecdsa"
 	"math/big"
 	"sync"
 	"io/ioutil"
@@ -25,7 +24,6 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-        //"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
         "github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -55,6 +53,22 @@ type ArbitrageOpportunity struct {
 	DstToken string  `json:"dstToken"`
 	AmountIn string  `json:"amountIn"`
 }
+
+// HealthCheckResponse represents the JSON structure of the health check response
+type HealthCheckResponse struct {
+	Status      string `json:"status"`
+	Uptime      string `json:"uptime"`
+	GoVersion   string `json:"goVersion"`
+	NumGoroutine int   `json:"numGoroutine"`
+	MemoryUsage struct {
+		Alloc      uint64 `json:"alloc"`      // Allocated memory in bytes
+		TotalAlloc uint64 `json:"totalAlloc"` // Total allocated memory in bytes
+		Sys        uint64 `json:"sys"`        // System memory in bytes
+	} `json:"memoryUsage"`
+	StartTime string `json:"startTime"`
+}
+
+var startTime time.Time
 
 var (
 	uniswapABI    abi.ABI
@@ -664,6 +678,7 @@ func init() {
 	if !ok {
 		log.Fatal("Failed to set value for CAPITAL")
 	}
+        startTime = time.Now()
 	setupCacheExpirationLogging()
         uniswapABI = loadABI(UniswapV3RouterABI)
 	sushiSwapABI = loadABI(SushiSwapRouterABI)
@@ -677,6 +692,33 @@ func init() {
 
 func setToStableTokenCache(key string, value interface{}) {
     stableTokenCache.Set(key, value, cache.DefaultExpiration)
+}
+
+// healthHandler handles the /health endpoint
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	// Calculate uptime
+	uptime := time.Since(startTime).String()
+
+	// Gather memory stats
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// Create the response object
+	response := HealthCheckResponse{
+		Status:      "ok",
+		Uptime:      uptime,
+		GoVersion:   runtime.Version(),
+		NumGoroutine: runtime.NumGoroutine(),
+		StartTime:   startTime.Format(time.RFC3339),
+	}
+	response.MemoryUsage.Alloc = memStats.Alloc
+	response.MemoryUsage.TotalAlloc = memStats.TotalAlloc
+	response.MemoryUsage.Sys = memStats.Sys
+
+	// Set response headers and write JSON response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 
@@ -2961,6 +3003,8 @@ func main() {
 		cancelFunc()
 		shutdownWebSocketServer()
 	}()
+         
+         http.HandleFunc("/health", healthHandler)
 
 	// Define the `/process-market-data` route with CORS middleware
 	http.HandleFunc("/process-market-data", enableCORS(generateRoutesHandler))
