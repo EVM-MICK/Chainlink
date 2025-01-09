@@ -109,6 +109,7 @@ const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0/42161";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "https://chainlink-production-b42d.up.railway.app"; // Go service endpoint
+const MARKET_DATA_INTERVAL_MS = 1 * 60 * 1000; // Every 1 minutes
 const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
 const CACHE_DURATION = 1 * 60; // 5 minutes in seconds
@@ -239,11 +240,10 @@ async function constructApiUrl(endpoint, params = {}) {
 
 // Utility Functions
 function log(message, level = 'info') {
-  if (process.env.DEBUG === 'true' || level === 'error') {
-    const timestamp = new Date().toISOString();
-    console[level === 'error' ? 'error' : 'log'](`[${timestamp}] [${level.toUpperCase()}] ${message}`);
-  }
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
 }
+
 
 // Connect to Redis
 (async () => {
@@ -925,17 +925,19 @@ async function notifyMonitoringSystem(message) {
 
 // Main Function
 async function runArbitrageBot() {
-  log('Starting arbitrage bot...');
+  log('Starting arbitrage bot...', 'info');
 
-  // const startToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-  // const startAmount = CAPITAL.toFixed(); // Convert BigNumber to string
-  // const profitThreshold = MIN_PROFIT.toFixed(); // Convert BigNumber to string
-
-setInterval(async () => {
-  console.log("Running periodic market data processing...");
-  await processMarketData();
-  }, 5 * 60 * 1000); // Every 5 minutes
-
+  // Periodic market data processing
+  setInterval(async () => {
+    log('Running periodic market data processing...', 'info');
+    try {
+      await processMarketData();
+      log('Market data processed successfully.', 'info');
+    } catch (err) {
+      log(`Error in processing market data: ${err.message}`, 'error');
+      await handleCriticalError(err, 'Market Data Processing');
+    }
+  }, MARKET_DATA_INTERVAL_MS);
 
   // Health check for Go backend
   cron.schedule('* * * * *', async () => {
@@ -946,6 +948,7 @@ setInterval(async () => {
       }
       log('Go backend is healthy.', 'info');
     } catch (err) {
+      log('Health check failed. Attempting recovery...', 'error');
       await handleCriticalError(err, 'Health Check');
     }
   });
