@@ -489,10 +489,14 @@ async function fetchTokenPrices(tokens) {
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL}/${tokenList}`; // Construct URL for API request
 
-    const config = {
-      headers: {
+ const config = {
+      headers:  {
         Authorization: `Bearer ${API_KEY}`, // Pass API key in the header
       },
+      params: {},
+      paramsSerializer: {
+        indexes: null
+      }
     };
 
     try {
@@ -519,7 +523,7 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL1}/quote`;
-    const params = {
+    const params1 = {
       src: fromToken,
       dst: toToken,
       amount,
@@ -533,10 +537,10 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 
     const config = {
       headers: { Authorization: `Bearer ${process.env.API_KEY}` },
-      params,
+      params: params1,
       paramsSerializer: { indexes: null }, // Ensure array params are not serialized with brackets
     };
-
+  
     try {
       const response = await axios.get(url, config);
       return response.data;
