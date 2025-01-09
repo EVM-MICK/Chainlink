@@ -205,27 +205,36 @@ async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
  * @returns {Promise<object>} - The response data from the API.
  */
 async function constructApiUrl(endpoint, params = {}) {
-  const url = `${API_BASE_URL}/${endpoint}`;
-  const config = {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-    },
-    params,
-    paramsSerializer: {
-      indexes: null, // Prevents arrays from being serialized with square brackets
-    },
-  };
+  const baseToken1 = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
+  const amount1 = "100000000000"; // $100,000 in USDC
 
   try {
-    const response = await axios.get(url, config);
-    console.log("API Response:", response.data);
-    return response.data;
+    // Fetch token prices
+    const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+    console.log("Token Prices Response:", JSON.stringify(tokenPrices, null, 2));
+
+    // Fetch liquidity data
+    const liquidityData = await fetchAllLiquidityData(
+      baseToken1,
+      amount1,
+      HARDCODED_STABLE_ADDRESSES_WITH_COMMA
+    );
+    console.log("Liquidity Data Response:", JSON.stringify(liquidityData, null, 2));
+
+    // Construct API response based on the endpoint and params
+    const apiResponse = {
+      endpoint,
+      params,
+      tokenPrices,
+      liquidityData,
+    };
+
+    return apiResponse;
   } catch (error) {
-    console.error("HTTP Call Error:", error.message);
+    console.error("Error constructing API URL:", error.message);
     throw error;
   }
 }
-
 
 
 // Utility Functions
@@ -509,7 +518,7 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
   const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
 
   return fetchAndCache(cacheKey, async () => {
-    const url = `${API_BASE_URL}/quote`;
+    const url = `${API_BASE_URL1}/quote`;
     const params = {
       src: fromToken,
       dst: toToken,
