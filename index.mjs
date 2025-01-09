@@ -104,7 +104,8 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
-const API_BASE_URL = `https://api.1inch.dev/swap/v6.0/${CHAIN_ID}`;
+const API_BASE_URL = `https://api.1inch.dev/price/v1.1/42161`;
+const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0/42161";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "https://chainlink-production-b42d.up.railway.app"; // Go service endpoint
@@ -120,12 +121,21 @@ const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
 const HARDCODED_STABLE_ADDRESSES = [
-    "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",//usdt
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",//usdc
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",//dai
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",//weth
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",//wbtc
+  0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9, // USDT
+  0xaf88d065e77c8cC2239327C5EDb3A432268e5831, // USDC
+  0xda10009cbd5d07dd0cecc66161fc93d7c9000da1, // DAI
+  0x82af49447d8a07e3bd95bd0d56f35241523fbab1, // WETH
+  0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f, // WBTC
 ];
+
+const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
+  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
+];
+
 // Initialize Permit2 contract instance
 const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
 
@@ -463,40 +473,68 @@ async function cachedFetchPrices(tokenAddresses) {
 }
 
 async function fetchTokenPrices(tokens) {
-  const cacheKey = `tokenPrices:${tokens.join(",")}`;
+  const tokenList = tokens.join(","); // Join token addresses into a single string
+  const cacheKey = `tokenPrices:${tokenList}`;
 
+  // Fetch and cache token prices
   return fetchAndCache(cacheKey, async () => {
-    const endpoint = `prices?tokens=${tokens.join(",")}`;
-    const url = `${API_BASE_URL}/${endpoint}`;
-    const response = await rateLimitedRequest(async () => {
-      return axios.get(url, {
-        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-      });
-    });
-    return response.data;
+    const url = `${API_BASE_URL}/${tokenList}`; // Construct URL for API request
+
+    const config = {
+      headers: {
+        Authorization: `Bearer ${ONEINCH_API_KEY}`, // Pass API key in the header
+      },
+    };
+
+    try {
+      const response = await rateLimitedRequest(async () => axios.get(url, config));
+      console.log("Fetched token prices:", response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching token prices:", error.message);
+      throw error;
+    }
   });
 }
 
 // Fetch liquidity data for a token pair using 1inch Swap API
-async function fetchLiquidityData(fromToken, toToken, amount) {
+/**
+ * Fetch liquidity data for a token pair using the 1inch API.
+ * @param {string} fromToken - The address of the source token.
+ * @param {string} toToken - The address of the destination token.
+ * @param {string} amount - The amount to swap (in smallest units).
+ * @returns {Promise<object>} - Liquidity data from the API.
+ */
+export async function fetchLiquidityData(fromToken, toToken, amount) {
   const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
 
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL}/quote`;
     const params = {
-      fromTokenAddress: fromToken,
-      toTokenAddress: toToken,
+      src: fromToken,
+      dst: toToken,
       amount,
-      disableEstimate: "false",
+      complexityLevel: "2", // Complexity level for routing
+      parts: "50", // Number of route parts
+      mainRouteParts: "10", // Main route parts
+      includeTokensInfo: false, // Exclude token info in the response
+      includeProtocols: true, // Include swap protocols in the response
+      includeGas: true, // Include gas estimation in the response
     };
 
-    const response = await rateLimitedRequest(async () => {
-      return axios.get(url, {
-        headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
-        params,
-      });
-    });
-    return response.data;
+    const config = {
+      headers: { Authorization: `Bearer ${process.env.ONEINCH_API_KEY}` },
+      params,
+      paramsSerializer: { indexes: null }, // Ensure array params are not serialized with brackets
+    };
+
+    try {
+      const response = await axios.get(url, config);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching liquidity data for ${fromToken} -> ${toToken}:`, error.message);
+      throw error;
+    }
   });
 }
 
@@ -506,11 +544,18 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
  * @param {string} amount - The amount in base token units (e.g., $100,000 in smallest units).
  * @returns {Promise<Array>} - Array of liquidity data for each token pair.
  */
-async function fetchAllLiquidityData(baseToken, amount) {
+/**
+ * Fetch liquidity data for all token pairs relative to a base token.
+ * @param {string} baseToken - The base token address (e.g., USDC).
+ * @param {string} amount - The amount in the base token's smallest units.
+ * @param {Array<string>} stableAddresses - List of target stable token addresses.
+ * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
+ */
+export async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
   const liquidityData = await Promise.all(
-    HARDCODED_STABLE_ADDRESSES.map(async (targetToken) => {
+    stableAddresses.map(async (targetToken) => {
       if (targetToken !== baseToken) {
         try {
           const data = await fetchLiquidityData(baseToken, targetToken, amount);
@@ -528,23 +573,21 @@ async function fetchAllLiquidityData(baseToken, amount) {
   return liquidityData.filter((entry) => entry !== null);
 }
 
-
 // Main function to gather all critical data
-
 async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
-    // Step 1: Fetch token prices
+    // Step 1: Fetch token prices (uses HARDCODED_STABLE_ADDRESSES without quotes)
     console.log("Fetching token prices...");
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
     console.log("Token prices fetched successfully:", JSON.stringify(tokenPrices, null, 2));
 
-    // Step 2: Fetch liquidity data for all token pairs
+    // Step 2: Fetch liquidity data (uses HARDCODED_STABLE_ADDRESSES_WITH_COMMA)
     console.log("Fetching liquidity data...");
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
     const amount = "100000000000"; // $100,000 in USDC
-    const liquidityData = await fetchAllLiquidityData(baseToken, amount);
+    const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES_WITH_COMMA);
 
     // Step 3: Compile market data
     const marketData = {
@@ -560,7 +603,6 @@ async function gatherMarketData() {
     throw error;
   }
 }
-
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message, isCritical = false) {
