@@ -609,7 +609,6 @@ async function gatherMarketData() {
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message, isCritical = false) {
-    //const chatId = isCritical ? process.env.TELEGRAM_CHAT_ID;
     const chatId = isCritical ? process.env.TELEGRAM_CRITICAL_CHAT_ID : process.env.TELEGRAM_CHAT_ID;
 
     try {
