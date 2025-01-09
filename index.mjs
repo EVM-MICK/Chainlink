@@ -548,12 +548,6 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 }
 
 /**
- * Fetch liquidity data for all stable tokens relative to a base token.
- * @param {string} baseToken - The base token address (e.g., USDC).
- * @param {string} amount - The amount in base token units (e.g., $100,000 in smallest units).
- * @returns {Promise<Array>} - Array of liquidity data for each token pair.
- */
-/**
  * Fetch liquidity data for all token pairs relative to a base token.
  * @param {string} baseToken - The base token address (e.g., USDC).
  * @param {string} amount - The amount in the base token's smallest units.
