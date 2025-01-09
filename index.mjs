@@ -505,7 +505,7 @@ async function fetchTokenPrices(tokens) {
  * @param {string} amount - The amount to swap (in smallest units).
  * @returns {Promise<object>} - Liquidity data from the API.
  */
-export async function fetchLiquidityData(fromToken, toToken, amount) {
+async function fetchLiquidityData(fromToken, toToken, amount) {
   const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
 
   return fetchAndCache(cacheKey, async () => {
@@ -551,7 +551,7 @@ export async function fetchLiquidityData(fromToken, toToken, amount) {
  * @param {Array<string>} stableAddresses - List of target stable token addresses.
  * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
  */
-export async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
+async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
   const liquidityData = await Promise.all(
@@ -865,7 +865,7 @@ async function monitorMempool(targetContracts) {
 }
 
 
-export async function notifyMonitoringSystem(message) {
+async function notifyMonitoringSystem(message) {
   const monitoringServiceUrl = process.env.MONITORING_SERVICE_URL;
 
   // Validate the monitoring system URL
