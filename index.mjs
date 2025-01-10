@@ -493,10 +493,7 @@ async function fetchTokenPrices(tokens) {
       headers:  {
         Authorization: `Bearer ${API_KEY}`, // Pass API key in the header
       },
-      params: {},
-      paramsSerializer: {
-        indexes: null
-      }
+      params: {}
     };
 
     try {
@@ -537,8 +534,7 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 
     const config = {
       headers: { Authorization: `Bearer ${process.env.API_KEY}` },
-      params: params1,
-      paramsSerializer: { indexes: null }, // Ensure array params are not serialized with brackets
+      params: params1
     };
   
     try {
