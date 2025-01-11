@@ -173,29 +173,6 @@ validateEnvVars([
   "CHAIN_ID",
 ]);
 
-async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
-  try {
-    // Check Redis for cached data
-    const cachedData = await getAsync(key);
-    if (cachedData) {
-      console.log(`Cache hit for ${key}`);
-      return JSON.parse(cachedData);
-    }
-
-    // Fetch fresh data
-    const data = await fetchFn();
-    console.log(`Fetched data for ${key}:`, JSON.stringify(data, null, 2));
-
-    // Cache the data for the specified duration
-    await setAsync(key, JSON.stringify(data), "EX", duration);
-    console.log(`Cached data for ${key} for ${duration} seconds.`);
-    return data;
-  } catch (error) {
-    console.error(`Error fetching or caching data for ${key}:`, error.message);
-    throw error;
-  }
-}
-
 
 
 // Helper function to construct 1inch API URLs
@@ -205,6 +182,21 @@ async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
  * @param {object} params - Query parameters to include in the request.
  * @returns {Promise<object>} - The response data from the API.
  */
+async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
+  const cachedData = await redisClient.get(key);
+  if (cachedData) {
+    try {
+      return JSON.parse(cachedData);
+    } catch (err) {
+      console.error(`Error parsing cached data for ${key}:`, err.message);
+    }
+  }
+  const data = await fetchFn();
+  await redisClient.set(key, JSON.stringify(data), "EX", duration);
+  return data;
+}
+
+
 async function constructApiUrl(endpoint, params = {}) {
   const baseToken1 = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
   const amount1 = "100000000000"; // $100,000 in USDC
@@ -369,6 +361,25 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 //   return data;
 // }
 
+async function cacheLiquidityData(baseToken, targetToken, liquidityData) {
+  const cacheKey = `liquidity:${baseToken}-${targetToken}`;
+  await redisClient.set(cacheKey, JSON.stringify(liquidityData), "EX", 300); // Cache for 5 minutes
+}
+
+async function getCachedLiquidityData(baseToken, targetToken) {
+  const cacheKey = `liquidity:${baseToken}-${targetToken}`;
+  const cachedData = await redisClient.get(cacheKey);
+  return cachedData ? JSON.parse(cachedData) : null;
+}
+
+async function validateTokenPrices(prices, tokens) {
+  const invalidTokens = tokens.filter((token) => !prices[token.toLowerCase()]);
+  if (invalidTokens.length > 0) {
+    throw new Error(`Invalid token prices for addresses: ${invalidTokens.join(", ")}`);
+  }
+}
+
+
 // Fetch Functions
 async function fetchGasPrice() {
   const url = `https://api.blocknative.com/gasprices/blockprices`;
@@ -486,42 +497,36 @@ async function cachedFetchPrices(tokenAddresses) {
   });
 }
 
+
 async function fetchTokenPrices(tokens) {
-  // Validate tokens
-  const invalidTokens = tokens.filter((token) => !isValidAddress(token));
-  if (invalidTokens.length > 0) {
-    throw new Error(`Invalid token addresses detected: ${invalidTokens.join(", ")}`);
-  }
+  const tokenList = tokens.join(",").toLowerCase();
+  const cacheKey = `prices:${tokenList}`;
 
-  // Construct the URL
-  const tokenList = tokens.join(","); // Join token addresses into a single string
-  const url = `${API_BASE_URL}/price/v1.1/42161/${tokenList}`;
+  return fetchAndCache(cacheKey, async () => {
+    const url = `${API_BASE_URL}/${tokenList}`;
+    const config = {
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        Accept: "application/json",
+      },
+      params: { currency: "USD" },
+    };
 
-  // Axios config
-  const config = {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`, // Replace with your actual API key
-      Accept: "application/json",
-    },
-    params: {
-      currency: "USD",
-    },
-    paramsSerializer: {
-      indexes: null, // Match 1inch's format
-    },
-  };
+    try {
+      const response = await axios.get(url, config);
+      const prices = response.data;
 
-  try {
-    // Make the API request with retry logic
-    const response = await axios.get(url, config);
-    console.log("Fetched token prices:", response.data);
-    return response.data; // Return the fetched prices
-  } catch (error) {
-    // Log and rethrow the error for upstream handling
-    console.error("Error fetching token prices:", error.response?.data || error.message);
-    throw error;
-  }
+      // Ensure token keys are lowercase
+      return Object.fromEntries(
+        Object.entries(prices).map(([token, price]) => [token.toLowerCase(), price.toString()])
+      );
+    } catch (error) {
+      console.error("Error fetching token prices:", error.response?.data || error.message);
+      throw error;
+    }
+  });
 }
+
 
 // Fetch liquidity data for a token pair using 1inch Swap API
 /**
@@ -533,43 +538,28 @@ async function fetchTokenPrices(tokens) {
  */
 async function fetchLiquidityData(fromToken, toToken, amount) {
   const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
-
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL1}/quote`;
-
     const config = {
       headers: { Authorization: `Bearer ${API_KEY}` },
       params: {
-      src: fromToken,
-      dst: toToken,
-      amount,
-      complexityLevel: "2", // Complexity level for routing
-      parts: "50", // Number of route parts
-      mainRouteParts: "10", // Main route parts
-      includeTokensInfo: false, // Exclude token info in the response
-      includeProtocols: true, // Include swap protocols in the response
-      includeGas: true, // Include gas estimation in the response
-    },
+        src: fromToken,
+        dst: toToken,
+        amount,
+        complexityLevel: "2",
+        parts: "50",
+        mainRouteParts: "10",
+        includeTokensInfo: false,
+        includeProtocols: true,
+        includeGas: true,
+      },
     };
-  
+
     try {
-      const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      params: {
-      src: fromToken,
-      dst: toToken,
-      amount,
-      complexityLevel: "2", // Complexity level for routing
-      parts: "50", // Number of route parts
-      mainRouteParts: "10", // Main route parts
-      includeTokensInfo: false, // Exclude token info in the response
-      includeProtocols: true, // Include swap protocols in the response
-      includeGas: true, // Include gas estimation in the response
-    },
-    });
+      const response = await axios.get(url, config);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching liquidity data for ${fromToken} -> ${toToken}:`, error.message);
+      console.error(`Error fetching liquidity for ${fromToken} -> ${toToken}:`, error.message);
       throw error;
     }
   });
@@ -607,28 +597,16 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
 // Main function to gather all critical data
 async function gatherMarketData() {
   try {
-    console.log("Starting to gather market data...");
-
-    // Step 1: Fetch token prices (uses HARDCODED_STABLE_ADDRESSES without quotes)
-    console.log("Fetching token prices...");
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched successfully:", JSON.stringify(tokenPrices, null, 2));
-
-    // Step 2: Fetch liquidity data (uses HARDCODED_STABLE_ADDRESSES_WITH_COMMA)
-    console.log("Fetching liquidity data...");
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-    const amount = "100000000000"; // $100,000 in USDC
+    const amount = "100000000000";
     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES_WITH_COMMA);
 
-    // Step 3: Compile market data
-    const marketData = {
+    return {
       chainId: CHAIN_ID,
       prices: tokenPrices,
       liquidity: liquidityData,
     };
-
-    console.log("Compiled market data:", JSON.stringify(marketData, null, 2));
-    return marketData;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
@@ -738,22 +716,17 @@ function checkCircuitBreaker() {
 // Function to send data to the Go backend for computation
 async function sendMarketDataToGo(marketData) {
   try {
-    console.log("Sending market data to Go backend...");
-    const response = await retryRequest(async () => {
-      return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData);
-    });
-
-    if (response.status === 200) {
-      console.log("Market data successfully sent to Go backend:", response.data);
-    } else {
-      console.error(`Go backend responded with error: ${response.statusText}`);
+    const response = await retryRequest(async () =>
+      axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData)
+    );
+    if (response.status !== 200) {
+      throw new Error(`Go backend error: ${response.statusText}`);
     }
   } catch (error) {
-    console.error("Failed to send market data to Go backend:", error.message);
+    console.error("Error sending market data to Go backend:", error.message);
     throw error;
   }
 }
-
 
 // Integration with Go Backend
 async function executeRoute(route, amount) {
