@@ -489,21 +489,28 @@ async function fetchTokenPrices(tokens) {
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL}/${tokenList}`; // Construct URL for API request
 
- const config = {
-      headers:  {
-        Authorization: `Bearer ${API_KEY}`, // Pass API key in the header
-      },
-      params: {}
-    };
+ // const config = {
+ //      headers:  {
+ //        Authorization: `Bearer ${API_KEY}`, // Pass API key in the header
+ //      },
+ //      params: { currency: "USD" },
+ //    };
 
     try {
-      const response = await rateLimitedRequest(async () => axios.get(url, config));
+      const response = await rateLimitedRequest(async () => axios.get(url, {
+                headers: {
+                    Authorization: `Bearer ${API_KEY}`,
+                    Accept: "application/json",
+                },
+                params: { currency: "USD" },
+            }));
       console.log("Fetched token prices:", response.data);
       return response.data;
     } catch (error) {
-      console.error("Error fetching token prices:", error.message);
+      console.error('Error fetching token prices:', error.response?.data || error.message);
       throw error;
     }
+
   });
 }
 
@@ -520,7 +527,10 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 
   return fetchAndCache(cacheKey, async () => {
     const url = `${API_BASE_URL1}/quote`;
-    const params1 = {
+
+    const config = {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      params: {
       src: fromToken,
       dst: toToken,
       amount,
@@ -530,15 +540,24 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
       includeTokensInfo: false, // Exclude token info in the response
       includeProtocols: true, // Include swap protocols in the response
       includeGas: true, // Include gas estimation in the response
-    };
-
-    const config = {
-      headers: { Authorization: `Bearer ${process.env.API_KEY}` },
-      params: params1
+    },
     };
   
     try {
-      const response = await axios.get(url, config);
+      const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      params: {
+      src: fromToken,
+      dst: toToken,
+      amount,
+      complexityLevel: "2", // Complexity level for routing
+      parts: "50", // Number of route parts
+      mainRouteParts: "10", // Main route parts
+      includeTokensInfo: false, // Exclude token info in the response
+      includeProtocols: true, // Include swap protocols in the response
+      includeGas: true, // Include gas estimation in the response
+    },
+    });
       return response.data;
     } catch (error) {
       console.error(`Error fetching liquidity data for ${fromToken} -> ${toToken}:`, error.message);
