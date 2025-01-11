@@ -1324,8 +1324,6 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 
-
-
 // fetchTokenDecimalsFromBlockchain queries the blockchain to retrieve token decimals
 func fetchTokenDecimalsFromBlockchain(tokenAddress string) (int, error) {
 	client, err := getEthClient()
