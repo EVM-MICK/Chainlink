@@ -1227,6 +1227,14 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
 	}
 
+       body, _ := io.ReadAll(r.Body) // Read raw body for debugging
+       defer r.Body.Close()
+
+      if err := json.Unmarshal(body, &req); err != nil {
+        http.Error(w, "Invalid request payload", http.StatusBadRequest)
+        log.Printf("Error decoding request body: %v, Payload: %s", err, string(body)) // Log raw payload
+        return
+      }
 	// Parse JSON body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
