@@ -358,16 +358,16 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 
 
 // Redis Cache Helper
-async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
-  const cached = await redis.get(key);
-  if (cached) {
-    return JSON.parse(cached);
-  }
+// async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
+//   const cached = await redis.get(key);
+//   if (cached) {
+//     return JSON.parse(cached);
+//   }
 
-  const data = await fetchFn();
-  await redis.setex(key, duration, JSON.stringify(data));
-  return data;
-}
+//   const data = await fetchFn();
+//   await redis.setex(key, duration, JSON.stringify(data));
+//   return data;
+// }
 
 // Fetch Functions
 async function fetchGasPrice() {
@@ -453,15 +453,20 @@ function extractTokensFromTransaction(tx) {
 }
 
 // Function to cache and fetch data from Redis
-// async function cachedFetch(key, fetchFn) {
-//   const cachedData = await redis.get(key);
-//   if (cachedData) {
-//     return JSON.parse(cachedData);
-//   }
-//   const freshData = await fetchFn();
-//   await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
-//   return freshData;
-// }
+async function cachedFetch(key, fetchFn) {
+  const cachedData = await redis.get(key);
+  if (cachedData) {
+    return JSON.parse(cachedData);
+  }
+  const freshData = await fetchFn();
+  await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
+  return freshData;
+}
+
+// Helper function for validating Ethereum addresses
+function isValidAddress(address) {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
 
 // Caching Helper
 async function cachedFetchPrices(tokenAddresses) {
@@ -482,36 +487,40 @@ async function cachedFetchPrices(tokenAddresses) {
 }
 
 async function fetchTokenPrices(tokens) {
+  // Validate tokens
+  const invalidTokens = tokens.filter((token) => !isValidAddress(token));
+  if (invalidTokens.length > 0) {
+    throw new Error(`Invalid token addresses detected: ${invalidTokens.join(", ")}`);
+  }
+
+  // Construct the URL
   const tokenList = tokens.join(","); // Join token addresses into a single string
-  const cacheKey = `tokenPrices:${tokenList}`;
+  const url = `${API_BASE_URL}/price/v1.1/42161/${tokenList}`;
 
-  // Fetch and cache token prices
-  return fetchAndCache(cacheKey, async () => {
-    const url = `${API_BASE_URL}/${tokenList}`; // Construct URL for API request
+  // Axios config
+  const config = {
+    headers: {
+      Authorization: `Bearer ${API_KEY}`, // Replace with your actual API key
+      Accept: "application/json",
+    },
+    params: {
+      currency: "USD",
+    },
+    paramsSerializer: {
+      indexes: null, // Match 1inch's format
+    },
+  };
 
- // const config = {
- //      headers:  {
- //        Authorization: `Bearer ${API_KEY}`, // Pass API key in the header
- //      },
- //      params: { currency: "USD" },
- //    };
-
-    try {
-      const response = await rateLimitedRequest(async () => axios.get(url, {
-                headers: {
-                    Authorization: `Bearer ${API_KEY}`,
-                    Accept: "application/json",
-                },
-                params: { currency: "USD" },
-            }));
-      console.log("Fetched token prices:", response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching token prices:', error.response?.data || error.message);
-      throw error;
-    }
-
-  });
+  try {
+    // Make the API request with retry logic
+    const response = await axios.get(url, config);
+    console.log("Fetched token prices:", response.data);
+    return response.data; // Return the fetched prices
+  } catch (error) {
+    // Log and rethrow the error for upstream handling
+    console.error("Error fetching token prices:", error.response?.data || error.message);
+    throw error;
+  }
 }
 
 // Fetch liquidity data for a token pair using 1inch Swap API
