@@ -1216,6 +1216,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
+	// Define the structure to decode the incoming JSON payload
 	var req struct {
 		ChainID         int64                    `json:"chainId"`
 		StartToken      string                   `json:"startToken"`
@@ -1223,7 +1224,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		MaxHops         int                      `json:"maxHops"`
 		ProfitThreshold string                   `json:"profitThreshold"`
 		TokenPrices     map[string]float64       `json:"tokenPrices"`
-		Liquidity       []map[string]interface{} `json:"liquidity"`
+		Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
 	}
 
 	// Parse JSON body
@@ -1275,6 +1276,24 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Request data: ChainID=%d, StartToken=%s, MaxHops=%d, ProfitThreshold=%s, TokenPrices=%v, Liquidity=%v",
 		req.ChainID, req.StartToken, req.MaxHops, profitThreshold.String(), req.TokenPrices, req.Liquidity)
 
+	// Validate and normalize liquidity data
+	for i, liquidityPair := range req.Liquidity {
+		for j, route := range liquidityPair {
+			fromToken, ok1 := route["fromTokenAddress"].(string)
+			toToken, ok2 := route["toTokenAddress"].(string)
+			part, ok3 := route["part"].(float64) // Assuming part is a percentage float
+
+			if !ok1 || !ok2 || !ok3 || !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
+				http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
+				log.Printf("Invalid liquidity data at pair[%d][%d]: %v", i, j, route)
+				return
+			}
+
+			// Optionally log validated liquidity details
+			log.Printf("Liquidity pair validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
+		}
+	}
+
 	// Compute profitable routes based on passed TokenPrices and Liquidity
 	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
 	if err != nil {
@@ -1303,6 +1322,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Successfully computed and returned filtered routes.")
 }
+
 
 
 
