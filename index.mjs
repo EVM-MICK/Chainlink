@@ -660,13 +660,22 @@ async function gatherMarketData() {
     const amount = "100000000000"; // $100,000 in USDC
     const rawLiquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES_WITH_COMMA);
 
+    if (!Array.isArray(rawLiquidityData) || rawLiquidityData.length === 0) {
+      console.error("Error: rawLiquidityData is not a valid array.");
+      throw new Error("Invalid liquidity data fetched.");
+    }
+
     // Step 3: Format liquidity data to match Go structure ([][]map[string]interface{})
     const liquidityData = rawLiquidityData.map(pair => {
+      if (!pair || !pair.data || !Array.isArray(pair.data.routes)) {
+        console.warn(`Skipping invalid pair data: ${JSON.stringify(pair)}`);
+        return [];
+      }
       return pair.data.routes.map(route => ({
-        name: route.name, // e.g., "ARBITRUM_UNISWAP_V3"
-        part: route.part, // e.g., 40
-        fromTokenAddress: route.fromTokenAddress, // e.g., "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
-        toTokenAddress: route.toTokenAddress, // e.g., "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        name: route.name || "unknown", // Default to "unknown" if name is missing
+        part: route.part || 0, // Default to 0 if part is missing
+        fromTokenAddress: route.fromTokenAddress || "0x", // Default to "0x" if missing
+        toTokenAddress: route.toTokenAddress || "0x", // Default to "0x" if missing
       }));
     });
 
@@ -678,7 +687,7 @@ async function gatherMarketData() {
       maxHops: MAX_HOPS, // Matches `MaxHops` in Go struct
       profitThreshold: MIN_PROFIT.toString(), // Matches `ProfitThreshold` in Go struct
       tokenPrices, // Matches `TokenPrices` in Go struct
-      liquidity: liquidityData, // Matches `Liquidity` in Go struct
+      liquidity: liquidityData.filter(data => data.length > 0), // Filter out invalid entries
     };
 
     console.log("Compiled market data payload:", JSON.stringify(marketDataPayload, null, 2));
@@ -688,6 +697,7 @@ async function gatherMarketData() {
     throw error;
   }
 }
+
 
 
 // Error Handling and Notifications
