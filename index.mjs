@@ -587,24 +587,64 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-  const liquidityData = await Promise.all(
-    stableAddresses.map(async (targetToken) => {
-      if (targetToken !== baseToken) {
-        try {
-          const data = await fetchLiquidityData(baseToken, targetToken, amount);
-          console.log(`Liquidity data for ${baseToken} -> ${targetToken}:`, JSON.stringify(data, null, 2));
-          return { baseToken, targetToken, data };
-        } catch (error) {
-          console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
-          return null;
-        }
-      }
-      return null;
-    })
-  );
+  const results = [];
 
-  return liquidityData.filter((entry) => entry !== null);
+  for (const targetToken of stableAddresses) {
+    if (targetToken !== baseToken) {
+      try {
+        const data = await rateLimitedRequest1(() =>
+          fetchLiquidityData(baseToken, targetToken, amount)
+        );
+        console.log(
+          `Liquidity data for ${baseToken} -> ${targetToken}:`,
+          JSON.stringify(data, null, 2)
+        );
+        results.push({ baseToken, targetToken, data });
+      } catch (error) {
+        console.error(
+          `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
+          error.message
+        );
+      }
+    }
+  }
+
+  return results;
 }
+
+async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const now = Date.now();
+      const timeSinceLastRequest = now - lastRequestTimestamp;
+
+      if (timeSinceLastRequest < delay) {
+        const waitTime = delay - timeSinceLastRequest;
+        console.log(`Throttling: Waiting ${waitTime}ms before next request...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+
+      lastRequestTimestamp = Date.now(); // Update timestamp
+      return await fn(); // Execute the request
+    } catch (err) {
+      if (err.response?.status === 429) {
+        const retryAfter = parseInt(err.response.headers["retry-after"], 10) || delay / 1000;
+        console.warn(`Rate-limited. Retrying after ${retryAfter} seconds...`);
+        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+      } else if (attempt === retries) {
+        console.error(`Request failed after ${retries} retries:`, err.message);
+        throw err;
+      } else {
+        const backoff = delay * Math.pow(2, attempt - 1);
+        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms: ${err.message}`);
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+
+  throw new Error("Maximum retry attempts exceeded.");
+}
+
 
 // Main function to gather all critical data
 async function gatherMarketData() {
