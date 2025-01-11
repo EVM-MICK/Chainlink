@@ -651,43 +651,47 @@ async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
-    // Step 1: Fetch token prices
+    // Fetch token prices
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched successfully:", tokenPrices);
+    console.log("Token prices fetched:", JSON.stringify(tokenPrices, null, 2));
 
-    // Step 2: Fetch liquidity data
+    // Fetch liquidity data
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
     const amount = "100000000000"; // $100,000 in USDC
     const rawLiquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES_WITH_COMMA);
 
     if (!Array.isArray(rawLiquidityData) || rawLiquidityData.length === 0) {
-      console.error("Error: rawLiquidityData is not a valid array.");
+      console.error("Error: rawLiquidityData is not valid.");
       throw new Error("Invalid liquidity data fetched.");
     }
 
-    // Step 3: Format liquidity data to match Go structure ([][]map[string]interface{})
+    // Process and format liquidity data for Go backend
     const liquidityData = rawLiquidityData.map(pair => {
-      if (!pair || !pair.data || !Array.isArray(pair.data.routes)) {
+      if (!pair || !pair.data || !Array.isArray(pair.data.protocols)) {
         console.warn(`Skipping invalid pair data: ${JSON.stringify(pair)}`);
         return [];
       }
-      return pair.data.routes.map(route => ({
-        name: route.name || "unknown", // Default to "unknown" if name is missing
-        part: route.part || 0, // Default to 0 if part is missing
-        fromTokenAddress: route.fromTokenAddress || "0x", // Default to "0x" if missing
-        toTokenAddress: route.toTokenAddress || "0x", // Default to "0x" if missing
-      }));
-    });
 
-    // Compile market data payload
+      // Convert `protocols` into the Go-compatible format
+      return pair.data.protocols.map(routeSet => {
+        return routeSet.map(route => ({
+          name: route.name || "unknown",
+          part: route.part || 0,
+          fromTokenAddress: route.fromTokenAddress || "0x",
+          toTokenAddress: route.toTokenAddress || "0x",
+        }));
+      });
+    }).filter(entry => entry.length > 0); // Remove empty entries
+
+    // Construct the payload
     const marketDataPayload = {
-      chainId: CHAIN_ID, // Matches `ChainID` in Go struct
-      startToken: baseToken, // Matches `StartToken` in Go struct
-      startAmount: amount, // Matches `StartAmount` in Go struct
-      maxHops: MAX_HOPS, // Matches `MaxHops` in Go struct
-      profitThreshold: MIN_PROFIT.toString(), // Matches `ProfitThreshold` in Go struct
-      tokenPrices, // Matches `TokenPrices` in Go struct
-      liquidity: liquidityData.filter(data => data.length > 0), // Filter out invalid entries
+      chainId: CHAIN_ID,
+      startToken: baseToken,
+      startAmount: amount,
+      maxHops: MAX_HOPS,
+      profitThreshold: MIN_PROFIT.toString(),
+      tokenPrices, // Prices mapped by token address
+      liquidity: liquidityData, // Nested liquidity structure
     };
 
     console.log("Compiled market data payload:", JSON.stringify(marketDataPayload, null, 2));
@@ -697,8 +701,6 @@ async function gatherMarketData() {
     throw error;
   }
 }
-
-
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
