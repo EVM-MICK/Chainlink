@@ -122,12 +122,13 @@ const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
 const HARDCODED_STABLE_ADDRESSES = [
-  0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9, // USDT
-  0xaf88d065e77c8cC2239327C5EDb3A432268e5831, // USDC
-  0xda10009cbd5d07dd0cecc66161fc93d7c9000da1, // DAI
-  0x82af49447d8a07e3bd95bd0d56f35241523fbab1, // WETH
-  0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f, // WBTC
+  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
 ];
+
 
 const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
@@ -183,19 +184,22 @@ validateEnvVars([
  * @returns {Promise<object>} - The response data from the API.
  */
 async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
-  const cachedData = await redisClient.get(key);
-  if (cachedData) {
-    try {
+  try {
+    const cachedData = await redisClient.get(key);
+    if (cachedData) {
+      console.log(`Cache hit for ${key}`);
       return JSON.parse(cachedData);
-    } catch (err) {
-      console.error(`Error parsing cached data for ${key}:`, err.message);
     }
-  }
-  const data = await fetchFn();
-  await redisClient.set(key, JSON.stringify(data), "EX", duration);
-  return data;
-}
 
+    const data = await fetchFn();
+    await redisClient.set(key, JSON.stringify(data), "EX", duration);
+    console.log(`Cached data for ${key} for ${duration} seconds.`);
+    return data;
+  } catch (error) {
+    console.error(`Error fetching or caching data for ${key}:`, error.message);
+    throw error;
+  }
+}
 
 async function constructApiUrl(endpoint, params = {}) {
   const baseToken1 = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
@@ -479,6 +483,13 @@ function isValidAddress(address) {
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 }
 
+function validateAddresses(addresses) {
+  const invalidAddresses = addresses.filter((addr) => !isValidAddress(addr));
+  if (invalidAddresses.length > 0) {
+    throw new Error(`Invalid token addresses detected: ${invalidAddresses.join(", ")}`);
+  }
+}
+
 // Caching Helper
 async function cachedFetchPrices(tokenAddresses) {
   const cacheKey = `prices:${tokenAddresses.join(",")}`;
@@ -499,6 +510,8 @@ async function cachedFetchPrices(tokenAddresses) {
 
 
 async function fetchTokenPrices(tokens) {
+  validateAddresses(tokens);
+
   const tokenList = tokens.join(",").toLowerCase();
   const cacheKey = `prices:${tokenList}`;
 
@@ -526,7 +539,6 @@ async function fetchTokenPrices(tokens) {
     }
   });
 }
-
 
 // Fetch liquidity data for a token pair using 1inch Swap API
 /**
