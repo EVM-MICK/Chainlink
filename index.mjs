@@ -716,53 +716,37 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 // Main function to gather all critical data
 async function gatherMarketData() {
   try {
-    console.log("Starting to gather market data...");
-
-    // Fetch token prices
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched:", JSON.stringify(tokenPrices, null, 2));
-
-    // Fetch liquidity data
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-    const amount = "100000000000"; // $100,000 in USDC
-    const rawLiquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES_WITH_COMMA);
+    const amount = "100000000000";
 
-    if (!Array.isArray(rawLiquidityData) || rawLiquidityData.length === 0) {
-      console.error("Error: rawLiquidityData is not valid.");
-      throw new Error("Invalid liquidity data fetched.");
-    }
+    // Fetch and validate all liquidity data
+    const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
 
-    // Process and format liquidity data for Go backend
-    const liquidityData = rawLiquidityData.map(pair => {
-      if (!pair || !pair.data || !Array.isArray(pair.data.protocols)) {
-        console.warn(`Skipping invalid pair data: ${JSON.stringify(pair)}`);
-        return [];
-      }
+    // Transform liquidity data into the correct structure for the Go backend
+    const compiledLiquidity = liquidityData.map((entry) => {
+      // Convert protocols into the expected Go backend format
+      return entry.protocols.map((protocol) => ({
+        name: protocol.name,
+        part: protocol.part,
+        fromTokenAddress: protocol.fromTokenAddress,
+        toTokenAddress: protocol.toTokenAddress,
+      }));
+    });
 
-      // Convert `protocols` into the Go-compatible format
-      return pair.data.protocols.map(routeSet => {
-        return routeSet.map(route => ({
-          name: route.name || "unknown",
-          part: route.part || 0,
-          fromTokenAddress: route.fromTokenAddress || "0x",
-          toTokenAddress: route.toTokenAddress || "0x",
-        }));
-      });
-    }).filter(entry => entry.length > 0); // Remove empty entries
-
-    // Construct the payload
-    const marketDataPayload = {
+    const marketData = {
       chainId: CHAIN_ID,
       startToken: baseToken,
       startAmount: amount,
-      maxHops: MAX_HOPS,
-      profitThreshold: MIN_PROFIT.toString(),
-      tokenPrices, // Prices mapped by token address
-      liquidity: liquidityData, // Nested liquidity structure
+      maxHops: 3,
+      profitThreshold: "500000000", // Adjust as per your logic
+      tokenPrices,
+      liquidity: compiledLiquidity,
     };
 
-    console.log("Compiled market data payload:", JSON.stringify(marketDataPayload, null, 2));
-    return marketDataPayload;
+    console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2)); // Debugging
+
+    return marketData;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
