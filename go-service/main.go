@@ -1250,11 +1250,53 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Decoded request: %+v", req)
 
 	// Validate required fields
-	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 42161 || req.MaxHops <= 3 {
-		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
-		log.Println("Invalid input parameters detected in the request.")
-		return
-	}
+	// if !common.IsHexAddress(req.StartToken) || req.ChainID <= 42161 || req.MaxHops <= 3 {
+	// 	http.Error(w, "Invalid input parameters", http.StatusBadRequest)
+	// 	log.Println("Invalid input parameters detected in the request.")
+	// 	return
+	// }
+         // Validate required fields
+    if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" {
+        http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
+        log.Println("Missing or invalid required fields in request.")
+        return
+    }
+
+    // Filter and log invalid liquidity entries
+    validLiquidity := [][][]map[string]interface{}{}
+    for _, liquidityPairs := range req.Liquidity {
+        validPairs := [][]map[string]interface{}{}
+        for _, protocols := range liquidityPairs {
+            validProtocols := []map[string]interface{}{}
+            for _, protocol := range protocols {
+                name, okName := protocol["name"].(string)
+                part, okPart := protocol["part"].(float64)
+                fromToken, okFrom := protocol["fromTokenAddress"].(string)
+                toToken, okTo := protocol["toTokenAddress"].(string)
+
+                if okName && okPart && okFrom && okTo &&
+                    common.IsHexAddress(fromToken) &&
+                    common.IsHexAddress(toToken) &&
+                    part > 0 {
+                    validProtocols = append(validProtocols, protocol)
+                } else {
+                    log.Printf("Invalid protocol entry: %+v", protocol)
+                }
+            }
+            if len(validProtocols) > 0 {
+                validPairs = append(validPairs, validProtocols)
+            }
+        }
+        if len(validPairs) > 0 {
+            validLiquidity = append(validLiquidity, validPairs)
+        }
+    }
+
+    req.Liquidity = validLiquidity
+
+    log.Printf("Processed liquidity data: %+v", req.Liquidity)
+
+
 
 	// Parse Start Amount
 	startAmount := new(big.Int)
