@@ -622,25 +622,25 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
       const data =await rateLimitedRequest1(() =>
           fetchLiquidityData(baseToken, targetToken, amount)
         );
-      if (!data || !data.protocols) {
-        console.warn(`No protocols found for pair ${baseToken} -> ${targetToken}`);
+      if (!data || !data.includeProtocols) {
+        console.warn(`No includeProtocols found for pair ${baseToken} -> ${targetToken}`);
         continue;
       }
 
       // Process paths for this pair
-      const paths = data.protocols.map((path) =>
-        path.map((protocols) => {
+      const paths = data.includeProtocols.map((path) =>
+        path.map((includeProtocols) => {
           if (
-            protocols.name &&
-            protocols.part > 0 &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocols.fromTokenAddress) &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocols.toTokenAddress)
+            includeProtocols.name &&
+            includeProtocols.part > 0 &&
+            /^0x[a-fA-F0-9]{40}$/.test(includeProtocols.fromTokenAddress) &&
+            /^0x[a-fA-F0-9]{40}$/.test(includeProtocols.toTokenAddress)
           ) {
             return {
-              name: protocols.name,
-              part: protocols.part,
-              fromTokenAddress: protocols.fromTokenAddress,
-              toTokenAddress: protocols.toTokenAddress,
+              name: includeProtocols.name,
+              part: includeProtocols.part,
+              fromTokenAddress: includeProtocols.fromTokenAddress,
+              toTokenAddress: includeProtocols.toTokenAddress,
             };
           } else {
             console.warn(
@@ -649,7 +649,7 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
             );
             return null;
           }
-        }).filter((protocols) => protocols !== null) // Remove invalid protocols
+        }).filter((includeProtocols) => includeProtocols !== null) // Remove invalid includeProtocols
       ).filter((path) => path.length > 0); // Remove empty paths
 
       if (paths.length === 0) {
@@ -727,9 +727,9 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
 //     // Transform liquidity data into the correct structure for the Go backend
 //     const compiledLiquidity = liquidityData
-//       .filter((entry) => entry && entry.protocols && Array.isArray(entry.protocols)) // Filter out invalid entries
+//       .filter((entry) => entry && entry.includeProtocols && Array.isArray(entry.includeProtocols)) // Filter out invalid entries
 //       .map((entry) =>
-//         entry.protocols.map((protocol) => ({
+//         entry.includeProtocols.map((protocol) => ({
 //           name: protocol.name,
 //           part: protocol.part,
 //           fromTokenAddress: protocol.fromTokenAddress,
