@@ -631,7 +631,7 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
       const paths = data.protocols.map((path) =>
         path.map((protocol) => {
           if (
-            protocol.name &&
+            //protocol.name &&
             protocol.part > 0 &&
             /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
             /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
