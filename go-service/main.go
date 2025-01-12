@@ -8,6 +8,7 @@ import (
 	"container/heap"
 	"math/big"
 	"sync"
+        "io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -671,6 +672,7 @@ func setupCacheExpirationLogging() {
 	})
 }
 
+
 // Initialize the cache with expiration logging
 func init() {
         CAPITAL = new(big.Int)
@@ -1226,7 +1228,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
 	}
 
-      // Read raw body for debugging
+	// Read and log the raw body for debugging
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -1237,7 +1239,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Raw request body: %s", string(body)) // Debugging
 
-	// Decode JSON body
+	// Decode JSON body into `req`
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		log.Printf("Error decoding request body: %v, Raw body: %s", err, string(body))
@@ -1246,13 +1248,6 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Log decoded request for debugging
 	log.Printf("Decoded request: %+v", req)
-
-	// Parse JSON body
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		log.Printf("Error decoding request body: %v", err)
-		return
-	}
 
 	// Validate required fields
 	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
@@ -1292,30 +1287,27 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log inputs for debugging
-	log.Printf("Request data: ChainID=%d, StartToken=%s, MaxHops=%d, ProfitThreshold=%s, TokenPrices=%v, Liquidity=%v",
-		req.ChainID, req.StartToken, req.MaxHops, profitThreshold.String(), req.TokenPrices, req.Liquidity)
+	// Flatten the nested liquidity structure
+	flattenedLiquidity := flattenLiquidity(req.Liquidity)
 
-	// Validate and normalize liquidity data
-	for i, liquidityPair := range req.Liquidity {
-		for j, route := range liquidityPair {
-			fromToken, ok1 := route["fromTokenAddress"].(string)
-			toToken, ok2 := route["toTokenAddress"].(string)
-			part, ok3 := route["part"].(float64) // Assuming part is a percentage float
+	// Validate and normalize flattened liquidity data
+	for i, route := range flattenedLiquidity {
+		fromToken, ok1 := route["fromTokenAddress"].(string)
+		toToken, ok2 := route["toTokenAddress"].(string)
+		part, ok3 := route["part"].(float64) // Assuming part is a percentage float
 
-			if !ok1 || !ok2 || !ok3 || !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
-				http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
-				log.Printf("Invalid liquidity data at pair[%d][%d]: %v", i, j, route)
-				return
-			}
-
-			// Optionally log validated liquidity details
-			log.Printf("Liquidity pair validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
+		if !ok1 || !ok2 || !ok3 || !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
+			http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
+			log.Printf("Invalid liquidity data at index[%d]: %v", i, route)
+			return
 		}
+
+		// Optionally log validated liquidity details
+		log.Printf("Liquidity validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
 	}
 
-	// Compute profitable routes based on passed TokenPrices and Liquidity
-	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
+	// Compute profitable routes based on TokenPrices and flattened Liquidity
+	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
 	if err != nil {
 		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
 		log.Printf("Error computing profitable routes: %v", err)
@@ -1339,8 +1331,17 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error encoding response: %v", err)
 		return
 	}
-        log.Printf("Decoded request: %+v", req)
+
 	log.Println("Successfully computed and returned filtered routes.")
+}
+
+// Helper function to flatten [][]map[string]interface{} to []map[string]interface{}
+func flattenLiquidity(liquidity [][]map[string]interface{}) []map[string]interface{} {
+	var flattened []map[string]interface{}
+	for _, inner := range liquidity {
+		flattened = append(flattened, inner...)
+	}
+	return flattened
 }
 
 
