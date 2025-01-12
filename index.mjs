@@ -555,9 +555,9 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
         src: fromToken,
         dst: toToken,
         amount,
-        complexityLevel: "2",
-        parts: "50",
-        mainRouteParts: "10",
+        complexityLevel: 2,
+        parts: 50,
+        mainRouteParts: 10,
         includeTokensInfo: false,
         includeProtocols: true,
         includeGas: true,
@@ -629,18 +629,18 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
 
       // Process paths for this pair
       const paths = data.protocols.map((path) =>
-        path.map((protocol) => {
+        path.map((protocols) => {
           if (
-            //protocol.name &&
-            protocol.part > 0 &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
+            protocols.name &&
+            protocols.part > 0 &&
+            /^0x[a-fA-F0-9]{40}$/.test(protocols.fromTokenAddress) &&
+            /^0x[a-fA-F0-9]{40}$/.test(protocols.toTokenAddress)
           ) {
             return {
-              name: protocol.name,
-              part: protocol.part,
-              fromTokenAddress: protocol.fromTokenAddress,
-              toTokenAddress: protocol.toTokenAddress,
+              name: protocols.name,
+              part: protocols.part,
+              fromTokenAddress: protocols.fromTokenAddress,
+              toTokenAddress: protocols.toTokenAddress,
             };
           } else {
             console.warn(
@@ -649,7 +649,7 @@ async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
             );
             return null;
           }
-        }).filter((protocol) => protocol !== null) // Remove invalid protocols
+        }).filter((protocols) => protocols !== null) // Remove invalid protocols
       ).filter((path) => path.length > 0); // Remove empty paths
 
       if (paths.length === 0) {
