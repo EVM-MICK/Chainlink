@@ -1219,13 +1219,13 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
     var req struct {
-        ChainID         int64                      `json:"chainId"`
-        StartToken      string                     `json:"startToken"`
-        StartAmount     string                     `json:"startAmount"`
-        MaxHops         int                        `json:"maxHops"`
-        ProfitThreshold string                     `json:"profitThreshold"`
-        TokenPrices     map[string]float64         `json:"tokenPrices"`
-        Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
+        ChainID         int64                    `json:"chainId"`
+        StartToken      string                   `json:"startToken"`
+        StartAmount     string                   `json:"startAmount"`
+        MaxHops         int                      `json:"maxHops"`
+        ProfitThreshold string                   `json:"profitThreshold"`
+        TokenPrices     map[string]float64       `json:"tokenPrices"`
+        Liquidity       [][]map[string]interface{} `json:"liquidity"`
     }
 
     // Read and log the raw body for debugging
@@ -1246,15 +1246,47 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Log decoded request for debugging
-    log.Printf("Decoded request: %+v", req)
-
     // Validate required fields
     if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" {
         http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
         log.Println("Missing or invalid required fields in request.")
         return
     }
+
+    // Process and filter invalid liquidity entries
+    var validLiquidity [][]map[string]interface{}
+    for _, liquidityPairs := range req.Liquidity {
+        var validPairs []map[string]interface{}
+        for _, protocol := range liquidityPairs {
+            // Assert protocol as map[string]interface{}
+            protocolMap, ok := protocol.(map[string]interface{})
+            if !ok {
+                log.Printf("Invalid protocol type: %+v", protocol)
+                continue
+            }
+
+            // Extract and validate fields
+            part, okPart := protocolMap["part"].(float64)
+            fromToken, okFrom := protocolMap["fromTokenAddress"].(string)
+            toToken, okTo := protocolMap["toTokenAddress"].(string)
+
+            if okPart && okFrom && okTo &&
+                common.IsHexAddress(fromToken) &&
+                common.IsHexAddress(toToken) &&
+                part > 0 {
+                validPairs = append(validPairs, protocolMap)
+            } else {
+                log.Printf("Invalid protocol entry: %+v", protocolMap)
+            }
+        }
+        if len(validPairs) > 0 {
+            validLiquidity = append(validLiquidity, validPairs)
+        }
+    }
+
+    // Assign valid liquidity back to the request
+    req.Liquidity = validLiquidity
+    log.Printf("Processed liquidity data: %+v", req.Liquidity)
 
     // Parse Start Amount
     startAmount := new(big.Int)
@@ -1287,77 +1319,15 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Process and filter invalid liquidity entries
-        // Process and filter invalid liquidity entries
-    var validLiquidity [][][]map[string]interface{}
-    for _, liquidityPairs := range req.Liquidity {
-        var validPairs [][]map[string]interface{}
-        for _, protocols := range liquidityPairs {
-            var validProtocols []map[string]interface{}
-            for _, protocol := range protocols {
-                // Assert protocol as map[string]interface{}
-                protocolMap, ok := protocol.(map[string]interface{})
-                if !ok {
-                    log.Printf("Invalid protocol type: %+v", protocol)
-                    continue
-                }
-
-                // Extract fields with type assertion
-                name, okName := protocolMap["name"].(string)
-                part, okPart := protocolMap["part"].(float64)
-                fromToken, okFrom := protocolMap["fromTokenAddress"].(string)
-                toToken, okTo := protocolMap["toTokenAddress"].(string)
-
-                if okName && okPart && okFrom && okTo &&
-                    common.IsHexAddress(fromToken) &&
-                    common.IsHexAddress(toToken) &&
-                    part > 0 {
-                    validProtocols = append(validProtocols, protocolMap)
-                } else {
-                    log.Printf("Invalid protocol entry: %+v", protocolMap)
-                }
-            }
-            if len(validProtocols) > 0 {
-                validPairs = append(validPairs, validProtocols)
-            }
-        }
-        if len(validPairs) > 0 {
-            validLiquidity = append(validLiquidity, validPairs)
-        }
-    }
-
-    // Assign valid liquidity back to the request
-    req.Liquidity = validLiquidity
-    log.Printf("Processed liquidity data: %+v", req.Liquidity)
-
-    // Flatten the nested liquidity structure
-    flattenedLiquidity := flattenLiquidity(req.Liquidity)
-
-    // Validate flattened liquidity data
-    for i, route := range flattenedLiquidity {
-        fromToken, okFrom := route["fromTokenAddress"].(string)
-        toToken, okTo := route["toTokenAddress"].(string)
-        part, okPart := route["part"].(float64)
-
-        if !okFrom || !okTo || !okPart ||
-            !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
-            http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
-            log.Printf("Invalid liquidity data at index[%d]: %v", i, route)
-            return
-        }
-
-        log.Printf("Liquidity validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
-    }
-
     // Compute profitable routes
-    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
+    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
     if err != nil {
         http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
         log.Printf("Error computing profitable routes: %v", err)
         return
     }
 
-    // Further filter routes
+    // Filter routes based on additional criteria
     filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
     if err != nil {
         http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
@@ -1365,14 +1335,13 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Respond with the computed and filtered routes
+    // Respond with filtered routes
     w.Header().Set("Content-Type", "application/json")
     if err := json.NewEncoder(w).Encode(map[string]interface{}{
         "routes": filteredRoutes,
     }); err != nil {
         http.Error(w, "Failed to encode response", http.StatusInternalServerError)
         log.Printf("Error encoding response: %v", err)
-        return
     }
 
     log.Println("Successfully computed and returned filtered routes.")
