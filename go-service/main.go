@@ -1288,24 +1288,33 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // Process and filter invalid liquidity entries
+        // Process and filter invalid liquidity entries
     var validLiquidity [][][]map[string]interface{}
     for _, liquidityPairs := range req.Liquidity {
         var validPairs [][]map[string]interface{}
         for _, protocols := range liquidityPairs {
             var validProtocols []map[string]interface{}
             for _, protocol := range protocols {
-                name, okName := protocol["name"].(string)
-                part, okPart := protocol["part"].(float64)
-                fromToken, okFrom := protocol["fromTokenAddress"].(string)
-                toToken, okTo := protocol["toTokenAddress"].(string)
+                // Assert protocol as map[string]interface{}
+                protocolMap, ok := protocol.(map[string]interface{})
+                if !ok {
+                    log.Printf("Invalid protocol type: %+v", protocol)
+                    continue
+                }
+
+                // Extract fields with type assertion
+                name, okName := protocolMap["name"].(string)
+                part, okPart := protocolMap["part"].(float64)
+                fromToken, okFrom := protocolMap["fromTokenAddress"].(string)
+                toToken, okTo := protocolMap["toTokenAddress"].(string)
 
                 if okName && okPart && okFrom && okTo &&
                     common.IsHexAddress(fromToken) &&
                     common.IsHexAddress(toToken) &&
                     part > 0 {
-                    validProtocols = append(validProtocols, protocol)
+                    validProtocols = append(validProtocols, protocolMap)
                 } else {
-                    log.Printf("Invalid protocol entry: %+v", protocol)
+                    log.Printf("Invalid protocol entry: %+v", protocolMap)
                 }
             }
             if len(validProtocols) > 0 {
@@ -1317,6 +1326,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         }
     }
 
+    // Assign valid liquidity back to the request
     req.Liquidity = validLiquidity
     log.Printf("Processed liquidity data: %+v", req.Liquidity)
 
