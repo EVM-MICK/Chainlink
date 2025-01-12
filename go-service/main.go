@@ -1327,7 +1327,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error encoding response: %v", err)
 		return
 	}
-
+        log.Printf("Decoded request: %+v", req)
 	log.Println("Successfully computed and returned filtered routes.")
 }
 
