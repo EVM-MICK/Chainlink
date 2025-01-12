@@ -1250,7 +1250,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Decoded request: %+v", req)
 
 	// Validate required fields
-	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 0 || req.MaxHops <= 0 {
+	if !common.IsHexAddress(req.StartToken) || req.ChainID <= 42161 || req.MaxHops <= 3 {
 		http.Error(w, "Invalid input parameters", http.StatusBadRequest)
 		log.Println("Invalid input parameters detected in the request.")
 		return
