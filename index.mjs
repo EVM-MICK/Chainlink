@@ -651,33 +651,33 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
  * @param {Array<string>} stableAddresses - List of target stable token addresses.
  * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
  */
-// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
-//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
+async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
+  console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-//   const results = [];
+  const results = [];
 
-//   for (const targetToken of stableAddresses) {
-//     if (targetToken !== baseToken) {
-//       try {
-//         const data = await rateLimitedRequest1(() =>
-//           fetchLiquidityData(baseToken, targetToken, amount)
-//         );
-//         console.log(
-//           `Liquidity data for ${baseToken} -> ${targetToken}:`,
-//           JSON.stringify(data, null, 2)
-//         );
-//         results.push({ baseToken, targetToken, data });
-//       } catch (error) {
-//         console.error(
-//           `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
-//           error.message
-//         );
-//       }
-//     }
-//   }
+  for (const targetToken of stableAddresses) {
+    if (targetToken !== baseToken) {
+      try {
+        const data = await rateLimitedRequest1(() =>
+          fetchLiquidityData(baseToken, targetToken, amount)
+        );
+        console.log(
+          `Liquidity data for ${baseToken} -> ${targetToken}:`,
+          JSON.stringify(data, null, 2)
+        );
+        results.push({ baseToken, targetToken, data });
+      } catch (error) {
+        console.error(
+          `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
+          error.message
+        );
+      }
+    }
+  }
 
-//   return results;
-// }
+  return results;
+}
 
 async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
