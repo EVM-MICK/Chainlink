@@ -574,75 +574,6 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
   });
 }
 
-// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
-//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
-
-//   const liquidityData = await Promise.all(
-//     stableAddresses.map(async (targetToken) => {
-//       // Skip if baseToken and targetToken are the same
-//       if (targetToken.toLowerCase() === baseToken.toLowerCase()) {
-//         return null;
-//       }
-
-//       try {
-//         // Fetch liquidity data for the pair
-//         const data = await fetchLiquidityData(baseToken, targetToken, amount);
-
-//         // Validate and extract protocols from the response
-//         const validProtocols = data.protocols.flat().map((protocol) => {
-//           if (
-//             protocol.name &&
-//             protocol.part > 0 &&
-//             /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
-//             /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
-//           ) {
-//             return {
-//               name: protocol.name,
-//               part: protocol.part,
-//               fromTokenAddress: protocol.fromTokenAddress,
-//               toTokenAddress: protocol.toTokenAddress,
-//             };
-//           } else {
-//             console.warn(
-//               `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
-//               protocol
-//             );
-//             return null;
-//           }
-//         });
-
-//         // Filter out null (invalid) protocols
-//         const filteredProtocols = validProtocols.filter((protocol) => protocol !== null);
-
-//         if (filteredProtocols.length === 0) {
-//           console.warn(`No valid protocols for pair ${baseToken} -> ${targetToken}`);
-//           return null;
-//         }
-
-//         // Return the formatted liquidity entry
-//         return {
-//           baseToken,
-//           targetToken,
-//           gas: data.gas,
-//           protocols: filteredProtocols,
-//         };
-//       } catch (error) {
-//         console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
-//         return null;
-//       }
-//     })
-//   );
-
-//   // Filter out any null entries (pairs with no valid liquidity data)
-//   const validLiquidityData = liquidityData.filter((entry) => entry !== null);
-
-//   if (validLiquidityData.length === 0) {
-//     console.warn("No valid liquidity data found for any token pairs.");
-//   }
-
-//   return validLiquidityData;
-// }
-
 
 /**
  * Fetch liquidity data for all token pairs relative to a base token.
@@ -651,34 +582,94 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
  * @param {Array<string>} stableAddresses - List of target stable token addresses.
  * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
  */
+// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
+//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
+
+//   const results = [];
+
+//   for (const targetToken of stableAddresses) {
+//     if (targetToken !== baseToken) {
+//       try {
+//         const data = await rateLimitedRequest1(() =>
+//           fetchLiquidityData(baseToken, targetToken, amount)
+//         );
+//         console.log(
+//           `Liquidity data for ${baseToken} -> ${targetToken}:`,
+//           JSON.stringify(data, null, 2)
+//         );
+//         results.push({ baseToken, targetToken, data });
+//       } catch (error) {
+//         console.error(
+//           `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
+//           error.message
+//         );
+//       }
+//     }
+//   }
+
+//   return results;
+// }
+
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-  const results = [];
+  const liquidityData = [];
 
   for (const targetToken of stableAddresses) {
-    if (targetToken !== baseToken) {
-      try {
-        const data = await rateLimitedRequest1(() =>
+    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue;
+
+    try {
+      const data =await rateLimitedRequest1(() =>
           fetchLiquidityData(baseToken, targetToken, amount)
         );
-        console.log(
-          `Liquidity data for ${baseToken} -> ${targetToken}:`,
-          JSON.stringify(data, null, 2)
-        );
-        results.push({ baseToken, targetToken, data });
-      } catch (error) {
-        console.error(
-          `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
-          error.message
-        );
+      if (!data || !data.protocols) {
+        console.warn(`No protocols found for pair ${baseToken} -> ${targetToken}`);
+        continue;
       }
+
+      // Process paths for this pair
+      const paths = data.protocols.map((path) =>
+        path.map((protocol) => {
+          if (
+            protocol.name &&
+            protocol.part > 0 &&
+            /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
+            /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
+          ) {
+            return {
+              name: protocol.name,
+              part: protocol.part,
+              fromTokenAddress: protocol.fromTokenAddress,
+              toTokenAddress: protocol.toTokenAddress,
+            };
+          } else {
+            console.warn(
+              `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
+              protocol
+            );
+            return null;
+          }
+        }).filter((protocol) => protocol !== null) // Remove invalid protocols
+      ).filter((path) => path.length > 0); // Remove empty paths
+
+      if (paths.length === 0) {
+        console.warn(`No valid paths for pair ${baseToken} -> ${targetToken}`);
+        continue;
+      }
+
+      liquidityData.push({
+        baseToken,
+        targetToken,
+        gas: data.gas,
+        paths,
+      });
+    } catch (error) {
+      console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
     }
   }
 
-  return results;
+  return liquidityData;
 }
-
 
 // Helper function for delay
 function delay(ms) {
@@ -721,6 +712,50 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
 
 // Main function to gather all critical data
+// async function gatherMarketData() {
+//   try {
+//     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+//     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
+//     const amount = "100000000000";
+
+//     // Fetch and validate all liquidity data
+//     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
+
+//     if (!liquidityData || liquidityData.length === 0) {
+//       throw new Error("No valid liquidity data found.");
+//     }
+
+//     // Transform liquidity data into the correct structure for the Go backend
+//     const compiledLiquidity = liquidityData
+//       .filter((entry) => entry && entry.protocols && Array.isArray(entry.protocols)) // Filter out invalid entries
+//       .map((entry) =>
+//         entry.protocols.map((protocol) => ({
+//           name: protocol.name,
+//           part: protocol.part,
+//           fromTokenAddress: protocol.fromTokenAddress,
+//           toTokenAddress: protocol.toTokenAddress,
+//         }))
+//       );
+
+//     const marketData = {
+//       chainId: CHAIN_ID,
+//       startToken: baseToken,
+//       startAmount: amount,
+//       maxHops: 3,
+//       profitThreshold: "500000000", // Adjust as per your logic
+//       tokenPrices,
+//       liquidity: compiledLiquidity,
+//     };
+
+//     console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2)); // Debugging
+
+//     return marketData;
+//   } catch (error) {
+//     console.error("Error gathering market data:", error.message);
+//     throw error;
+//   }
+// }
+
 async function gatherMarketData() {
   try {
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
@@ -730,21 +765,8 @@ async function gatherMarketData() {
     // Fetch and validate all liquidity data
     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
 
-    if (!liquidityData || liquidityData.length === 0) {
-      throw new Error("No valid liquidity data found.");
-    }
-
-    // Transform liquidity data into the correct structure for the Go backend
-    const compiledLiquidity = liquidityData
-      .filter((entry) => entry && entry.protocols && Array.isArray(entry.protocols)) // Filter out invalid entries
-      .map((entry) =>
-        entry.protocols.map((protocol) => ({
-          name: protocol.name,
-          part: protocol.part,
-          fromTokenAddress: protocol.fromTokenAddress,
-          toTokenAddress: protocol.toTokenAddress,
-        }))
-      );
+    // Transform liquidity data for the Go backend
+    const compiledLiquidity = liquidityData.map((entry) => entry.paths);
 
     const marketData = {
       chainId: CHAIN_ID,
@@ -764,6 +786,7 @@ async function gatherMarketData() {
     throw error;
   }
 }
+
 
 
 // Error Handling and Notifications
