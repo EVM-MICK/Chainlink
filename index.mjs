@@ -651,33 +651,111 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
  * @param {Array<string>} stableAddresses - List of target stable token addresses.
  * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
  */
+// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
+//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
+
+//   const results = [];
+
+//   for (const targetToken of stableAddresses) {
+//     if (targetToken !== baseToken) {
+//       try {
+//         const data = await rateLimitedRequest1(() =>
+//           fetchLiquidityData(baseToken, targetToken, amount)
+//         );
+//         console.log(
+//           `Liquidity data for ${baseToken} -> ${targetToken}:`,
+//           JSON.stringify(data, null, 2)
+//         );
+//         results.push({ baseToken, targetToken, data });
+//       } catch (error) {
+//         console.error(
+//           `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
+//           error.message
+//         );
+//       }
+//     }
+//   }
+
+//   return results;
+// }
+
+
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-  const results = [];
+  const liquidityData = [];
 
   for (const targetToken of stableAddresses) {
-    if (targetToken !== baseToken) {
-      try {
-        const data = await rateLimitedRequest1(() =>
+    // Skip if baseToken and targetToken are the same
+    if (targetToken.toLowerCase() === baseToken.toLowerCase()) {
+      continue;
+    }
+
+    try {
+      // Fetch liquidity data for the pair
+      console.log(`Fetching liquidity for ${baseToken} -> ${targetToken}`);
+      const data =  await rateLimitedRequest1(() =>
           fetchLiquidityData(baseToken, targetToken, amount)
         );
-        console.log(
-          `Liquidity data for ${baseToken} -> ${targetToken}:`,
-          JSON.stringify(data, null, 2)
-        );
-        results.push({ baseToken, targetToken, data });
-      } catch (error) {
-        console.error(
-          `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
-          error.message
-        );
+
+      // Validate and extract protocols from the response
+      const validProtocols = data.protocols.flat().map((protocol) => {
+        if (
+          protocol.name &&
+          protocol.part > 0 &&
+          /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
+          /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
+        ) {
+          return {
+            name: protocol.name,
+            part: protocol.part,
+            fromTokenAddress: protocol.fromTokenAddress,
+            toTokenAddress: protocol.toTokenAddress,
+          };
+        } else {
+          console.warn(
+            `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
+            protocol
+          );
+          return null;
+        }
+      });
+
+      // Filter out null (invalid) protocols
+      const filteredProtocols = validProtocols.filter((protocol) => protocol !== null);
+
+      if (filteredProtocols.length === 0) {
+        console.warn(`No valid protocols for pair ${baseToken} -> ${targetToken}`);
+        continue;
       }
+
+      // Add the formatted liquidity entry to the list
+      liquidityData.push({
+        baseToken,
+        targetToken,
+        gas: data.gas,
+        protocols: filteredProtocols,
+      });
+
+      // Respect the 1RPS rate limit by adding a delay
+      await delay(1000); // 1 second delay
+    } catch (error) {
+      console.error(
+        `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
+        error.message
+      );
     }
   }
 
-  return results;
+  // Return the collected liquidity data
+  return liquidityData;
 }
+
+// Helper function for delay
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 
 async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
