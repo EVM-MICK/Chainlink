@@ -1216,7 +1216,6 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
-	// Define the structure to decode the incoming JSON payload
 	var req struct {
 		ChainID         int64                    `json:"chainId"`
 		StartToken      string                   `json:"startToken"`
@@ -1227,14 +1226,27 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
 	}
 
-       body, _ := io.ReadAll(r.Body) // Read raw body for debugging
-       defer r.Body.Close()
+      // Read raw body for debugging
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		log.Printf("Error reading request body: %v", err)
+		return
+	}
+	defer r.Body.Close()
 
-      if err := json.Unmarshal(body, &req); err != nil {
-        http.Error(w, "Invalid request payload", http.StatusBadRequest)
-        log.Printf("Error decoding request body: %v, Payload: %s", err, string(body)) // Log raw payload
-        return
-      }
+	log.Printf("Raw request body: %s", string(body)) // Debugging
+
+	// Decode JSON body
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		log.Printf("Error decoding request body: %v, Raw body: %s", err, string(body))
+		return
+	}
+
+	// Log decoded request for debugging
+	log.Printf("Decoded request: %+v", req)
+
 	// Parse JSON body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
