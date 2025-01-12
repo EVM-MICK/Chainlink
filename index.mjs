@@ -730,16 +730,21 @@ async function gatherMarketData() {
     // Fetch and validate all liquidity data
     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
 
+    if (!liquidityData || liquidityData.length === 0) {
+      throw new Error("No valid liquidity data found.");
+    }
+
     // Transform liquidity data into the correct structure for the Go backend
-    const compiledLiquidity = liquidityData.map((entry) => {
-      // Convert protocols into the expected Go backend format
-      return entry.protocols.map((protocol) => ({
-        name: protocol.name,
-        part: protocol.part,
-        fromTokenAddress: protocol.fromTokenAddress,
-        toTokenAddress: protocol.toTokenAddress,
-      }));
-    });
+    const compiledLiquidity = liquidityData
+      .filter((entry) => entry && entry.protocols && Array.isArray(entry.protocols)) // Filter out invalid entries
+      .map((entry) =>
+        entry.protocols.map((protocol) => ({
+          name: protocol.name,
+          part: protocol.part,
+          fromTokenAddress: protocol.fromTokenAddress,
+          toTokenAddress: protocol.toTokenAddress,
+        }))
+      );
 
     const marketData = {
       chainId: CHAIN_ID,
@@ -759,6 +764,7 @@ async function gatherMarketData() {
     throw error;
   }
 }
+
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
