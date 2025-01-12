@@ -14,9 +14,7 @@ import pkg from "telegraf";
 
 dotenv.config();
 const { Telegraf } = pkg;
-
 const INFURA_URL = process.env.INFURA_URL;
-
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
 const permit2Abi = [
