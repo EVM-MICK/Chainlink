@@ -1258,25 +1258,19 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
     for _, liquidityPairs := range req.Liquidity {
         var validPairs []map[string]interface{}
         for _, protocol := range liquidityPairs {
-            // Assert protocol as map[string]interface{}
-            protocolMap, ok := protocol.(map[string]interface{})
-            if !ok {
-                log.Printf("Invalid protocol type: %+v", protocol)
-                continue
-            }
+            // Extract and validate fields directly
+            name, okName := protocol["name"].(string)
+            part, okPart := protocol["part"].(float64)
+            fromToken, okFrom := protocol["fromTokenAddress"].(string)
+            toToken, okTo := protocol["toTokenAddress"].(string)
 
-            // Extract and validate fields
-            part, okPart := protocolMap["part"].(float64)
-            fromToken, okFrom := protocolMap["fromTokenAddress"].(string)
-            toToken, okTo := protocolMap["toTokenAddress"].(string)
-
-            if okPart && okFrom && okTo &&
+            if okName && okPart && okFrom && okTo &&
                 common.IsHexAddress(fromToken) &&
                 common.IsHexAddress(toToken) &&
                 part > 0 {
-                validPairs = append(validPairs, protocolMap)
+                validPairs = append(validPairs, protocol)
             } else {
-                log.Printf("Invalid protocol entry: %+v", protocolMap)
+                log.Printf("Invalid protocol entry: %+v", protocol)
             }
         }
         if len(validPairs) > 0 {
@@ -1284,7 +1278,6 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         }
     }
 
-    // Assign valid liquidity back to the request
     req.Liquidity = validLiquidity
     log.Printf("Processed liquidity data: %+v", req.Liquidity)
 
@@ -1319,8 +1312,11 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Flatten the liquidity data
+    flattenedLiquidity := flattenLiquidity(req.Liquidity)
+
     // Compute profitable routes
-    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, req.Liquidity)
+    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
     if err != nil {
         http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
         log.Printf("Error computing profitable routes: %v", err)
@@ -1347,14 +1343,15 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
     log.Println("Successfully computed and returned filtered routes.")
 }
 
-
 // Helper function to flatten [][]map[string]interface{} to []map[string]interface{}
-func flattenLiquidity(liquidity [][]map[string]interface{}) []map[string]interface{} {
-	var flattened []map[string]interface{}
-	for _, inner := range liquidity {
-		flattened = append(flattened, inner...)
-	}
-	return flattened
+func flattenLiquidity(nestedLiquidity [][]map[string]interface{}) []map[string]interface{} {
+    var flattened []map[string]interface{}
+    for _, liquidityPairs := range nestedLiquidity {
+        for _, protocol := range liquidityPairs {
+            flattened = append(flattened, protocol)
+        }
+    }
+    return flattened
 }
 
 
