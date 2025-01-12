@@ -1218,153 +1218,156 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ChainID         int64                    `json:"chainId"`
-		StartToken      string                   `json:"startToken"`
-		StartAmount     string                   `json:"startAmount"`
-		MaxHops         int                      `json:"maxHops"`
-		ProfitThreshold string                   `json:"profitThreshold"`
-		TokenPrices     map[string]float64       `json:"tokenPrices"`
-		Liquidity       [][]map[string]interface{} `json:"liquidity"`
-	}
+    var req struct {
+        ChainID         int64                      `json:"chainId"`
+        StartToken      string                     `json:"startToken"`
+        StartAmount     string                     `json:"startAmount"`
+        MaxHops         int                        `json:"maxHops"`
+        ProfitThreshold string                     `json:"profitThreshold"`
+        TokenPrices     map[string]float64         `json:"tokenPrices"`
+        Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
+    }
 
-	// Read and log the raw body for debugging
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		log.Printf("Error reading request body: %v", err)
-		return
-	}
-	defer r.Body.Close()
+    // Read and log the raw body for debugging
+    body, err := io.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "Failed to read request body", http.StatusBadRequest)
+        log.Printf("Error reading request body: %v", err)
+        return
+    }
+    defer r.Body.Close()
 
-	log.Printf("Raw request body: %s", string(body)) // Debugging
+    log.Printf("Raw request body: %s", string(body)) // Debugging
 
-	// Decode JSON body into `req`
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		log.Printf("Error decoding request body: %v, Raw body: %s", err, string(body))
-		return
-	}
+    // Decode JSON body into `req`
+    if err := json.Unmarshal(body, &req); err != nil {
+        http.Error(w, "Invalid request payload", http.StatusBadRequest)
+        log.Printf("Error decoding request body: %v, Raw body: %s", err, string(body))
+        return
+    }
 
-	// Log decoded request for debugging
-	log.Printf("Decoded request: %+v", req)
+    // Log decoded request for debugging
+    log.Printf("Decoded request: %+v", req)
 
-	// Validate required fields
-	if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" || req.MaxHops <= 0 || req.ProfitThreshold == "" {
-		http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
-		log.Println("Missing or invalid required fields in request.")
-		return
-	}
+    // Validate required fields
+    if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" {
+        http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
+        log.Println("Missing or invalid required fields in request.")
+        return
+    }
 
-	// Parse Start Amount
-	startAmount := new(big.Int)
-	if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
-		log.Println("Invalid startAmount format or value.")
-		return
-	}
+    // Parse Start Amount
+    startAmount := new(big.Int)
+    if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
+        http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
+        log.Println("Invalid startAmount format or value.")
+        return
+    }
 
-	// Parse Profit Threshold
-	profitThreshold := new(big.Int)
-	if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
-		log.Println("Invalid profitThreshold format or value.")
-		return
-	}
+    // Parse Profit Threshold
+    profitThreshold := new(big.Int)
+    if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
+        http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
+        log.Println("Invalid profitThreshold format or value.")
+        return
+    }
 
-	// Validate and adjust Start Token Decimals
-	tokenDecimals := getTokenDecimals(req.StartToken)
-	if tokenDecimals < 0 {
-		http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
-		log.Printf("Invalid token decimals for token: %s", req.StartToken)
-		return
-	}
+    // Validate and adjust Start Token Decimals
+    tokenDecimals := getTokenDecimals(req.StartToken)
+    if tokenDecimals < 0 {
+        http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
+        log.Printf("Invalid token decimals for token: %s", req.StartToken)
+        return
+    }
 
-	adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
-	if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
-		http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
-		log.Println("Invalid adjusted startAmount.")
-		return
-	}
+    adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
+    if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
+        http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
+        log.Println("Invalid adjusted startAmount.")
+        return
+    }
 
-	// Validate and filter liquidity
-	validLiquidity := [][][]map[string]interface{}{}
-	for _, liquidityPairs := range req.Liquidity {
-		validPairs := [][]map[string]interface{}{}
-		for _, protocols := range liquidityPairs {
-			validProtocols := []map[string]interface{}{}
-			for _, protocol := range protocols {
-				name, okName := protocol["name"].(string)
-				part, okPart := protocol["part"].(float64)
-				fromToken, okFrom := protocol["fromTokenAddress"].(string)
-				toToken, okTo := protocol["toTokenAddress"].(string)
+    // Process and filter invalid liquidity entries
+    var validLiquidity [][][]map[string]interface{}
+    for _, liquidityPairs := range req.Liquidity {
+        var validPairs [][]map[string]interface{}
+        for _, protocols := range liquidityPairs {
+            var validProtocols []map[string]interface{}
+            for _, protocol := range protocols {
+                name, okName := protocol["name"].(string)
+                part, okPart := protocol["part"].(float64)
+                fromToken, okFrom := protocol["fromTokenAddress"].(string)
+                toToken, okTo := protocol["toTokenAddress"].(string)
 
-				if okName && okPart && okFrom && okTo &&
-					common.IsHexAddress(fromToken) &&
-					common.IsHexAddress(toToken) &&
-					part > 0 {
-					validProtocols = append(validProtocols, protocol)
-				} else {
-					log.Printf("Invalid protocol entry: %+v", protocol)
-				}
-			}
-			if len(validProtocols) > 0 {
-				validPairs = append(validPairs, validProtocols)
-			}
-		}
-		if len(validPairs) > 0 {
-			validLiquidity = append(validLiquidity, validPairs)
-		}
-	}
+                if okName && okPart && okFrom && okTo &&
+                    common.IsHexAddress(fromToken) &&
+                    common.IsHexAddress(toToken) &&
+                    part > 0 {
+                    validProtocols = append(validProtocols, protocol)
+                } else {
+                    log.Printf("Invalid protocol entry: %+v", protocol)
+                }
+            }
+            if len(validProtocols) > 0 {
+                validPairs = append(validPairs, validProtocols)
+            }
+        }
+        if len(validPairs) > 0 {
+            validLiquidity = append(validLiquidity, validPairs)
+        }
+    }
 
-	req.Liquidity = validLiquidity
-	log.Printf("Processed liquidity data: %+v", req.Liquidity)
+    req.Liquidity = validLiquidity
+    log.Printf("Processed liquidity data: %+v", req.Liquidity)
 
-	// Flatten liquidity data
-	flattenedLiquidity := flattenLiquidity(req.Liquidity)
+    // Flatten the nested liquidity structure
+    flattenedLiquidity := flattenLiquidity(req.Liquidity)
 
-	// Validate flattened liquidity data
-	for i, route := range flattenedLiquidity {
-		fromToken, ok1 := route["fromTokenAddress"].(string)
-		toToken, ok2 := route["toTokenAddress"].(string)
-		part, ok3 := route["part"].(float64)
+    // Validate flattened liquidity data
+    for i, route := range flattenedLiquidity {
+        fromToken, okFrom := route["fromTokenAddress"].(string)
+        toToken, okTo := route["toTokenAddress"].(string)
+        part, okPart := route["part"].(float64)
 
-		if !ok1 || !ok2 || !ok3 || !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
-			http.Error(w, "Invalid flattened liquidity data format", http.StatusBadRequest)
-			log.Printf("Invalid liquidity data at index[%d]: %v", i, route)
-			return
-		}
-		log.Printf("Liquidity validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
-	}
+        if !okFrom || !okTo || !okPart ||
+            !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
+            http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
+            log.Printf("Invalid liquidity data at index[%d]: %v", i, route)
+            return
+        }
 
-	// Compute profitable routes
-	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
-	if err != nil {
-		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
-		log.Printf("Error computing profitable routes: %v", err)
-		return
-	}
+        log.Printf("Liquidity validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
+    }
 
-	// Further filter routes
-	filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
-	if err != nil {
-		http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
-		log.Printf("Error filtering profitable routes: %v", err)
-		return
-	}
+    // Compute profitable routes
+    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
+    if err != nil {
+        http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
+        log.Printf("Error computing profitable routes: %v", err)
+        return
+    }
 
-	// Send the response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"routes": filteredRoutes,
-	}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		log.Printf("Error encoding response: %v", err)
-		return
-	}
+    // Further filter routes
+    filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
+    if err != nil {
+        http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
+        log.Printf("Error filtering profitable routes: %v", err)
+        return
+    }
 
-	log.Println("Successfully computed and returned filtered routes.")
+    // Respond with the computed and filtered routes
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(map[string]interface{}{
+        "routes": filteredRoutes,
+    }); err != nil {
+        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+        log.Printf("Error encoding response: %v", err)
+        return
+    }
+
+    log.Println("Successfully computed and returned filtered routes.")
 }
+
 
 // Helper function to flatten [][]map[string]interface{} to []map[string]interface{}
 func flattenLiquidity(liquidity [][]map[string]interface{}) []map[string]interface{} {
