@@ -1225,7 +1225,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		MaxHops         int                      `json:"maxHops"`
 		ProfitThreshold string                   `json:"profitThreshold"`
 		TokenPrices     map[string]float64       `json:"tokenPrices"`
-		Liquidity       [][]map[string]interface{} `json:"liquidity"` // Nested structure for liquidity
+		Liquidity       [][]map[string]interface{} `json:"liquidity"`
 	}
 
 	// Read and log the raw body for debugging
@@ -1250,53 +1250,11 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Decoded request: %+v", req)
 
 	// Validate required fields
-	// if !common.IsHexAddress(req.StartToken) || req.ChainID <= 42161 || req.MaxHops <= 3 {
-	// 	http.Error(w, "Invalid input parameters", http.StatusBadRequest)
-	// 	log.Println("Invalid input parameters detected in the request.")
-	// 	return
-	// }
-         // Validate required fields
-    if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" {
-        http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
-        log.Println("Missing or invalid required fields in request.")
-        return
-    }
-
-    // Filter and log invalid liquidity entries
-    validLiquidity := [][][]map[string]interface{}{}
-    for _, liquidityPairs := range req.Liquidity {
-        validPairs := [][]map[string]interface{}{}
-        for _, protocols := range liquidityPairs {
-            validProtocols := []map[string]interface{}{}
-            for _, protocol := range protocols {
-                name, okName := protocol["name"].(string)
-                part, okPart := protocol["part"].(float64)
-                fromToken, okFrom := protocol["fromTokenAddress"].(string)
-                toToken, okTo := protocol["toTokenAddress"].(string)
-
-                if okName && okPart && okFrom && okTo &&
-                    common.IsHexAddress(fromToken) &&
-                    common.IsHexAddress(toToken) &&
-                    part > 0 {
-                    validProtocols = append(validProtocols, protocol)
-                } else {
-                    log.Printf("Invalid protocol entry: %+v", protocol)
-                }
-            }
-            if len(validProtocols) > 0 {
-                validPairs = append(validPairs, validProtocols)
-            }
-        }
-        if len(validPairs) > 0 {
-            validLiquidity = append(validLiquidity, validPairs)
-        }
-    }
-
-    req.Liquidity = validLiquidity
-
-    log.Printf("Processed liquidity data: %+v", req.Liquidity)
-
-
+	if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" || req.MaxHops <= 0 || req.ProfitThreshold == "" {
+		http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
+		log.Println("Missing or invalid required fields in request.")
+		return
+	}
 
 	// Parse Start Amount
 	startAmount := new(big.Int)
@@ -1329,26 +1287,57 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Flatten the nested liquidity structure
+	// Validate and filter liquidity
+	validLiquidity := [][][]map[string]interface{}{}
+	for _, liquidityPairs := range req.Liquidity {
+		validPairs := [][]map[string]interface{}{}
+		for _, protocols := range liquidityPairs {
+			validProtocols := []map[string]interface{}{}
+			for _, protocol := range protocols {
+				name, okName := protocol["name"].(string)
+				part, okPart := protocol["part"].(float64)
+				fromToken, okFrom := protocol["fromTokenAddress"].(string)
+				toToken, okTo := protocol["toTokenAddress"].(string)
+
+				if okName && okPart && okFrom && okTo &&
+					common.IsHexAddress(fromToken) &&
+					common.IsHexAddress(toToken) &&
+					part > 0 {
+					validProtocols = append(validProtocols, protocol)
+				} else {
+					log.Printf("Invalid protocol entry: %+v", protocol)
+				}
+			}
+			if len(validProtocols) > 0 {
+				validPairs = append(validPairs, validProtocols)
+			}
+		}
+		if len(validPairs) > 0 {
+			validLiquidity = append(validLiquidity, validPairs)
+		}
+	}
+
+	req.Liquidity = validLiquidity
+	log.Printf("Processed liquidity data: %+v", req.Liquidity)
+
+	// Flatten liquidity data
 	flattenedLiquidity := flattenLiquidity(req.Liquidity)
 
-	// Validate and normalize flattened liquidity data
+	// Validate flattened liquidity data
 	for i, route := range flattenedLiquidity {
 		fromToken, ok1 := route["fromTokenAddress"].(string)
 		toToken, ok2 := route["toTokenAddress"].(string)
-		part, ok3 := route["part"].(float64) // Assuming part is a percentage float
+		part, ok3 := route["part"].(float64)
 
 		if !ok1 || !ok2 || !ok3 || !common.IsHexAddress(fromToken) || !common.IsHexAddress(toToken) {
-			http.Error(w, "Invalid liquidity data format", http.StatusBadRequest)
+			http.Error(w, "Invalid flattened liquidity data format", http.StatusBadRequest)
 			log.Printf("Invalid liquidity data at index[%d]: %v", i, route)
 			return
 		}
-
-		// Optionally log validated liquidity details
 		log.Printf("Liquidity validated: fromToken=%s, toToken=%s, part=%f", fromToken, toToken, part)
 	}
 
-	// Compute profitable routes based on TokenPrices and flattened Liquidity
+	// Compute profitable routes
 	profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
 	if err != nil {
 		http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
@@ -1364,7 +1353,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Respond with the computed and filtered routes
+	// Send the response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"routes": filteredRoutes,
