@@ -545,103 +545,103 @@ async function fetchTokenPrices(tokens) {
  * @param {string} amount - The amount to swap (in smallest units).
  * @returns {Promise<object>} - Liquidity data from the API.
  */
-// async function fetchLiquidityData(fromToken, toToken, amount) {
-//   const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
-//   return fetchAndCache(cacheKey, async () => {
-//     const url = `${API_BASE_URL1}/quote`;
-//     const config = {
-//       headers: { Authorization: `Bearer ${API_KEY}` },
-//       params: {
-//         src: fromToken,
-//         dst: toToken,
-//         amount,
-//         complexityLevel: "2",
-//         parts: "50",
-//         mainRouteParts: "10",
-//         includeTokensInfo: false,
-//         includeProtocols: true,
-//         includeGas: true,
-//       },
-//     };
+async function fetchLiquidityData(fromToken, toToken, amount) {
+  const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
+  return fetchAndCache(cacheKey, async () => {
+    const url = `${API_BASE_URL1}/quote`;
+    const config = {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      params: {
+        src: fromToken,
+        dst: toToken,
+        amount,
+        complexityLevel: "2",
+        parts: "50",
+        mainRouteParts: "10",
+        includeTokensInfo: false,
+        includeProtocols: true,
+        includeGas: true,
+      },
+    };
 
-//     try {
-//       const response = await axios.get(url, config);
-//       return response.data;
-//     } catch (error) {
-//       console.error(`Error fetching liquidity for ${fromToken} -> ${toToken}:`, error.message);
-//       throw error;
-//     }
-//   });
-// }
-
-async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
-  console.log(`Fetching liquidity data for base token: ${baseToken}`);
-
-  const liquidityData = await Promise.all(
-    stableAddresses.map(async (targetToken) => {
-      // Skip if baseToken and targetToken are the same
-      if (targetToken.toLowerCase() === baseToken.toLowerCase()) {
-        return null;
-      }
-
-      try {
-        // Fetch liquidity data for the pair
-        const data = await fetchLiquidityData(baseToken, targetToken, amount);
-
-        // Validate and extract protocols from the response
-        const validProtocols = data.protocols.flat().map((protocol) => {
-          if (
-            protocol.name &&
-            protocol.part > 0 &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
-            /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
-          ) {
-            return {
-              name: protocol.name,
-              part: protocol.part,
-              fromTokenAddress: protocol.fromTokenAddress,
-              toTokenAddress: protocol.toTokenAddress,
-            };
-          } else {
-            console.warn(
-              `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
-              protocol
-            );
-            return null;
-          }
-        });
-
-        // Filter out null (invalid) protocols
-        const filteredProtocols = validProtocols.filter((protocol) => protocol !== null);
-
-        if (filteredProtocols.length === 0) {
-          console.warn(`No valid protocols for pair ${baseToken} -> ${targetToken}`);
-          return null;
-        }
-
-        // Return the formatted liquidity entry
-        return {
-          baseToken,
-          targetToken,
-          gas: data.gas,
-          protocols: filteredProtocols,
-        };
-      } catch (error) {
-        console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
-        return null;
-      }
-    })
-  );
-
-  // Filter out any null entries (pairs with no valid liquidity data)
-  const validLiquidityData = liquidityData.filter((entry) => entry !== null);
-
-  if (validLiquidityData.length === 0) {
-    console.warn("No valid liquidity data found for any token pairs.");
-  }
-
-  return validLiquidityData;
+    try {
+      const response = await axios.get(url, config);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching liquidity for ${fromToken} -> ${toToken}:`, error.message);
+      throw error;
+    }
+  });
 }
+
+// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
+//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
+
+//   const liquidityData = await Promise.all(
+//     stableAddresses.map(async (targetToken) => {
+//       // Skip if baseToken and targetToken are the same
+//       if (targetToken.toLowerCase() === baseToken.toLowerCase()) {
+//         return null;
+//       }
+
+//       try {
+//         // Fetch liquidity data for the pair
+//         const data = await fetchLiquidityData(baseToken, targetToken, amount);
+
+//         // Validate and extract protocols from the response
+//         const validProtocols = data.protocols.flat().map((protocol) => {
+//           if (
+//             protocol.name &&
+//             protocol.part > 0 &&
+//             /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) &&
+//             /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress)
+//           ) {
+//             return {
+//               name: protocol.name,
+//               part: protocol.part,
+//               fromTokenAddress: protocol.fromTokenAddress,
+//               toTokenAddress: protocol.toTokenAddress,
+//             };
+//           } else {
+//             console.warn(
+//               `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
+//               protocol
+//             );
+//             return null;
+//           }
+//         });
+
+//         // Filter out null (invalid) protocols
+//         const filteredProtocols = validProtocols.filter((protocol) => protocol !== null);
+
+//         if (filteredProtocols.length === 0) {
+//           console.warn(`No valid protocols for pair ${baseToken} -> ${targetToken}`);
+//           return null;
+//         }
+
+//         // Return the formatted liquidity entry
+//         return {
+//           baseToken,
+//           targetToken,
+//           gas: data.gas,
+//           protocols: filteredProtocols,
+//         };
+//       } catch (error) {
+//         console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
+//         return null;
+//       }
+//     })
+//   );
+
+//   // Filter out any null entries (pairs with no valid liquidity data)
+//   const validLiquidityData = liquidityData.filter((entry) => entry !== null);
+
+//   if (validLiquidityData.length === 0) {
+//     console.warn("No valid liquidity data found for any token pairs.");
+//   }
+
+//   return validLiquidityData;
+// }
 
 
 /**
