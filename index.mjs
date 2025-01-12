@@ -82,7 +82,6 @@ const permit2Abi = [
     "type": "function"
   }
 ];
-
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
