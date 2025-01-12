@@ -802,17 +802,26 @@ function checkCircuitBreaker() {
 // Function to send data to the Go backend for computation
 async function sendMarketDataToGo(marketData) {
   try {
-    const response = await retryRequest(async () =>
-      axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData)
-    );
-    if (response.status !== 200) {
-      throw new Error(`Go backend error: ${response.statusText}`);
+    console.log("Sending market data to Go backend...");
+    console.log("Payload being sent:", JSON.stringify(marketData, null, 2)); // Debugging
+
+    const response = await retryRequest(async () => {
+      return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData, {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    if (response.status === 200) {
+      console.log("Market data successfully sent to Go backend:", response.data);
+    } else {
+      console.error(`Go backend responded with error: ${response.statusText}`);
     }
   } catch (error) {
-    console.error("Error sending market data to Go backend:", error.message);
+    console.error("Failed to send market data to Go backend:", error.message);
     throw error;
   }
 }
+
 
 // Integration with Go Backend
 async function executeRoute(route, amount) {
