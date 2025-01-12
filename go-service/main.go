@@ -1259,7 +1259,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         var validPairs []map[string]interface{}
         for _, protocol := range liquidityPairs {
             // Extract and validate fields directly
-            name, okName := protocol["name"].(string)
+            _, okName := protocol["name"].(string)
             part, okPart := protocol["part"].(float64)
             fromToken, okFrom := protocol["fromTokenAddress"].(string)
             toToken, okTo := protocol["toTokenAddress"].(string)
