@@ -131,7 +131,6 @@ type EdgeWeight struct {
 	Liquidity *big.Float // Liquidity available for the edge
 }
 
-
 type Receipt struct {
 	TransactionHash string `json:"transactionHash"`
 }
