@@ -1228,38 +1228,99 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
         Liquidity       [][]map[string]interface{} `json:"liquidity"`
     }
 
-    // Read and log the raw body for debugging
+    // Step 1: Read and log the raw request body
     body, err := io.ReadAll(r.Body)
     if err != nil {
-        http.Error(w, "Failed to read request body", http.StatusBadRequest)
         log.Printf("Error reading request body: %v", err)
+        http.Error(w, "Failed to read request body", http.StatusBadRequest)
         return
     }
     defer r.Body.Close()
 
     log.Printf("Raw request body: %s", string(body)) // Debugging
 
-    // Decode JSON body into `req`
+    // Step 2: Decode the JSON body into `req`
     if err := json.Unmarshal(body, &req); err != nil {
-        http.Error(w, "Invalid request payload", http.StatusBadRequest)
         log.Printf("Error decoding request body: %v, Raw body: %s", err, string(body))
+        http.Error(w, "Invalid request payload", http.StatusBadRequest)
         return
     }
 
-    // Validate required fields
+    // Step 3: Validate required fields
     if req.ChainID == 0 || req.StartToken == "" || req.StartAmount == "" {
-        http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
         log.Println("Missing or invalid required fields in request.")
+        http.Error(w, "Missing or invalid required fields", http.StatusBadRequest)
         return
     }
 
-    // Process and filter invalid liquidity entries
+    // Step 4: Process and validate liquidity data
+    req.Liquidity = processAndValidateLiquidity(req.Liquidity)
+
+    log.Printf("Processed liquidity data: %+v", req.Liquidity)
+
+    // Step 5: Parse Start Amount
+    startAmount, err := parseBigInt(req.StartAmount)
+    if err != nil {
+        log.Println("Invalid startAmount format or value.")
+        http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
+        return
+    }
+
+    // Step 6: Parse Profit Threshold
+    profitThreshold, err := parseBigInt(req.ProfitThreshold)
+    if err != nil {
+        log.Println("Invalid profitThreshold format or value.")
+        http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
+        return
+    }
+
+    // Step 7: Validate and adjust Start Token Decimals
+    adjustedAmount, err := adjustForTokenDecimals(req.StartToken, startAmount)
+    if err != nil {
+        log.Printf("Error adjusting startAmount: %v", err)
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    // Step 8: Flatten the liquidity data
+    flattenedLiquidity := flattenLiquidity(req.Liquidity)
+
+    // Step 9: Compute profitable routes
+    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
+    if err != nil {
+        log.Printf("Error computing profitable routes: %v", err)
+        http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
+        return
+    }
+
+    // Step 10: Filter routes based on criteria
+    filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
+    if err != nil {
+        log.Printf("Error filtering profitable routes: %v", err)
+        http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
+        return
+    }
+
+    // Step 11: Respond with filtered routes
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(map[string]interface{}{
+        "routes": filteredRoutes,
+    }); err != nil {
+        log.Printf("Error encoding response: %v", err)
+        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+        return
+    }
+
+    log.Println("Successfully computed and returned filtered routes.")
+}
+
+func processAndValidateLiquidity(liquidity [][]map[string]interface{}) [][]map[string]interface{} {
     var validLiquidity [][]map[string]interface{}
-    for _, liquidityPairs := range req.Liquidity {
+    for _, liquidityPairs := range liquidity {
         var validPairs []map[string]interface{}
         for _, protocol := range liquidityPairs {
-            // Extract and validate fields directly
-            _, okName := protocol["name"].(string)
+            // Extract and validate fields
+            name, okName := protocol["name"].(string)
             part, okPart := protocol["part"].(float64)
             fromToken, okFrom := protocol["fromTokenAddress"].(string)
             toToken, okTo := protocol["toTokenAddress"].(string)
@@ -1277,71 +1338,31 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
             validLiquidity = append(validLiquidity, validPairs)
         }
     }
-
-    req.Liquidity = validLiquidity
-    log.Printf("Processed liquidity data: %+v", req.Liquidity)
-
-    // Parse Start Amount
-    startAmount := new(big.Int)
-    if _, success := startAmount.SetString(req.StartAmount, 10); !success || startAmount.Cmp(big.NewInt(0)) <= 0 {
-        http.Error(w, "Invalid startAmount format or value", http.StatusBadRequest)
-        log.Println("Invalid startAmount format or value.")
-        return
-    }
-
-    // Parse Profit Threshold
-    profitThreshold := new(big.Int)
-    if _, success := profitThreshold.SetString(req.ProfitThreshold, 10); !success || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
-        http.Error(w, "Invalid profitThreshold format or value", http.StatusBadRequest)
-        log.Println("Invalid profitThreshold format or value.")
-        return
-    }
-
-    // Validate and adjust Start Token Decimals
-    tokenDecimals := getTokenDecimals(req.StartToken)
-    if tokenDecimals < 0 {
-        http.Error(w, "Unable to fetch token decimals for the start token", http.StatusBadRequest)
-        log.Printf("Invalid token decimals for token: %s", req.StartToken)
-        return
-    }
-
-    adjustedAmount := new(big.Int).Mul(startAmount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
-    if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
-        http.Error(w, "Invalid startAmount when adjusted for token decimals", http.StatusBadRequest)
-        log.Println("Invalid adjusted startAmount.")
-        return
-    }
-
-    // Flatten the liquidity data
-    flattenedLiquidity := flattenLiquidity(req.Liquidity)
-
-    // Compute profitable routes
-    profitableRoutes, err := computeProfitableRoutes(req.TokenPrices, flattenedLiquidity)
-    if err != nil {
-        http.Error(w, "Failed to compute profitable routes", http.StatusInternalServerError)
-        log.Printf("Error computing profitable routes: %v", err)
-        return
-    }
-
-    // Filter routes based on additional criteria
-    filteredRoutes, err := filterRoutes(profitableRoutes, req.ChainID, req.StartToken, adjustedAmount, req.MaxHops, profitThreshold)
-    if err != nil {
-        http.Error(w, "Failed to filter profitable routes", http.StatusInternalServerError)
-        log.Printf("Error filtering profitable routes: %v", err)
-        return
-    }
-
-    // Respond with filtered routes
-    w.Header().Set("Content-Type", "application/json")
-    if err := json.NewEncoder(w).Encode(map[string]interface{}{
-        "routes": filteredRoutes,
-    }); err != nil {
-        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-        log.Printf("Error encoding response: %v", err)
-    }
-
-    log.Println("Successfully computed and returned filtered routes.")
+    return validLiquidity
 }
+
+func parseBigInt(value string) (*big.Int, error) {
+    parsedValue := new(big.Int)
+    if _, success := parsedValue.SetString(value, 10); !success || parsedValue.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid big.Int value: %s", value)
+    }
+    return parsedValue, nil
+}
+
+func adjustForTokenDecimals(token string, amount *big.Int) (*big.Int, error) {
+    tokenDecimals := getTokenDecimals(token)
+    if tokenDecimals < 0 {
+        return nil, fmt.Errorf("unable to fetch token decimals for token: %s", token)
+    }
+
+    adjustedAmount := new(big.Int).Mul(amount, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
+    if adjustedAmount.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid adjusted amount for token decimals")
+    }
+
+    return adjustedAmount, nil
+}
+
 
 // Helper function to flatten [][]map[string]interface{} to []map[string]interface{}
 func flattenLiquidity(nestedLiquidity [][]map[string]interface{}) []map[string]interface{} {
@@ -1353,6 +1374,7 @@ func flattenLiquidity(nestedLiquidity [][]map[string]interface{}) []map[string]i
     }
     return flattened
 }
+
 
 
 // fetchTokenDecimalsFromBlockchain queries the blockchain to retrieve token decimals
