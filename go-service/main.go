@@ -285,6 +285,22 @@ type Payload struct {
     Liquidity       []LiquidityData
 }
 
+type LiquidityData struct {
+    BaseToken  string
+    TargetToken string
+    DstAmount  *big.Int
+    Gas        uint64
+    Paths      [][][]PathSegment
+}
+
+type PathSegment struct {
+    Name             string
+    Part             float64
+    FromTokenAddress string
+    ToTokenAddress   string
+}
+
+
 var apiRateLimits = make(map[string]*RateLimitTracker)
 
 type TokenPair struct {
@@ -735,37 +751,41 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useAStar bool) ([]string, *big.Float, error) {
+    // Check if start and end tokens exist in the graph
     if _, exists := graph.AdjacencyList[startToken]; !exists {
-        return nil, nil, fmt.Errorf("start token not in graph")
+        return nil, nil, fmt.Errorf("start token %s not in graph", startToken)
     }
     if _, exists := graph.AdjacencyList[endToken]; !exists {
-        return nil, nil, fmt.Errorf("end token not in graph")
+        return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
     }
 
-    // Initialize distances, previous map, and heuristic estimates
+    // Initialize distances and previous map
     distances := make(map[string]*big.Float)
     previous := make(map[string]string)
-    for token := range graph.AdjacencyList {
-        distances[token] = big.NewFloat(math.Inf(1)) // Infinity
-    }
-    distances[startToken] = big.NewFloat(0)
 
-    // Priority queue for Dijkstra/A* algorithm
+    for token := range graph.AdjacencyList {
+        distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
+    }
+    distances[startToken] = big.NewFloat(0) // Distance to the startToken is 0
+
+    // Priority queue for the algorithm
     pq := make(PriorityQueue, 0)
     heap.Init(&pq)
     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
 
+    // Map to track visited nodes
     visited := make(map[string]bool)
 
-    // Heuristic function: estimate distance to the endToken (used in A* algorithm)
+    // Define heuristic function for A* (can be replaced with domain-specific logic)
     heuristic := func(token string) *big.Float {
         if token == endToken {
-            return big.NewFloat(0)
+            return big.NewFloat(0) // No distance if it's the end token
         }
-        // Replace this with a domain-specific heuristic if needed
+        // Example heuristic: constant cost (can be replaced with real estimates)
         return big.NewFloat(1.0)
     }
 
+    // Main loop for Dijkstra/A* algorithm
     for pq.Len() > 0 {
         current := heap.Pop(&pq).(*Node)
         currentToken := current.Token
@@ -775,8 +795,8 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
         }
         visited[currentToken] = true
 
+        // If the endToken is reached, reconstruct and return the path
         if currentToken == endToken {
-            // Construct path from `previous` map
             path := []string{}
             for token := endToken; token != ""; token = previous[token] {
                 path = append([]string{token}, path...)
@@ -784,9 +804,10 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
             return path, distances[endToken], nil
         }
 
+        // Process all neighbors of the current token
         for neighbor, edge := range graph.AdjacencyList[currentToken] {
+            // Skip visited neighbors or low-liquidity edges
             if visited[neighbor] || edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
-                // Prune low-liquidity edges
                 continue
             }
 
@@ -796,19 +817,20 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
                 distances[neighbor] = tentativeDistance
                 previous[neighbor] = currentToken
 
-                // Calculate priority based on the selected algorithm
+                // Calculate priority for the neighbor
                 priority := new(big.Float).Set(tentativeDistance)
                 if useAStar {
                     priority = new(big.Float).Add(tentativeDistance, heuristic(neighbor))
                 }
 
-                // Push the neighbor to the priority queue
+                // Push the neighbor into the priority queue
                 priorityFloat, _ := priority.Float64()
                 heap.Push(&pq, &Node{Token: neighbor, Priority: priorityFloat})
             }
         }
     }
 
+    // If no path was found
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
 
@@ -841,7 +863,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Starting capital in USDC (10^6 base units)
-    amountIn := big.NewInt(CAPITAL1.Int64())
+    amountIn :=amount := big.NewInt(CAPITAL.Int64())
     totalGasCost := new(big.Int) // Initialize for gas cost calculation
 
     // Loop through the route to compute trade flow
@@ -1325,7 +1347,7 @@ func generateRoutesHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // Step 4: Process and validate liquidity data
-    req.Liquidity = processAndValidateLiquidity(req.Liquidity)
+   req.Liquidity = processAndValidateLiquidity(req.Liquidity, req.TokenPrices, req.ProfitMargin)
 
     log.Printf("Processed liquidity data: %+v", req.Liquidity)
 
@@ -1433,6 +1455,79 @@ func processAndValidateLiquidity(liquidity [][]map[string]interface{}, tokenPric
     return validLiquidity
 }
 
+func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
+    rawLiquidity, ok := payload["liquidity"].([]interface{})
+    if !ok {
+        return nil, fmt.Errorf("invalid or missing liquidity data in payload")
+    }
+
+    var liquidityData []LiquidityData
+    for _, item := range rawLiquidity {
+        liquidityItem, ok := item.(map[string]interface{})
+        if !ok {
+            log.Printf("Skipping invalid liquidity item: %+v", item)
+            continue
+        }
+
+        // Parse and validate individual liquidity item
+        dstAmount := new(big.Int)
+        if dstStr, ok := liquidityItem["dstAmount"].(string); ok {
+            dstAmount.SetString(dstStr, 10)
+        } else {
+            log.Printf("Skipping liquidity item due to invalid dstAmount: %+v", liquidityItem)
+            continue
+        }
+
+        gas := uint64(0)
+        if gasFloat, ok := liquidityItem["gas"].(float64); ok {
+            gas = uint64(gasFloat)
+        }
+
+        paths := parsePaths(liquidityItem["paths"].([]interface{}))
+
+        liquidityData = append(liquidityData, LiquidityData{
+            BaseToken:   liquidityItem["baseToken"].(string),
+            TargetToken: liquidityItem["targetToken"].(string),
+            DstAmount:   dstAmount,
+            Gas:         gas,
+            Paths:       paths,
+        })
+    }
+
+    log.Printf("Fetched and parsed liquidity data: %d items", len(liquidityData))
+    return liquidityData, nil
+}
+
+func parsePaths(rawPaths []interface{}) [][][]PathSegment {
+    var paths [][][]PathSegment
+
+    for _, path := range rawPaths {
+        var parsedPath [][]PathSegment
+        rawSegments, ok := path.([]interface{})
+        if !ok {
+            continue
+        }
+
+        for _, segment := range rawSegments {
+            rawSegment, ok := segment.(map[string]interface{})
+            if !ok {
+                continue
+            }
+
+            parsedSegment := PathSegment{
+                Name:             rawSegment["name"].(string),
+                Part:             rawSegment["part"].(float64),
+                FromTokenAddress: rawSegment["fromTokenAddress"].(string),
+                ToTokenAddress:   rawSegment["toTokenAddress"].(string),
+            }
+            parsedPath = append(parsedPath, []PathSegment{parsedSegment})
+        }
+
+        paths = append(paths, parsedPath)
+    }
+
+    return paths
+}
 
 func parseBigInt(value string) (*big.Int, error) {
     parsedValue := new(big.Int)
@@ -1678,7 +1773,7 @@ validStableTokenAddresses := filterValidAddresses(stableTokens)
             defer wg.Done()
 
             // Use Dijkstra's algorithm to find the shortest path
-            path, cost, err := ComputeOptimalRoute(graph, startToken, endToken)
+            path, cost, err := ComputeOptimalRoute(graph, startToken, endToken, false)
             if err != nil || len(path) <= 1 {
                 return
             }
@@ -2008,6 +2103,19 @@ func retryWithBackoffError(maxRetries int, initialBackoff time.Duration, fn func
     return err
 }
 
+func cacheSet(key string, value interface{}, ttl time.Duration) {
+    tokenPriceCache.mu.Lock()
+    defer tokenPriceCache.mu.Unlock()
+    tokenPriceCache.cache[key] = value
+    go func() {
+        time.Sleep(ttl)
+        tokenPriceCache.mu.Lock()
+        delete(tokenPriceCache.cache, key)
+        tokenPriceCache.mu.Unlock()
+    }()
+}
+
+
 // Helper function to set cache with expiration for token prices
 func cacheSetTokenPrices(key string, value interface{}, duration time.Duration) {
     tokenPriceCache.mu.Lock()
@@ -2160,11 +2268,8 @@ func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
 }
 
 func adjustProfitThreshold(baseThreshold float64, gasPrice float64, volatilityFactor float64) float64 {
-    dynamicThreshold := baseThreshold + (gasPrice * volatilityFactor)
-    log.Printf("Adjusted Profit Threshold: %.2f USD", dynamicThreshold)
-    return dynamicThreshold
+    return baseThreshold + gasPrice*volatilityFactor
 }
-
 
 // Dynamic weight calculation function
 func calculateWeight(price, liquidity *big.Float) *big.Float {
@@ -2185,17 +2290,23 @@ func calculateWeight(price, liquidity *big.Float) *big.Float {
     }
 
     // Compute 1/price
-    inversePrice := new(big.Float).Quo(big.NewFloat(1), price)
-
+    //inversePrice := new(big.Float).Quo(big.NewFloat(1), price)
     // Apply logarithmic dampening to inversePrice
-    logPrice := new(big.Float).SetPrec(64)
-    logPrice.Log(inversePrice) // Natural log of inversePrice (ln(1/price))
+    //logPrice := new(big.Float).SetPrec(64)
+
+     logPriceFloat, _ := price.Float64()
+     log.Printf("Log price: %f", math.Log(logPriceFloat))
+
+    //logPrice.Log(inversePrice) // Natural log of inversePrice (ln(1/price))
     dampenedPrice := new(big.Float).Mul(logPrice, big.NewFloat(weightFactor)) // Apply weightFactor
 
     // Apply logarithmic dampening to liquidity
-    logLiquidity := new(big.Float).SetPrec(64)
-    logLiquidity.Log(liquidity) // Natural log of liquidity (ln(liquidity))
-    dampenedLiquidity := new(big.Float).Mul(logLiquidity, big.NewFloat(liquidityFactor)) // Apply liquidityFactor
+    //logLiquidity := new(big.Float).SetPrec(64)
+    //logLiquidity.Log(liquidity) // Natural log of liquidity (ln(liquidity))
+
+      logLiquidityFloat, _ := Liquidity.Float64()
+      log.Printf("Log price: %f", math.Log(logLiquidityFloat))
+    dampenedLiquidity := new(big.Float).Mul(logLiquidityFloat, big.NewFloat(liquidityFactor)) // Apply liquidityFactor
 
     // Calculate final weight as the sum of dampened components
     finalWeight := new(big.Float).Add(dampenedPrice, dampenedLiquidity)
@@ -2860,69 +2971,6 @@ func pollPendingTransactions(ctx context.Context, client *ethclient.Client, targ
 	return nil
 }
 
-func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
-    rawLiquidity, ok := payload["liquidity"].([]interface{})
-    if !ok {
-        return nil, fmt.Errorf("invalid or missing liquidity data in payload")
-    }
-
-    var liquidityData []LiquidityData
-    for _, item := range rawLiquidity {
-        liquidityItem, ok := item.(map[string]interface{})
-        if !ok {
-            log.Println("Skipping invalid liquidity item")
-            continue
-        }
-
-        baseToken, _ := liquidityItem["baseToken"].(string)
-        targetToken, _ := liquidityItem["targetToken"].(string)
-        dstAmountStr, _ := liquidityItem["dstAmount"].(string)
-        gasEstimate, _ := liquidityItem["gas"].(float64)
-
-        dstAmount := new(big.Int)
-        if _, ok = dstAmount.SetString(dstAmountStr, 10); !ok {
-            log.Printf("Invalid dstAmount for baseToken %s and targetToken %s", baseToken, targetToken)
-            continue
-        }
-
-        paths, _ := liquidityItem["paths"].([]interface{})
-
-        liquidityData = append(liquidityData, LiquidityData{
-            BaseToken:  baseToken,
-            TargetToken: targetToken,
-            DstAmount:  dstAmount,
-            Gas:        uint64(gasEstimate),
-            Paths:      parsePaths(paths),
-        })
-    }
-
-    return liquidityData, nil
-}
-
-// Helper to parse paths from payload
-func parsePaths(rawPaths []interface{}) [][][]PathSegment {
-    var parsedPaths [][][]PathSegment
-
-    for _, rawPathGroup := range rawPaths {
-        var pathGroup [][]PathSegment
-        for _, rawPath := range rawPathGroup.([]interface{}) {
-            var path []PathSegment
-            for _, rawSegment := range rawPath.([]interface{}) {
-                segmentMap, _ := rawSegment.(map[string]interface{})
-                path = append(path, PathSegment{
-                    Name:             segmentMap["name"].(string),
-                    Part:             segmentMap["part"].(float64),
-                    FromTokenAddress: segmentMap["fromTokenAddress"].(string),
-                    ToTokenAddress:   segmentMap["toTokenAddress"].(string),
-                })
-            }
-            pathGroup = append(pathGroup, path)
-        }
-        parsedPaths = append(parsedPaths, pathGroup)
-    }
-
-    return parsedPaths
-}
 
 func fetchCurrentGasPrice(payload map[string]interface{}) (*big.Float, error) {
     rawGasPrice, ok := payload["gasPrice"].(string)
@@ -2930,12 +2978,12 @@ func fetchCurrentGasPrice(payload map[string]interface{}) (*big.Float, error) {
         return nil, fmt.Errorf("missing or invalid gas price in payload")
     }
 
-    gasPrice := new(big.Float)
-    if _, _, err := gasPrice.Parse(rawGasPrice, 10); err != nil {
+   gasPriceFloat, _ := gasPrice.Float64()
+    if _, _, err := gasPriceFloat.Parse(rawGasPrice, 10); err != nil {
         return nil, fmt.Errorf("failed to parse gas price: %v", err)
     }
 
-    return gasPrice, nil
+    return gasPriceFloat, nil
 }
 
 
