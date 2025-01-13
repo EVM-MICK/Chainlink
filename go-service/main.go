@@ -1562,20 +1562,23 @@ func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{}
     var liquidityMaps [][]map[string]interface{}
     for _, data := range liquidityData {
         var pathMaps []map[string]interface{}
-        for _, path := range data.Paths {
-            for _, segment := range path {
-                pathMaps = append(pathMaps, map[string]interface{}{
-                    "name":             segment.Name,
-                    "part":             segment.Part,
-                    "fromTokenAddress": segment.FromTokenAddress,
-                    "toTokenAddress":   segment.ToTokenAddress,
-                })
+        for _, path := range data.Paths { // Each path is [][]PathSegment
+            for _, segments := range path { // Each segments is []PathSegment
+                for _, segment := range segments { // Each segment is a PathSegment
+                    pathMaps = append(pathMaps, map[string]interface{}{
+                        "name":             segment.Name,
+                        "part":             segment.Part,
+                        "fromTokenAddress": segment.FromTokenAddress,
+                        "toTokenAddress":   segment.ToTokenAddress,
+                    })
+                }
             }
         }
         liquidityMaps = append(liquidityMaps, pathMaps)
     }
     return liquidityMaps
 }
+
 
 // Updates the function where processAndValidateLiquidity is called
 // func handleLiquidityProcessing(payload map[string]interface{}, tokenPrices map[string]float64, minDstAmount float64) ([]LiquidityData, error) {
@@ -1904,70 +1907,73 @@ func validateEnvVars(vars []string) error {
 }
 
 func sendTransaction(tx Transaction, token string) (*Receipt, error) {
-	// Validate required environment variables
-	requiredVars := []string{"ONEINCH_API_KEY", "INFURA_URL", "PRIVATE_KEY"}
-          if err := validateEnvVars(requiredVars); err != nil {
-              log.Fatalf("Environment validation failed: %v", err)
-        }
+    // Validate required environment variables
+    requiredVars := []string{"ONEINCH_API_KEY", "INFURA_URL", "PRIVATE_KEY"}
+    if err := validateEnvVars(requiredVars); err != nil {
+        log.Fatalf("Environment validation failed: %v", err)
+    }
 
-	// Use shared Ethereum client
-	client, err := getEthClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Ethereum client: %v", err)
-	}
+    // Use shared Ethereum client
+    client, err := getEthClient()
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect to Ethereum client: %v", err)
+    }
 
-	// Fetch Permit2 signature from Node.js
-	permitDetails, err := fetchPermit2Signature(token, tx.To, tx.Value.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Permit2 signature: %v", err)
-	}
+    // Fetch Permit2 signature from Node.js
+    permitDetails, err := fetchPermit2Signature(token, tx.To, tx.Value.String())
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch Permit2 signature: %v", err)
+    }
 
-	// Convert gas price and gas limit to big.Int
-        gasPrice := big.NewFloat(tx.GasPrice) // Set appropriate initial value
-	gasLimit := uint64(tx.Gas)
+    // Convert gas price from *big.Float to *big.Int
+    gasPrice := convertBigFloatToInt(tx.GasPrice) // Utilize helper function
+    if gasPrice.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid gas price: %s", gasPrice.String())
+    }
 
-	// Parse sender and receiver addresses
-	//fromAddress := common.HexToAddress(tx.From)
-	toAddress := common.HexToAddress(tx.To)
+    // Parse gas limit and recipient address
+    gasLimit := uint64(tx.Gas)
+    toAddress := common.HexToAddress(tx.To)
 
-	// Create transaction data
-	rawTx := types.NewTransaction(
-		permitDetails.Nonce, // Use fetched nonce
-		toAddress,
-		new(big.Int).Set(tx.Value), // Value in Wei
-		gasLimit,
-		gasPrice,
-		common.FromHex(tx.Data), // Include Permit2 details in data if necessary
-	)
+    // Create transaction data
+    rawTx := types.NewTransaction(
+        permitDetails.Nonce,          // Use fetched nonce
+        toAddress,                    // Recipient address
+        new(big.Int).Set(tx.Value),   // Value in Wei
+        gasLimit,                     // Gas limit
+        gasPrice,                     // Gas price in Wei
+        common.FromHex(tx.Data),      // Transaction data
+    )
 
-	// Load private key for signing
-	privateKey, err := crypto.HexToECDSA(os.Getenv("PRIVATE_KEY"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load private key: %v", err)
-	}
+    // Load private key for signing
+    privateKey, err := crypto.HexToECDSA(os.Getenv("PRIVATE_KEY"))
+    if err != nil {
+        return nil, fmt.Errorf("failed to load private key: %v", err)
+    }
 
-	// Sign the transaction
-	chainID, err := client.NetworkID(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch chain ID: %v", err)
-	}
+    // Fetch the current chain ID
+    chainID, err := client.NetworkID(context.Background())
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch chain ID: %v", err)
+    }
 
-	signedTx, err := types.SignTx(rawTx, types.NewEIP155Signer(chainID), privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction: %v", err)
-	}
+    // Sign the transaction
+    signedTx, err := types.SignTx(rawTx, types.NewEIP155Signer(chainID), privateKey)
+    if err != nil {
+        return nil, fmt.Errorf("failed to sign transaction: %v", err)
+    }
 
-	// Send the transaction
-	err = client.SendTransaction(context.Background(), signedTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send transaction: %v", err)
-	}
+    // Send the signed transaction
+    err = client.SendTransaction(context.Background(), signedTx)
+    if err != nil {
+        return nil, fmt.Errorf("failed to send transaction: %v", err)
+    }
 
-	// Create a receipt struct
-	txHash := signedTx.Hash().Hex()
-	log.Printf("Transaction sent successfully. Hash: %s", txHash)
+    // Log and return the transaction hash
+    txHash := signedTx.Hash().Hex()
+    log.Printf("Transaction sent successfully. Hash: %s", txHash)
 
-	return &Receipt{TransactionHash: txHash}, nil
+    return &Receipt{TransactionHash: txHash}, nil
 }
 
 // FetchTokenPrices fetches prices for tokens using concurrent API calls
@@ -2207,20 +2213,20 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
     var tokenPairs []TokenPair
 
     for _, data := range liquidityData {
-        for _, path := range data.Paths {
-            for _, segment := range path {
-                tokenPairs = append(tokenPairs, TokenPair{
-                    SrcToken: segment.FromTokenAddress,
-                    DstToken: segment.ToTokenAddress,
-                })
+        for _, path := range data.Paths { // Iterate over [][][]PathSegment
+            for _, segments := range path { // Iterate over [][]PathSegment
+                for _, segment := range segments { // Iterate over []PathSegment
+                    tokenPairs = append(tokenPairs, TokenPair{
+                        SrcToken: segment.FromTokenAddress,
+                        DstToken: segment.ToTokenAddress,
+                    })
+                }
             }
         }
     }
 
     return tokenPairs
 }
-
-
 
 func BuildGraph(tokenPairs []TokenPair, chainID int64) (*WeightedGraph, error) {
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
@@ -2311,35 +2317,29 @@ func calculateWeight(price, liquidity *big.Float) *big.Float {
         return big.NewFloat(0)
     }
 
-    // Compute 1/price
-    //inversePrice := new(big.Float).Quo(big.NewFloat(1), price)
-    // Apply logarithmic dampening to inversePrice
-    //logPrice := new(big.Float).SetPrec(64)
+    // Compute natural log of price
+    priceFloat, _ := price.Float64()
+    logPrice := math.Log(priceFloat)
 
-     logPriceFloat, _ := price.Float64()
-     log.Printf("Log price: %f", math.Log(logPriceFloat))
+    // Apply weight factor to log(price)
+    dampenedPrice := new(big.Float).Mul(big.NewFloat(logPrice), big.NewFloat(weightFactor))
 
-    //logPrice.Log(inversePrice) // Natural log of inversePrice (ln(1/price))
-    dampenedPrice := new(big.Float).Mul(logPrice, big.NewFloat(weightFactor)) // Apply weightFactor
+    // Compute natural log of liquidity
+    liquidityFloat, _ := liquidity.Float64()
+    logLiquidity := math.Log(liquidityFloat)
 
-    // Apply logarithmic dampening to liquidity
-    //logLiquidity := new(big.Float).SetPrec(64)
-    //logLiquidity.Log(liquidity) // Natural log of liquidity (ln(liquidity))
-
-      logLiquidityFloat, _ := Liquidity.Float64()
-      log.Printf("Log price: %f", math.Log(logLiquidityFloat))
-    dampenedLiquidity := new(big.Float).Mul(logLiquidityFloat, big.NewFloat(liquidityFactor)) // Apply liquidityFactor
+    // Apply liquidity factor to log(liquidity)
+    dampenedLiquidity := new(big.Float).Mul(big.NewFloat(logLiquidity), big.NewFloat(liquidityFactor))
 
     // Calculate final weight as the sum of dampened components
     finalWeight := new(big.Float).Add(dampenedPrice, dampenedLiquidity)
 
     // Log the components for debugging
     log.Printf("Weight Calculation: Price=%.4f, Liquidity=%.4f, Weight=%.4f",
-        price, liquidity, finalWeight)
+        priceFloat, liquidityFloat, finalWeight)
 
     return finalWeight
 }
-
 
 // Helper function to fetch environment variables as floats
 func getEnvAsFloat(key string, defaultValue float64) float64 {
