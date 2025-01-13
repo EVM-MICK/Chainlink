@@ -8,7 +8,6 @@ import (
 	"container/heap"
 	"math/big"
 	"sync"
-        "io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -864,9 +863,18 @@ func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
 }
 
 // Helper to convert *big.Float to *big.Int
-func convertBigFloatToInt(bigFloat *big.Float) *big.Int {
+func convertBigFloatToInt(input interface{}) *big.Int {
     gasPriceInt := new(big.Int)
-    bigFloat.Int(gasPriceInt) // Convert *big.Float to *big.Int
+
+    switch v := input.(type) {
+    case *big.Float:
+        v.Int(gasPriceInt) // Convert *big.Float to *big.Int
+    case *big.Int:
+        gasPriceInt.Set(v) // Directly assign *big.Int
+    default:
+        log.Fatalf("Unsupported type for conversion: %T", input)
+    }
+
     return gasPriceInt
 }
 
@@ -1325,7 +1333,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 }
 
 // REST API Handler for Route Generation
-func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
+func generateRoutesHandler(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
     // Validate the start token address
     if !common.IsHexAddress(startToken) {
         return nil, fmt.Errorf("invalid start token address: %s", startToken)
@@ -1908,7 +1916,7 @@ func validateEnvVars(vars []string) error {
 
 func sendTransaction(tx Transaction, token string) (*Receipt, error) {
     // Validate required environment variables
-    requiredVars := []string{"ONEINCH_API_KEY", "INFURA_URL", "PRIVATE_KEY"}
+    requiredVars := []string{"ONEINCH_API_KEY", "INFURA_URL", "PRIVATE_KEY", "NODE_URL"}
     if err := validateEnvVars(requiredVars); err != nil {
         log.Fatalf("Environment validation failed: %v", err)
     }
@@ -1969,12 +1977,50 @@ func sendTransaction(tx Transaction, token string) (*Receipt, error) {
         return nil, fmt.Errorf("failed to send transaction: %v", err)
     }
 
-    // Log and return the transaction hash
+    // Log the transaction hash
     txHash := signedTx.Hash().Hex()
     log.Printf("Transaction sent successfully. Hash: %s", txHash)
 
+    // Notify the Node.js script
+    notificationPayload := map[string]string{
+        "txHash": txHash,
+        "token":  token,
+        "value":  tx.Value.String(),
+    }
+    if err := notifyNodeJS(notificationPayload); err != nil {
+        log.Printf("Failed to notify Node.js script: %v", err)
+    }
+
     return &Receipt{TransactionHash: txHash}, nil
 }
+
+func notifyNodeJS(payload map[string]string) error {
+    nodeURL := os.Getenv("NODE_URL") // Node.js script URL
+    if nodeURL == "" {
+        return fmt.Errorf("NODE_URL environment variable is not set")
+    }
+
+    // Encode the payload as JSON
+    jsonData, err := json.Marshal(payload)
+    if err != nil {
+        return fmt.Errorf("failed to marshal payload: %v", err)
+    }
+
+    // Send the notification via HTTP POST
+    resp, err := http.Post(nodeURL, "application/json", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return fmt.Errorf("failed to send notification: %v", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("received non-OK response from Node.js script: %d", resp.StatusCode)
+    }
+
+    log.Println("Notification sent to Node.js script successfully")
+    return nil
+}
+
 
 // FetchTokenPrices fetches prices for tokens using concurrent API calls
 func FetchTokenPrices(tokens []string) (map[string]float64, error) {
