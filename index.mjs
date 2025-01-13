@@ -925,7 +925,7 @@ async function sendMarketDataToGo(marketData) {
     }
 
     // Define retry logic
-    const response = await retryRequest(async () => {
+    const response = await retryRequest3(async () => {
       return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData, {
         headers: { "Content-Type": "application/json" }, // Ensure JSON payload is specified
         timeout: 5000, // Set a timeout to avoid hanging requests
@@ -954,6 +954,27 @@ async function sendMarketDataToGo(marketData) {
     throw error;
   }
 }
+
+async function retryRequest3(requestFn, retries = 3, delay = 1000) {
+  let attempts = 0;
+
+  while (attempts < retries) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      attempts++;
+
+      if (attempts >= retries) {
+        console.error(`Failed after ${retries} attempts:`, error.message);
+        throw error;
+      }
+
+      console.warn(`Retrying request (${attempts}/${retries})...`);
+      await new Promise((resolve) => setTimeout(resolve, delay * attempts)); // Exponential backoff
+    }
+  }
+}
+
 
 
 
