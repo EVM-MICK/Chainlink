@@ -1420,7 +1420,7 @@ func processAndValidateLiquidity(
         for _, path := range data.Paths {
             var validSegments []PathSegment
             for _, segment := range path {
-                // Validate fields
+                // Validate required fields for each segment
                 if segment.Name == "" || segment.Part <= 0 ||
                     !common.IsHexAddress(segment.FromTokenAddress) ||
                     !common.IsHexAddress(segment.ToTokenAddress) {
@@ -1428,32 +1428,32 @@ func processAndValidateLiquidity(
                     continue
                 }
 
-                // Check token price availability for the target token
+                // Check if token price for the target token is available
                 targetTokenPrice, priceOk := tokenPrices[segment.ToTokenAddress]
                 if !priceOk {
-                    log.Printf("Skipping path segment, missing price for token: %s", segment.ToTokenAddress)
+                    log.Printf("Skipping segment due to missing price for token: %s", segment.ToTokenAddress)
                     continue
                 }
 
                 // Calculate destination amount in USD
                 dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
                 if dstAmountInUSD < minDstAmount {
-                    log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
+                    log.Printf("Segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
                         segment.ToTokenAddress, dstAmountInUSD)
                     continue
                 }
 
-                // Add valid segment
+                // Add segment to valid segments
                 validSegments = append(validSegments, segment)
             }
 
-            // Only append non-empty valid paths
+            // Append non-empty valid paths
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, validSegments)
             }
         }
 
-        // Append data with non-empty valid paths
+        // Add LiquidityData with valid paths to the final result
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
                 BaseToken:   data.BaseToken,
@@ -1468,6 +1468,7 @@ func processAndValidateLiquidity(
     log.Printf("Pre-Filtering completed: %d valid liquidity entries out of %d", len(validLiquidity), len(liquidity))
     return validLiquidity
 }
+
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
