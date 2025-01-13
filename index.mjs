@@ -768,29 +768,42 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
 async function gatherMarketData() {
   try {
+    // Fetch token prices for the hardcoded stable addresses
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-    const amount = "100000000000";
+    const amount = "100000000000"; // Example amount
 
-    // Fetch and validate all liquidity data
+    // Fetch all liquidity data
     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
 
     // Transform liquidity data for the Go backend
-    const compiledLiquidity = liquidityData.map((entry) => entry.paths);
+    const compiledLiquidity = liquidityData.map((entry) => ({
+      baseToken: entry.baseToken,
+      targetToken: entry.targetToken,
+      dstAmount: entry.dstAmount,
+      gas: entry.gas,
+      paths: entry.paths, // Nested paths for the token pair
+    }));
 
+    // Construct the market data payload
     const marketData = {
-      chainId: CHAIN_ID,
-      startToken: baseToken,
-      startAmount: amount,
-      maxHops: 3,
-      profitThreshold: "500000000", // Adjust as per your logic
-      tokenPrices,
-      liquidity: compiledLiquidity,
+      chainId: CHAIN_ID, // Ensure CHAIN_ID is defined elsewhere in your code
+      startToken: baseToken, // The base token (e.g., USDC)
+      startAmount: amount, // The amount in base token
+      maxHops: 3, // Maximum hops allowed in the route
+      profitThreshold: "500000000", // Minimum profit threshold (adjust as needed)
+      tokenPrices, // Token prices fetched earlier
+      liquidity: compiledLiquidity, // Transformed liquidity data
     };
 
-    console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2)); // Debugging
+    // Log the compiled payload for debugging
+    console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
 
-    return marketData;
+    // Send the compiled data to the Go backend
+    const response = await sendMarketDataToGo(marketData);
+
+    console.log("Go backend response:", response.data);
+    return response.data;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
