@@ -863,6 +863,14 @@ func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
     return totalGasCost
 }
 
+// Helper to convert *big.Float to *big.Int
+func convertBigFloatToInt(bigFloat *big.Float) *big.Int {
+    gasPriceInt := new(big.Int)
+    bigFloat.Int(gasPriceInt) // Convert *big.Float to *big.Int
+    return gasPriceInt
+}
+
+
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
     if len(route) < 2 {
@@ -1253,17 +1261,18 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int64) ([]interface{
 	return nil, nil
 }
 
-func generateTokenPairs(tokens []Token) []TokenPair {
+func generateTokenPairs(tokens []string) []TokenPair {
     var pairs []TokenPair
     for _, src := range tokens {
         for _, dst := range tokens {
-            if src.Address != dst.Address {
-                pairs = append(pairs, TokenPair{SrcToken: src.Address, DstToken: dst.Address})
+            if src != dst {
+                pairs = append(pairs, TokenPair{SrcToken: src, DstToken: dst})
             }
         }
     }
     return pairs
 }
+
 
 // Helper function for HTTP GET with retries and parameters
 func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]byte, error) {
@@ -1321,11 +1330,11 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
 
     // Use hardcoded stable tokens to generate token pairs
     var stableTokenAddresses []string
-    for _, token := range hardcodedStableTokens {
-        stableTokenAddresses = append(stableTokenAddresses, token.Address)
-    }
+   for _, token := range hardcodedStableTokens {
+    stableTokenAddresses = append(stableTokenAddresses, token.Address)
+}
 
-    tokenPairs := generateTokenPairs(stableTokenAddresses)
+   tokenPairs := generateTokenPairs(stableTokenAddresses)
     liquidityData := convertToLiquidityData(tokenPairs)
 
     // Build and process the graph using LiquidityData
@@ -1333,12 +1342,11 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
-
     // Calculate average liquidity to adjust the max hops
-    averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
-    if err != nil {
-        log.Fatalf("Failed to calculate average liquidity: %v", err)
-    }
+  averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
+  if err != nil {
+    log.Fatalf("Failed to calculate average liquidity: %v", err)
+     }
     log.Printf("Average Liquidity: %s", averageLiquidity.String())
     maxHops = adjustMaxHops(maxHops, averageLiquidity)
 
@@ -1395,7 +1403,6 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     // Return sorted and limited routes
     return sortAndLimitRoutes(profitableRoutes, 3), nil
 }
-
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
@@ -2397,7 +2404,7 @@ func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float6
     return tokenPrices
 }
 
-func calculateAverageLiquidity(tokens []Token, chainID int64, startToken string) (*big.Float, error) {
+func calculateAverageLiquidity(tokens []string, chainID int64, startToken string) (*big.Float, error) {
     totalLiquidity := big.NewFloat(0)
     count := 0
 
@@ -2406,13 +2413,13 @@ func calculateAverageLiquidity(tokens []Token, chainID int64, startToken string)
 
     for _, token := range tokens {
         wg.Add(1)
-        go func(token Token) {
+        go func(token string) {
             defer wg.Done()
 
             // Estimate liquidity for each token
-            liquidity, err := estimateLiquidity(chainID, startToken, token.Address)
+            liquidity, err := estimateLiquidity(chainID, startToken, token)
             if err != nil {
-                log.Printf("Failed to estimate liquidity for token %s: %v", token.Address, err)
+                log.Printf("Failed to estimate liquidity for token %s: %v", token, err)
                 return
             }
 
@@ -2435,6 +2442,7 @@ func calculateAverageLiquidity(tokens []Token, chainID int64, startToken string)
     }
     return big.NewFloat(0), nil
 }
+
 
 func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, error) {
     orderBook, err := fetchOrderBookDepth(srcToken, dstToken, chainID)
