@@ -1419,40 +1419,42 @@ func processAndValidateLiquidity(
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
-        var validPaths [][][]PathSegment // Properly handle the nested structure
-        for _, path := range data.Paths {
+        var validPaths [][][]PathSegment // Correctly handle nested structure of Paths
+        for _, path := range data.Paths { // Each path is [][]PathSegment
             var validSegments []PathSegment
-            for _, segment := range path { // Iterate over the slice of PathSegment
-                // Validate fields of each PathSegment
-                if segment.Name == "" || segment.Part <= 0 ||
-                    !common.IsHexAddress(segment.FromTokenAddress) ||
-                    !common.IsHexAddress(segment.ToTokenAddress) {
-                    log.Printf("Invalid path segment skipped: %+v", segment)
-                    continue
-                }
+            for _, segments := range path { // Each segments is []PathSegment
+                for _, segment := range segments { // Each segment is PathSegment
+                    // Validate fields of each PathSegment
+                    if segment.Name == "" || segment.Part <= 0 ||
+                        !common.IsHexAddress(segment.FromTokenAddress) ||
+                        !common.IsHexAddress(segment.ToTokenAddress) {
+                        log.Printf("Invalid path segment skipped: %+v", segment)
+                        continue
+                    }
 
-                // Check token price availability for the target token
-                targetTokenPrice, priceOk := tokenPrices[segment.ToTokenAddress]
-                if !priceOk {
-                    log.Printf("Skipping path segment, missing price for token: %s", segment.ToTokenAddress)
-                    continue
-                }
+                    // Check token price availability for the target token
+                    targetTokenPrice, priceOk := tokenPrices[segment.ToTokenAddress]
+                    if !priceOk {
+                        log.Printf("Skipping path segment, missing price for token: %s", segment.ToTokenAddress)
+                        continue
+                    }
 
-                // Calculate destination amount in USD
-                dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
-                if dstAmountInUSD < minDstAmount {
-                    log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
-                        segment.ToTokenAddress, dstAmountInUSD)
-                    continue
-                }
+                    // Calculate destination amount in USD
+                    dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
+                    if dstAmountInUSD < minDstAmount {
+                        log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
+                            segment.ToTokenAddress, dstAmountInUSD)
+                        continue
+                    }
 
-                // Add valid segment
-                validSegments = append(validSegments, segment)
+                    // Add valid segment
+                    validSegments = append(validSegments, segment)
+                }
             }
 
-            // Only append non-empty valid paths
+            // Only append non-empty valid segments as paths
             if len(validSegments) > 0 {
-                validPaths = append(validPaths, validSegments)
+                validPaths = append(validPaths, [][]PathSegment{validSegments})
             }
         }
 
@@ -1471,6 +1473,7 @@ func processAndValidateLiquidity(
     log.Printf("Pre-Filtering completed: %d valid liquidity entries out of %d", len(validLiquidity), len(liquidity))
     return validLiquidity
 }
+
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
