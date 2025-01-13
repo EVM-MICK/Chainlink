@@ -1340,7 +1340,8 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Generate token pairs and build the graph using real-time data
-    liquidityData := generateTokenPairs(validStableTokenAddresses)
+    //liquidityData := generateTokenPairs(validStableTokenAddresses)
+    liquidityData := convertToLiquidityData(tokenPairs)
     graph, err := buildAndProcessGraph(liquidityData, chainID)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
@@ -1420,7 +1421,7 @@ func processAndValidateLiquidity(
         for _, path := range data.Paths {
             var validSegments []PathSegment
             for _, segment := range path {
-                // Validate required fields for each segment
+                // Validate fields
                 if segment.Name == "" || segment.Part <= 0 ||
                     !common.IsHexAddress(segment.FromTokenAddress) ||
                     !common.IsHexAddress(segment.ToTokenAddress) {
@@ -1428,32 +1429,32 @@ func processAndValidateLiquidity(
                     continue
                 }
 
-                // Check if token price for the target token is available
+                // Check token price availability for the target token
                 targetTokenPrice, priceOk := tokenPrices[segment.ToTokenAddress]
                 if !priceOk {
-                    log.Printf("Skipping segment due to missing price for token: %s", segment.ToTokenAddress)
+                    log.Printf("Skipping path segment, missing price for token: %s", segment.ToTokenAddress)
                     continue
                 }
 
                 // Calculate destination amount in USD
-                dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
+                dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18)
                 if dstAmountInUSD < minDstAmount {
-                    log.Printf("Segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
+                    log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
                         segment.ToTokenAddress, dstAmountInUSD)
                     continue
                 }
 
-                // Add segment to valid segments
+                // Add valid segment
                 validSegments = append(validSegments, segment)
             }
 
-            // Append non-empty valid paths
+            // Only append non-empty valid paths
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, validSegments)
             }
         }
 
-        // Add LiquidityData with valid paths to the final result
+        // Append data with non-empty valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
                 BaseToken:   data.BaseToken,
@@ -2174,19 +2175,6 @@ func filterValidAddresses(tokens []StableToken) []string {
 	return addresses
 }
 
-
-func generateTokenPairs(tokens []string) []TokenPair {
-	var pairs []TokenPair
-	for _, src := range tokens {
-		for _, dst := range tokens {
-			if src != dst {
-				pairs = append(pairs, TokenPair{SrcToken: src, DstToken: dst})
-			}
-		}
-	}
-	return pairs
-}
-
 func buildAndProcessGraph(liquidityData []LiquidityData, chainID int64) (*WeightedGraph, error) {
     // Convert LiquidityData to TokenPair
     tokenPairs := convertToTokenPairs(liquidityData)
@@ -2200,7 +2188,6 @@ func buildAndProcessGraph(liquidityData []LiquidityData, chainID int64) (*Weight
 
     return graph, nil
 }
-
 
 func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
     var tokenPairs []TokenPair
