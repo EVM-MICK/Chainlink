@@ -278,6 +278,12 @@ type RateLimitTracker struct {
 	ResetTime time.Time
 }
 
+type Payload struct {
+    TokenPrices     map[string]float64
+    ProfitThreshold float64
+    Liquidity       []LiquidityData
+}
+
 var apiRateLimits = make(map[string]*RateLimitTracker)
 
 type TokenPair struct {
@@ -805,8 +811,6 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
 
-
-
 // calculateTotalGasCost calculates the total gas cost for a transaction.
 func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
     // Ensure gas price and limit are valid
@@ -836,7 +840,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Starting capital in USDC (10^6 base units)
-    amountIn := new(big.Int).SetInt64(CAPITAL1)
+    amountIn := big.NewInt(CAPITAL1.Int64())
     totalGasCost := new(big.Int) // Initialize for gas cost calculation
 
     // Loop through the route to compute trade flow
@@ -1427,6 +1431,7 @@ func processAndValidateLiquidity(liquidity [][]map[string]interface{}, tokenPric
     log.Printf("Pre-Filtering completed: %d valid routes out of %d", len(validLiquidity), len(liquidity))
     return validLiquidity
 }
+
 
 func parseBigInt(value string) (*big.Int, error) {
     parsedValue := new(big.Int)
@@ -2214,7 +2219,7 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
     return defaultValue
 }
 
-func MonitorMarketAndRebuildGraph(payload *Payload, updateInterval time.Duration, graphChan chan *WeightedGraph, baseThreshold float64, volatilityFactor float64) {
+func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval time.Duration, graphChan chan *WeightedGraph, baseThreshold float64, volatilityFactor float64) {
     ticker := time.NewTicker(updateInterval)
     defer ticker.Stop()
 
@@ -2222,28 +2227,34 @@ func MonitorMarketAndRebuildGraph(payload *Payload, updateInterval time.Duration
         log.Println("Fetching latest liquidity and market data for graph update...")
 
         // Fetch updated liquidity
-        updatedLiquidity, err := fetchUpdatedLiquidity()
+        updatedLiquidity, err := fetchUpdatedLiquidity(payload)
         if err != nil {
             log.Printf("Failed to fetch updated liquidity: %v", err)
             continue
         }
 
-        // Adjust profit threshold dynamically
-        gasPrice := fetchCurrentGasPrice() // Function to fetch current gas price
+        // Fetch current gas price
+        gasPrice, err := fetchCurrentGasPrice(payload)
+        if err != nil {
+            log.Printf("Failed to fetch current gas price: %v", err)
+            continue
+        }
+
+        // Adjust profit threshold dynamically based on gas price and volatility
         adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
-        // Filter liquidity based on adjusted threshold
-        updatedLiquidity = processAndValidateLiquidity(updatedLiquidity, payload.TokenPrices, adjustedThreshold)
+        // Validate and filter liquidity based on the adjusted profit threshold
+        tokenPrices := convertTokenPrices(payload["tokenPrices"].(map[string]interface{}))
+        updatedLiquidity = processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
 
-        // Rebuild the graph
+        // Rebuild the graph with the updated liquidity data
         updatedGraph := BuildGraph(updatedLiquidity)
 
-        // Send updated graph through the channel
+        // Send the updated graph through the channel
         graphChan <- updatedGraph
         log.Println("Graph updated successfully.")
     }
 }
-
 
 func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *big.Float, error) {
     prices, err := FetchTokenPrices([]string{srcToken, dstToken})
@@ -2265,6 +2276,14 @@ func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *
     return big.NewFloat(srcPrice / dstPrice), liquidity, nil
 }
 
+// Helper to convert token prices
+func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float64 {
+    tokenPrices := make(map[string]float64)
+    for token, price := range rawTokenPrices {
+        tokenPrices[token] = price.(float64)
+    }
+    return tokenPrices
+}
 
 func calculateAverageLiquidity(tokens []string, chainID int64, startToken string) (*big.Float, error) {
 	totalLiquidity := big.NewFloat(0)
@@ -2838,6 +2857,84 @@ func pollPendingTransactions(ctx context.Context, client *ethclient.Client, targ
 
 	log.Printf("Processed %d transactions from block %s", len(block.Transactions()), block.Hash().Hex())
 	return nil
+}
+
+func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
+    rawLiquidity, ok := payload["liquidity"].([]interface{})
+    if !ok {
+        return nil, fmt.Errorf("invalid or missing liquidity data in payload")
+    }
+
+    var liquidityData []LiquidityData
+    for _, item := range rawLiquidity {
+        liquidityItem, ok := item.(map[string]interface{})
+        if !ok {
+            log.Println("Skipping invalid liquidity item")
+            continue
+        }
+
+        baseToken, _ := liquidityItem["baseToken"].(string)
+        targetToken, _ := liquidityItem["targetToken"].(string)
+        dstAmountStr, _ := liquidityItem["dstAmount"].(string)
+        gasEstimate, _ := liquidityItem["gas"].(float64)
+
+        dstAmount := new(big.Int)
+        if _, ok = dstAmount.SetString(dstAmountStr, 10); !ok {
+            log.Printf("Invalid dstAmount for baseToken %s and targetToken %s", baseToken, targetToken)
+            continue
+        }
+
+        paths, _ := liquidityItem["paths"].([]interface{})
+
+        liquidityData = append(liquidityData, LiquidityData{
+            BaseToken:  baseToken,
+            TargetToken: targetToken,
+            DstAmount:  dstAmount,
+            Gas:        uint64(gasEstimate),
+            Paths:      parsePaths(paths),
+        })
+    }
+
+    return liquidityData, nil
+}
+
+// Helper to parse paths from payload
+func parsePaths(rawPaths []interface{}) [][][]PathSegment {
+    var parsedPaths [][][]PathSegment
+
+    for _, rawPathGroup := range rawPaths {
+        var pathGroup [][]PathSegment
+        for _, rawPath := range rawPathGroup.([]interface{}) {
+            var path []PathSegment
+            for _, rawSegment := range rawPath.([]interface{}) {
+                segmentMap, _ := rawSegment.(map[string]interface{})
+                path = append(path, PathSegment{
+                    Name:             segmentMap["name"].(string),
+                    Part:             segmentMap["part"].(float64),
+                    FromTokenAddress: segmentMap["fromTokenAddress"].(string),
+                    ToTokenAddress:   segmentMap["toTokenAddress"].(string),
+                })
+            }
+            pathGroup = append(pathGroup, path)
+        }
+        parsedPaths = append(parsedPaths, pathGroup)
+    }
+
+    return parsedPaths
+}
+
+func fetchCurrentGasPrice(payload map[string]interface{}) (*big.Float, error) {
+    rawGasPrice, ok := payload["gasPrice"].(string)
+    if !ok {
+        return nil, fmt.Errorf("missing or invalid gas price in payload")
+    }
+
+    gasPrice := new(big.Float)
+    if _, _, err := gasPrice.Parse(rawGasPrice, 10); err != nil {
+        return nil, fmt.Errorf("failed to parse gas price: %v", err)
+    }
+
+    return gasPrice, nil
 }
 
 
