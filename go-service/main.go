@@ -871,8 +871,8 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Starting capital in USDC (10^6 base units)
-    amountIn := big.NewInt(CAPITAL.Int64())
-    totalGasCost := new(big.Int) // Initialize for gas cost calculation
+    amountIn := new(big.Int).Set(CAPITAL) // Use CAPITAL directly
+    totalGasCost := new(big.Int)         // Initialize total gas cost
 
     // Loop through the route to compute trade flow
     for i := 0; i < len(route)-1; i++ {
@@ -891,10 +891,6 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
             return nil, fmt.Errorf("missing price data for token: %s", toToken)
         }
 
-        // Log token prices and liquidity for debugging
-        log.Printf("From Token: %s, Price: %s, Liquidity: %s", fromToken, fromData.Price.String(), fromData.Liquidity.String())
-        log.Printf("To Token: %s, Price: %s, Liquidity: %s", toToken, toData.Price.String(), toData.Liquidity.String())
-
         // Adjust for slippage
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
@@ -905,29 +901,17 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         adjustedAmount := new(big.Int)
         adjustedAmountFloat.Int(adjustedAmount)
 
-        // Log adjusted amount after slippage
-        log.Printf("Adjusted amount after slippage: %s wei", adjustedAmount.String())
-
         // Update the trading amount using the price ratio
-        priceRatio := new(big.Float).Quo(toData.Price, fromData.Price) // priceRatio = toPrice / fromPrice
+        priceRatio := new(big.Float).Quo(toData.Price, fromData.Price)       // priceRatio = toPrice / fromPrice
         tradeAmount := new(big.Float).Mul(new(big.Float).SetInt(adjustedAmount), priceRatio) // tradeAmount = adjustedAmount * priceRatio
 
         // Convert tradeAmount (*big.Float) to *big.Int
         amountIn = new(big.Int)
         tradeAmount.Int(amountIn)
 
-        // Log updated amount after price ratio
-        log.Printf("Trade amount after price ratio: %s wei", amountIn.String())
-
         // Calculate gas cost for this hop
-        gasPriceInt := new(big.Int)
-        gasPrice.Int(gasPriceInt) // Convert *big.Float gasPrice to *big.Int
-
-        hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
+        hopGasCost := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
-
-        // Log gas cost for this hop
-        log.Printf("Gas cost for hop: %s wei", hopGasCost.String())
 
         // Ensure remaining amount is positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
@@ -936,22 +920,20 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Calculate net profit: final amount - starting capital - gas costs
-    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, big.NewInt(CAPITAL)), totalGasCost)
+    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
 
     // Log the route and profit for debugging
     log.Printf("Route evaluated: %v", route)
     log.Printf("Final Amount: %s wei, Total Gas Cost: %s wei, Net Profit: %s wei", amountIn.String(), totalGasCost.String(), netProfit.String())
 
     // Check against minimum profit threshold
-    if netProfit.Cmp(big.NewInt(MINIMUM_PROFIT_THRESHOLD1)) < 0 {
-        log.Printf("Route did not meet the profit threshold of %s wei.", big.NewInt(MINIMUM_PROFIT_THRESHOLD1).String())
+    if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
+        log.Printf("Route did not meet the profit threshold of %s wei.", MINIMUM_PROFIT_THRESHOLD.String())
         return nil, nil
     }
 
     return netProfit, nil
 }
-
-
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
@@ -1438,7 +1420,7 @@ func processAndValidateLiquidity(
                 }
 
                 // Calculate destination amount in USD
-                dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18)
+                dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
                 if dstAmountInUSD < minDstAmount {
                     log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
                         segment.ToTokenAddress, dstAmountInUSD)
@@ -2409,43 +2391,43 @@ func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float6
     return tokenPrices
 }
 
-func calculateAverageLiquidity(tokens []string, chainID int64, startToken string) (*big.Float, error) {
-	totalLiquidity := big.NewFloat(0)
-	count := 0
+func calculateAverageLiquidity(tokens []Token, chainID int64, startToken string) (*big.Float, error) {
+    totalLiquidity := big.NewFloat(0)
+    count := 0
 
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+    var mu sync.Mutex
+    var wg sync.WaitGroup
 
-	for _, token := range tokens {
-		wg.Add(1)
-		go func(token string) {
-			defer wg.Done()
+    for _, token := range tokens {
+        wg.Add(1)
+        go func(token Token) {
+            defer wg.Done()
 
-			// Estimate liquidity for each token
-			liquidity, err := estimateLiquidity(chainID, startToken, token)
-			if err != nil {
-				log.Printf("Failed to estimate liquidity for token %s: %v", token, err)
-				return
-			}
+            // Estimate liquidity for each token
+            liquidity, err := estimateLiquidity(chainID, startToken, token.Address)
+            if err != nil {
+                log.Printf("Failed to estimate liquidity for token %s: %v", token.Address, err)
+                return
+            }
 
-			// Accumulate total liquidity and count valid tokens
-			mu.Lock()
-			if liquidity.Cmp(big.NewFloat(0)) > 0 {
-				totalLiquidity.Add(totalLiquidity, liquidity)
-				count++
-			}
-			mu.Unlock()
-		}(token)
-	}
+            // Accumulate total liquidity and count valid tokens
+            mu.Lock()
+            if liquidity.Cmp(big.NewFloat(0)) > 0 {
+                totalLiquidity.Add(totalLiquidity, liquidity)
+                count++
+            }
+            mu.Unlock()
+        }(token)
+    }
 
-	// Wait for all goroutines to complete
-	wg.Wait()
+    // Wait for all goroutines to complete
+    wg.Wait()
 
-	// Return average liquidity or zero if no valid tokens were processed
-	if count > 0 {
-		return new(big.Float).Quo(totalLiquidity, big.NewFloat(float64(count))), nil
-	}
-	return big.NewFloat(0), nil
+    // Return average liquidity or zero if no valid tokens were processed
+    if count > 0 {
+        return new(big.Float).Quo(totalLiquidity, big.NewFloat(float64(count))), nil
+    }
+    return big.NewFloat(0), nil
 }
 
 func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, error) {
@@ -2459,12 +2441,11 @@ func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, er
         return nil, fmt.Errorf("no liquidity available for %s -> %s", srcToken, dstToken)
     }
 
-    low := big.NewFloat(1e18) // Minimum trade size
+    low := big.NewFloat(1e18)  // Minimum trade size
     high := big.NewFloat(1e24) // Maximum trade size
     bestAmount := new(big.Float).Set(low)
 
     for low.Cmp(high) <= 0 {
-        
         mid := new(big.Float).Add(low, high)
         mid.Quo(mid, big.NewFloat(2))
         adjustedAmount, err := adjustForSlippage(mid, totalLiquidity)
@@ -2477,7 +2458,6 @@ func estimateLiquidity(chainID int64, srcToken, dstToken string) (*big.Float, er
     }
     return bestAmount, nil
 }
-
 
 func orderBookLiquidity(orderBook []interface{}) *big.Float {
     totalLiquidity := big.NewFloat(0)
