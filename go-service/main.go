@@ -161,7 +161,6 @@ var clientOnce sync.Once
 // Global WebSocket Broadcast Channel
 var wsBroadcast = make(chan ArbitrageOpportunity)
 // BroadcastChannel for messages
-
 // Hardcoded stable token addresses
 var hardcodedStableTokens = []Token{
 	{"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "USDT", 6, "Tether USD"},
