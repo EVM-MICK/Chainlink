@@ -881,6 +881,10 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     amountIn := new(big.Int).Set(CAPITAL) // Use CAPITAL directly
     totalGasCost := new(big.Int)         // Initialize total gas cost
 
+    // Convert gasPrice (*big.Float) to *big.Int for compatibility
+    gasPriceInt := new(big.Int)
+    gasPrice.Int(gasPriceInt)
+
     // Loop through the route to compute trade flow
     for i := 0; i < len(route)-1; i++ {
         fromToken := route[i]
@@ -917,8 +921,11 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         tradeAmount.Int(amountIn)
 
         // Calculate gas cost for this hop
-        hopGasCost := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+        hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
+
+        // Log gas cost for debugging
+        log.Printf("Gas cost for hop (%s -> %s): %s wei", fromToken, toToken, hopGasCost.String())
 
         // Ensure remaining amount is positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
@@ -1591,24 +1598,33 @@ func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{}
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
     var liquidityData []LiquidityData
+
     for _, pair := range tokenPairs {
+        // Construct individual path segment
+        segment := PathSegment{
+            Name:             fmt.Sprintf("%s -> %s", pair.SrcToken, pair.DstToken),
+            Part:             1.0, // Assume 100% allocation for now
+            FromTokenAddress: pair.SrcToken,
+            ToTokenAddress:   pair.DstToken,
+        }
+
+        // Wrap the segment in [][]PathSegment, and then wrap that in [][][]PathSegment
+        paths := [][][]PathSegment{
+            {
+                {segment}, // Wrap each segment in the required nesting
+            },
+        }
+
+        // Append the constructed LiquidityData
         liquidityData = append(liquidityData, LiquidityData{
             BaseToken:   pair.SrcToken,
             TargetToken: pair.DstToken,
             DstAmount:   big.NewInt(1e18), // Default value, adjust as needed
             Gas:         21000,           // Default gas, adjust based on real data
-            Paths: [][][]PathSegment{
-                {
-                    {
-                        Name:             fmt.Sprintf("%s -> %s", pair.SrcToken, pair.DstToken),
-                        Part:             1.0, // Assume 100% allocation for now
-                        FromTokenAddress: pair.SrcToken,
-                        ToTokenAddress:   pair.DstToken,
-                    },
-                },
-            },
+            Paths:       paths,           // Set paths with proper structure
         })
     }
+
     return liquidityData
 }
 
