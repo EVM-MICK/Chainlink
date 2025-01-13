@@ -1272,20 +1272,15 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int64) ([]interface{
 	return nil, nil
 }
 
-func generateTokenPairs(stableTokens []Token) []TokenPair {
+func generateTokenPairs(tokens []Token) []TokenPair {
     var pairs []TokenPair
-    const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
-
-    for _, token := range stableTokens {
-        if token.Address == usdcAddress {
-            continue // Skip pairing USDC with itself
+    for _, src := range tokens {
+        for _, dst := range tokens {
+            if src.Address != dst.Address {
+                pairs = append(pairs, TokenPair{SrcToken: src.Address, DstToken: dst.Address})
+            }
         }
-        pairs = append(pairs, TokenPair{
-            SrcToken: usdcAddress,
-            DstToken: token.Address,
-        })
     }
-
     return pairs
 }
 
@@ -1332,7 +1327,6 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 	return result.([]byte), nil
 }
 
-
 // REST API Handler for Route Generation
 func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
     // Validate the start token address
@@ -1344,18 +1338,8 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
         return nil, fmt.Errorf("startAmount and profitThreshold must be positive values")
     }
 
-    // Extract stable token addresses from hardcodedStableTokens
-    var stableTokenAddresses []string
-    for _, token := range hardcodedStableTokens {
-        stableTokenAddresses = append(stableTokenAddresses, token.Address)
-    }
-
-    if len(stableTokenAddresses) == 0 {
-        return nil, fmt.Errorf("no valid stable token addresses available")
-    }
-
-    // Generate token pairs and convert to LiquidityData
-    tokenPairs := generateTokenPairs(stableTokenAddresses)
+    // Use hardcoded stable tokens to generate token pairs
+    tokenPairs := generateTokenPairs(hardcodedStableTokens)
     liquidityData := convertToLiquidityData(tokenPairs)
 
     // Build and process the graph using LiquidityData
@@ -1365,7 +1349,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Calculate average liquidity to adjust the max hops
-    averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
+    averageLiquidity, err := calculateAverageLiquidity(hardcodedStableTokens, chainID, startToken)
     if err != nil {
         log.Fatalf("Failed to calculate average liquidity: %v", err)
     }
@@ -1377,17 +1361,17 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     var wg sync.WaitGroup
 
     // Iterate over all end tokens and find routes
-    for _, endToken := range stableTokenAddresses {
-        if strings.EqualFold(endToken, startToken) {
+    for _, endToken := range hardcodedStableTokens {
+        if strings.EqualFold(endToken.Address, startToken) {
             continue
         }
 
         wg.Add(1)
-        go func(endToken string) {
+        go func(endToken Token) {
             defer wg.Done()
 
             // Use Dijkstra's algorithm to find the shortest path
-            path, cost, err := ComputeOptimalRoute(graph, startToken, endToken, false)
+            path, cost, err := ComputeOptimalRoute(graph, startToken, endToken.Address, false)
             if err != nil || len(path) <= 1 {
                 return
             }
@@ -1425,7 +1409,6 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     // Return sorted and limited routes
     return sortAndLimitRoutes(profitableRoutes, 3), nil
 }
-
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
