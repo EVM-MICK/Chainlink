@@ -1319,7 +1319,7 @@ func processAndValidateLiquidity(liquidity [][]map[string]interface{}) [][]map[s
         var validPairs []map[string]interface{}
         for _, protocol := range liquidityPairs {
             // Extract and validate fields
-            name, okName := protocol["name"].(string)
+            _, okName := protocol["name"].(string)
             part, okPart := protocol["part"].(float64)
             fromToken, okFrom := protocol["fromTokenAddress"].(string)
             toToken, okTo := protocol["toTokenAddress"].(string)
