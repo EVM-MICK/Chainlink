@@ -613,62 +613,72 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-  const liquidityData = [];
+  const liquidity = []; // Array to hold all token pair data in the required format
 
   for (const targetToken of stableAddresses) {
-    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue;
+    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue; // Skip cases where the base token is the same as the target token
 
     try {
-      const data =await rateLimitedRequest1(() =>
-          fetchLiquidityData(baseToken, targetToken, amount)
-        );
-      if (!data || !data.includeProtocols) {
-        console.warn(`No includeProtocols found for pair ${baseToken} -> ${targetToken}`);
+      // Fetch liquidity data for the token pair
+      const data = await rateLimitedRequest1(() =>
+        fetchLiquidityData(baseToken, targetToken, amount)
+      );
+
+      // Check if the response contains valid protocols
+      if (!data || !data.protocols) {
+        console.warn(`No protocols found for pair ${baseToken} -> ${targetToken}`);
         continue;
       }
 
-      // Process paths for this pair
-      const paths = data.includeProtocols.map((path) =>
-        path.map((includeProtocols) => {
-          if (
-            includeProtocols.name &&
-            includeProtocols.part > 0 &&
-            /^0x[a-fA-F0-9]{40}$/.test(includeProtocols.fromTokenAddress) &&
-            /^0x[a-fA-F0-9]{40}$/.test(includeProtocols.toTokenAddress)
-          ) {
-            return {
-              name: includeProtocols.name,
-              part: includeProtocols.part,
-              fromTokenAddress: includeProtocols.fromTokenAddress,
-              toTokenAddress: includeProtocols.toTokenAddress,
-            };
-          } else {
-            console.warn(
-              `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
-              protocol
-            );
-            return null;
-          }
-        }).filter((includeProtocols) => includeProtocols !== null) // Remove invalid includeProtocols
-      ).filter((path) => path.length > 0); // Remove empty paths
+      // Process each route in the `protocols` field
+     const tokenPairLiquidity = data.protocols.map((route) =>
+  route.map((step) =>
+    step.map((protocol) => {
+      if (
+        protocol.name && // Ensure protocol name exists
+        protocol.part > 0 && // Ensure part is greater than 0
+        /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) && // Validate Ethereum address
+        /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress) // Validate Ethereum address
+      ) {
+        // Include all fields from the protocol object
+        return {
+          name: protocol.name,
+          part: protocol.part,
+          fromTokenAddress: protocol.fromTokenAddress,
+          toTokenAddress: protocol.toTokenAddress,
+          ...protocol, // Spread operator to include any additional fields dynamically
+        };
+      } else {
+        console.warn(
+          `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
+          protocol
+        );
+        return null; // Skip invalid protocol
+      }
+    }).filter((protocol) => protocol !== null) // Remove null protocols
+  ).filter((step) => step.length > 0) // Remove empty steps
+  ).filter((route) => route.length > 0); // Remove empty routes
 
-      if (paths.length === 0) {
+      // Skip if no valid paths were found
+      if (tokenPairLiquidity.length === 0) {
         console.warn(`No valid paths for pair ${baseToken} -> ${targetToken}`);
         continue;
       }
 
-      liquidityData.push({
-        baseToken,
-        targetToken,
-        gas: data.gas,
-        paths,
+      // Add this token pair's liquidity data to the overall liquidity array
+      liquidity.push({
+        baseToken, // Source token address
+        targetToken, // Target token address
+        dstAmount: data.dstAmount, // Destination amount from API response
+        gas: data.gas, // Gas information from API response
+        paths: tokenPairLiquidity, // All processed paths for this token pair
       });
     } catch (error) {
       console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
     }
   }
 
-  return liquidityData;
+  return liquidity; // Return the complete liquidity array
 }
 
 // Helper function for delay
