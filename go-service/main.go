@@ -1272,6 +1272,22 @@ func fetchOrderBookDepth(srcToken, dstToken string, chainID int64) ([]interface{
 	return nil, nil
 }
 
+func generateTokenPairs(stableTokens []Token) []TokenPair {
+    var pairs []TokenPair
+    const usdcAddress = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+
+    for _, token := range stableTokens {
+        if token.Address == usdcAddress {
+            continue // Skip pairing USDC with itself
+        }
+        pairs = append(pairs, TokenPair{
+            SrcToken: usdcAddress,
+            DstToken: token.Address,
+        })
+    }
+
+    return pairs
+}
 
 // Helper function for HTTP GET with retries and parameters
 func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]byte, error) {
@@ -1328,27 +1344,28 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
         return nil, fmt.Errorf("startAmount and profitThreshold must be positive values")
     }
 
-    // Convert hardcoded stable addresses to StableToken format
-    stableTokens := make([]StableToken, len(hardcodedStableAddresses))
-    for i, addr := range hardcodedStableAddresses {
-        stableTokens[i] = StableToken{Address: addr}
+    // Extract stable token addresses from hardcodedStableTokens
+    var stableTokenAddresses []string
+    for _, token := range hardcodedStableTokens {
+        stableTokenAddresses = append(stableTokenAddresses, token.Address)
     }
-    validStableTokenAddresses := filterValidAddresses(stableTokens)
 
-    if len(validStableTokenAddresses) == 0 {
+    if len(stableTokenAddresses) == 0 {
         return nil, fmt.Errorf("no valid stable token addresses available")
     }
 
-    // Generate token pairs and build the graph using real-time data
-    //liquidityData := generateTokenPairs(validStableTokenAddresses)
+    // Generate token pairs and convert to LiquidityData
+    tokenPairs := generateTokenPairs(stableTokenAddresses)
     liquidityData := convertToLiquidityData(tokenPairs)
+
+    // Build and process the graph using LiquidityData
     graph, err := buildAndProcessGraph(liquidityData, chainID)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     // Calculate average liquidity to adjust the max hops
-    averageLiquidity, err := calculateAverageLiquidity(validStableTokenAddresses, chainID, startToken)
+    averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
     if err != nil {
         log.Fatalf("Failed to calculate average liquidity: %v", err)
     }
@@ -1360,7 +1377,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     var wg sync.WaitGroup
 
     // Iterate over all end tokens and find routes
-    for _, endToken := range validStableTokenAddresses {
+    for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, startToken) {
             continue
         }
@@ -1408,6 +1425,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     // Return sorted and limited routes
     return sortAndLimitRoutes(profitableRoutes, 3), nil
 }
+
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
@@ -1469,7 +1487,6 @@ func processAndValidateLiquidity(
     log.Printf("Pre-Filtering completed: %d valid liquidity entries out of %d", len(validLiquidity), len(liquidity))
     return validLiquidity
 }
-
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
