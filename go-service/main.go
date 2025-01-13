@@ -863,7 +863,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     // Starting capital in USDC (10^6 base units)
-    amountIn :=amount := big.NewInt(CAPITAL.Int64())
+    amountIn := big.NewInt(CAPITAL.Int64())
     totalGasCost := new(big.Int) // Initialize for gas cost calculation
 
     // Loop through the route to compute trade flow
