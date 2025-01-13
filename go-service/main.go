@@ -1321,7 +1321,12 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Use hardcoded stable tokens to generate token pairs
-    tokenPairs := generateTokenPairs(hardcodedStableTokens)
+    var stableTokenAddresses []string
+    for _, token := range hardcodedStableTokens {
+        stableTokenAddresses = append(stableTokenAddresses, token.Address)
+    }
+
+    tokenPairs := generateTokenPairs(stableTokenAddresses)
     liquidityData := convertToLiquidityData(tokenPairs)
 
     // Build and process the graph using LiquidityData
@@ -1331,7 +1336,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     }
 
     // Calculate average liquidity to adjust the max hops
-    averageLiquidity, err := calculateAverageLiquidity(hardcodedStableTokens, chainID, startToken)
+    averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
     if err != nil {
         log.Fatalf("Failed to calculate average liquidity: %v", err)
     }
@@ -1392,6 +1397,7 @@ func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxH
     return sortAndLimitRoutes(profitableRoutes, 3), nil
 }
 
+
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
     tokenPrices map[string]float64,
@@ -1400,11 +1406,11 @@ func processAndValidateLiquidity(
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
-        var validPaths [][]PathSegment
+        var validPaths [][][]PathSegment // Properly handle the nested structure
         for _, path := range data.Paths {
             var validSegments []PathSegment
-            for _, segment := range path {
-                // Validate fields
+            for _, segment := range path { // Iterate over the slice of PathSegment
+                // Validate fields of each PathSegment
                 if segment.Name == "" || segment.Part <= 0 ||
                     !common.IsHexAddress(segment.FromTokenAddress) ||
                     !common.IsHexAddress(segment.ToTokenAddress) {
@@ -1556,48 +1562,49 @@ func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{}
 }
 
 // Updates the function where processAndValidateLiquidity is called
-func handleLiquidityProcessing(payload map[string]interface{}, tokenPrices map[string]float64, minDstAmount float64) ([]LiquidityData, error) {
-    // Fetch updated liquidity data
-    updatedLiquidity, err := fetchUpdatedLiquidity(payload)
-    if err != nil {
-        return nil, fmt.Errorf("failed to fetch updated liquidity: %v", err)
-    }
+// func handleLiquidityProcessing(payload map[string]interface{}, tokenPrices map[string]float64, minDstAmount float64) ([]LiquidityData, error) {
+//     // Fetch updated liquidity data
+//     updatedLiquidity, err := fetchUpdatedLiquidity(payload)
+//     if err != nil {
+//         return nil, fmt.Errorf("failed to fetch updated liquidity: %v", err)
+//     }
 
-    // Convert updatedLiquidity to the required format
-    updatedLiquidityMap := convertToMapSlice(updatedLiquidity)
+//     // Convert updatedLiquidity to the required format
+//     updatedLiquidityMap := convertToMapSlice(updatedLiquidity)
 
-    // Process and validate the liquidity
-    validLiquidityMap := processAndValidateLiquidity(updatedLiquidityMap, tokenPrices, minDstAmount)
+//     // Process and validate the liquidity
+//     validLiquidityMap := processAndValidateLiquidity(updatedLiquidityMap, tokenPrices, minDstAmount)
 
-    // Convert back to []LiquidityData
-    validLiquidity := convertToLiquidityData(validLiquidityMap)
+//     // Convert back to []LiquidityData
+//     validLiquidity := convertToLiquidityData(validLiquidityMap)
 
-    log.Printf("Validated liquidity data: %d valid routes", len(validLiquidity))
-    return validLiquidity, nil
-}
+//     log.Printf("Validated liquidity data: %d valid routes", len(validLiquidity))
+//     return validLiquidity, nil
+// }
 
 // Converts [][]map[string]interface{} back to []LiquidityData
-func convertToLiquidityData(liquidityMaps [][]map[string]interface{}) []LiquidityData {
+func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
     var liquidityData []LiquidityData
-    for _, pathMaps := range liquidityMaps {
-        var paths [][]PathSegment
-        for _, segmentMap := range pathMaps {
-            paths = append(paths, []PathSegment{
-                {
-                    Name:             segmentMap["name"].(string),
-                    Part:             segmentMap["part"].(float64),
-                    FromTokenAddress: segmentMap["fromTokenAddress"].(string),
-                    ToTokenAddress:   segmentMap["toTokenAddress"].(string),
-                },
-            })
-        }
+    for _, pair := range tokenPairs {
         liquidityData = append(liquidityData, LiquidityData{
-            Paths: paths,
+            BaseToken:   pair.SrcToken,
+            TargetToken: pair.DstToken,
+            DstAmount:   big.NewInt(1e18), // Default value, adjust as needed
+            Gas:         21000,           // Default gas, adjust based on real data
+            Paths: [][][]PathSegment{
+                {
+                    {
+                        Name:             fmt.Sprintf("%s -> %s", pair.SrcToken, pair.DstToken),
+                        Part:             1.0, // Assume 100% allocation for now
+                        FromTokenAddress: pair.SrcToken,
+                        ToTokenAddress:   pair.DstToken,
+                    },
+                },
+            },
         })
     }
     return liquidityData
 }
-
 
 func adjustForTokenDecimals(token string, amount *big.Int) (*big.Int, error) {
     tokenDecimals := getTokenDecimals(token)
