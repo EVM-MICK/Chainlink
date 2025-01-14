@@ -1717,7 +1717,7 @@ func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
         liquidityData = append(liquidityData, LiquidityData{
             BaseToken:   pair.SrcToken,
             TargetToken: pair.DstToken,
-            DstAmount:   big.NewInt(1e18), // Default value, adjust as needed
+            DstAmount:   new(big.Int), // Default value, adjust as needed
             Gas:         21000,           // Default gas, adjust based on real data
             Paths:       paths,           // Set paths with proper structure
         })
