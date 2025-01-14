@@ -848,29 +848,55 @@ function checkCircuitBreaker() {
 }
 
 // Function to send data to the Go backend for computation
+// async function sendMarketDataToGo(marketData) {
+//   try {
+//   console.log("Request being sent:", {
+//   url: `${process.env.GO_BACKEND_URL}/process-market-data`,
+//   method: "POST",
+//   headers: { "Content-Type": "application/json" },
+//  });
+// console.log("Market data gathered:", JSON.stringify(marketData, null, 2));
+//     const url = `${process.env.GO_BACKEND_URL}/process-market-data`;
+//     // Ensure POST method is used
+//   const response = await axios.post(url, marketData, {
+//       headers: { "Content-Type": "application/json" },
+//       timeout: 5000,
+//     });
+
+//     console.log("Market data successfully sent to Go backend:", response.data);
+//     return response.data;
+//   } catch (error) {
+//     console.error("Error sending market data to Go backend:", error.message);
+//     console.error("Request method likely used:", error.config?.method || "unknown");
+//     if (error.response) {
+//       console.error("Backend response:", error.response.data);
+//     }
+//     throw error;
+//   }
+// }
+
 async function sendMarketDataToGo(marketData) {
   try {
-  console.log("Request being sent:", {
-  url: `${process.env.GO_BACKEND_URL}/process-market-data`,
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
- });
-console.log("Market data gathered:", JSON.stringify(marketData, null, 2));
-    const url = `${process.env.GO_BACKEND_URL}/process-market-data`;
-    // Ensure POST method is used
-  const response = await axios.post(url, marketData, {
+    console.log("Sending market data to Go backend...");
+    console.log("Market data payload:", JSON.stringify(marketData, null, 2));
+
+    const response = await axios({
+      method: "POST",
+      url: `${process.env.GO_BACKEND_URL}/process-market-data`,
       headers: { "Content-Type": "application/json" },
-      timeout: 5000,
+      data: marketData, // Pass the data payload
     });
 
-    console.log("Market data successfully sent to Go backend:", response.data);
+    console.log("Response from Go backend:", response.data);
     return response.data;
   } catch (error) {
     console.error("Error sending market data to Go backend:", error.message);
-    console.error("Request method likely used:", error.config?.method || "unknown");
+
     if (error.response) {
-      console.error("Backend response:", error.response.data);
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", error.response.data);
     }
+
     throw error;
   }
 }
