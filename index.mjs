@@ -676,15 +676,32 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
 async function gatherMarketData() {
   try {
-    // Fetch token prices for the hardcoded stable addresses
+    console.log("Starting to gather market data...");
+
+    // Step 1: Fetch token prices for the hardcoded stable addresses
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+    console.log("Token prices fetched successfully.");
+
+    // Step 2: Define base token and amount
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
     const amount = "100000000000"; // Example amount
 
-    // Fetch all liquidity data
+    // Step 3: Fetch all liquidity data
+    console.log("Fetching liquidity data for all tokens...");
     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
 
-    // Transform liquidity data for the Go backend
+    // Step 4: Validate liquidity data completeness
+    const missingLiquidityTokens = HARDCODED_STABLE_ADDRESSES.filter(
+      (token) => !liquidityData.some((entry) => entry.targetToken.toLowerCase() === token.toLowerCase())
+    );
+
+    if (missingLiquidityTokens.length > 0) {
+      console.warn(
+        `Missing liquidity data for tokens: ${missingLiquidityTokens.join(", ")}`
+      );
+    }
+
+    // Step 5: Transform liquidity data for the Go backend
     const compiledLiquidity = liquidityData.map((entry) => ({
       baseToken: entry.baseToken,
       targetToken: entry.targetToken,
@@ -693,7 +710,7 @@ async function gatherMarketData() {
       paths: entry.paths, // Nested paths for the token pair
     }));
 
-    // Construct the market data payload
+    // Step 6: Construct the market data payload
     const marketData = {
       chainId: CHAIN_ID, // Ensure CHAIN_ID is defined elsewhere in your code
       startToken: baseToken, // The base token (e.g., USDC)
@@ -703,17 +720,16 @@ async function gatherMarketData() {
       tokenPrices, // Token prices fetched earlier
       liquidity: compiledLiquidity, // Transformed liquidity data
     };
-  //console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
 
-    //  const cacheKey = "marketData";
-    // console.log(`Caching market data with key: ${cacheKey}`);
-    // await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
-    // console.log("Market data cached successfully.");
+    console.log("Market data compiled successfully:");
+    console.log(JSON.stringify(marketData, null, 2));
 
+    // Step 7: Send the compiled data to the Go backend
     console.log("Sending market data to Go backend...");
     await sendMarketDataToGo(marketData);
     console.log("Market data sent successfully to Go backend.");
 
+    return marketData;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
@@ -852,14 +868,12 @@ function checkCircuitBreaker() {
 // Function to send data to the Go backend for computation
 async function sendMarketDataToGo(marketData) {
   try {
-    console.log("Sending market data to Go backend...");
   console.log("Request being sent:", {
   url: `${process.env.GO_BACKEND_URL}/process-market-data`,
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  data: JSON.stringify(marketData, null, 2),
  });
-
+console.log("Market data gathered:", JSON.stringify(marketData, null, 2));
     // Ensure POST method is used
     const response = await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
       headers: { "Content-Type": "application/json" },
@@ -924,7 +938,7 @@ async function executeRoute(route, amount) {
 // Main function
 async function processMarketData() {
   try {
-    const marketData = await gatherMarketData();
+     await gatherMarketData();
 
   } catch (error) {
     console.error("Error in processing market data:", error.message);
