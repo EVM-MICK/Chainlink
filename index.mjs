@@ -714,12 +714,6 @@ async function gatherMarketData() {
     await sendMarketDataToGo(marketData);
     console.log("Market data sent successfully to Go backend.");
 
-    // Log the compiled payload for debugging
-    // // Send the compiled data to the Go backend
-    // const response1 = await sendMarketDataToGo(marketData);
-
-    // console.log("Go backend response:", response.data);
-    // return response1.data;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
@@ -890,6 +884,7 @@ async function sendMarketDataToGo(marketData) {
 
     throw error; // Rethrow to allow higher-level handling
   }
+}
 
 async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   let attempts = 0;
@@ -938,13 +933,6 @@ async function processMarketData() {
   try {
     const marketData = await gatherMarketData();
 
-    // // Cache compiled market data
-    // const cacheKey = "marketData";
-    // await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
-    // console.log("Market data cached successfully.");
-
-    // Send data to Go backend
-    //await sendMarketDataToGo(marketData);
   } catch (error) {
     console.error("Error in processing market data:", error.message);
     await sendTelegramMessage(`❌ Error in market data processing: ${error.message}`, true);
