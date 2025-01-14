@@ -568,73 +568,41 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
 
-  const liquidity = []; // Array to hold all token pair data in the required format
+  const liquidity = []; // Array to hold all token pair data
 
   for (const targetToken of stableAddresses) {
-    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue; // Skip cases where the base token is the same as the target token
+    // Skip fetching for base token -> base token
+    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue;
 
     try {
-      // Fetch liquidity data for the token pair
+      // Fetch liquidity data for the baseToken -> targetToken pair
       const data = await rateLimitedRequest1(() =>
         fetchLiquidityData(baseToken, targetToken, amount)
       );
 
-      // Check if the response contains valid protocols
-      if (!data || !data.protocols) {
-        console.warn(`No protocols found for pair ${baseToken} -> ${targetToken}`);
-        continue;
-      }
+      if (data) {
+        // Push the full liquidity data as returned by the API, without filtering
+        liquidity.push({
+          baseToken,               // Base token address (USDC)
+          targetToken,             // Target token address (e.g., WBTC)
+          dstAmount: data.dstAmount, // Destination amount
+          gas: data.gas,           // Gas required
+          protocols: data.protocols, // Full protocols information
+        });
 
-      // Process each route in the `protocols` field
-     const tokenPairLiquidity = data.protocols.map((route) =>
-  route.map((step) =>
-    step.map((protocol) => {
-      if (
-        protocol.name && // Ensure protocol name exists
-        protocol.part > 0 && // Ensure part is greater than 0
-        /^0x[a-fA-F0-9]{40}$/.test(protocol.fromTokenAddress) && // Validate Ethereum address
-        /^0x[a-fA-F0-9]{40}$/.test(protocol.toTokenAddress) // Validate Ethereum address
-      ) {
-        // Include all fields from the protocol object
-        return {
-          name: protocol.name,
-          part: protocol.part,
-          fromTokenAddress: protocol.fromTokenAddress,
-          toTokenAddress: protocol.toTokenAddress,
-          ...protocol, // Spread operator to include any additional fields dynamically
-        };
+        console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
       } else {
-        console.warn(
-          `Invalid protocol data skipped for pair ${baseToken} -> ${targetToken}:`,
-          protocol
-        );
-        return null; // Skip invalid protocol
+        console.warn(`No liquidity data returned for ${baseToken} -> ${targetToken}`);
       }
-    }).filter((protocol) => protocol !== null) // Remove null protocols
-  ).filter((step) => step.length > 0) // Remove empty steps
-  ).filter((route) => route.length > 0); // Remove empty routes
-
-      // Skip if no valid paths were found
-      if (tokenPairLiquidity.length === 0) {
-        console.warn(`No valid paths for pair ${baseToken} -> ${targetToken}`);
-        continue;
-      }
-
-      // Add this token pair's liquidity data to the overall liquidity array
-      liquidity.push({
-        baseToken, // Source token address
-        targetToken, // Target token address
-        dstAmount: data.dstAmount, // Destination amount from API response
-        gas: data.gas, // Gas information from API response
-        paths: tokenPairLiquidity, // All processed paths for this token pair
-      });
     } catch (error) {
       console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
     }
   }
 
-  return liquidity; // Return the complete liquidity array
+  console.log(`Total liquidity pairs fetched: ${liquidity.length}`);
+  return liquidity; // Return the full liquidity array
 }
+
 
 // Helper function for delay
 function delay(ms) {
@@ -686,31 +654,40 @@ async function gatherMarketData() {
     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
     const amount = "100000000000"; // Example amount
 
-    // Step 3: Fetch all liquidity data
-    console.log("Fetching liquidity data for all tokens...");
-    const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
+    // Step 3: Fetch all liquidity data for the token pairs
+    console.log("Fetching liquidity data for all token pairs...");
+    const liquidityData = [];
 
-    // Step 4: Validate liquidity data completeness
-    const missingLiquidityTokens = HARDCODED_STABLE_ADDRESSES.filter(
-      (token) => !liquidityData.some((entry) => entry.targetToken.toLowerCase() === token.toLowerCase())
-    );
+    for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
+      // Skip base token to itself
+      if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
-    if (missingLiquidityTokens.length > 0) {
-      console.warn(
-        `Missing liquidity data for tokens: ${missingLiquidityTokens.join(", ")}`
-      );
+      try {
+        // Fetch liquidity data for the base token to the current target token
+        const data = await fetchLiquidityData(baseToken, targetToken, amount);
+
+        // Ensure the response has data and add it to the liquidity array
+        if (data) {
+          liquidityData.push({
+            baseToken,                // Source token address (e.g., USDC)
+            targetToken,              // Target token address (e.g., WBTC)
+            dstAmount: data.dstAmount, // Destination amount
+            gas: data.gas,             // Gas information
+            protocols: data.protocols, // Nested protocols information
+          });
+
+          console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
+        } else {
+          console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
+        }
+      } catch (error) {
+        console.error(`Error fetching liquidity data for ${baseToken} -> ${targetToken}:`, error.message);
+      }
     }
 
-    // Step 5: Transform liquidity data for the Go backend
-    const compiledLiquidity = liquidityData.map((entry) => ({
-      baseToken: entry.baseToken,
-      targetToken: entry.targetToken,
-      dstAmount: entry.dstAmount,
-      gas: entry.gas,
-      paths: entry.paths, // Nested paths for the token pair
-    }));
+    console.log(`Total liquidity data collected: ${liquidityData.length} pairs.`);
 
-    // Step 6: Construct the market data payload
+    // Step 4: Construct the market data payload
     const marketData = {
       chainId: CHAIN_ID, // Ensure CHAIN_ID is defined elsewhere in your code
       startToken: baseToken, // The base token (e.g., USDC)
@@ -718,13 +695,13 @@ async function gatherMarketData() {
       maxHops: 3, // Maximum hops allowed in the route
       profitThreshold: "500000000", // Minimum profit threshold (adjust as needed)
       tokenPrices, // Token prices fetched earlier
-      liquidity: compiledLiquidity, // Transformed liquidity data
+      liquidity: liquidityData, // Full liquidity data for all pairs
     };
 
     console.log("Market data compiled successfully:");
     console.log(JSON.stringify(marketData, null, 2));
 
-    // Step 7: Send the compiled data to the Go backend
+    // Step 5: Send the compiled data to the Go backend
     console.log("Sending market data to Go backend...");
     await sendMarketDataToGo(marketData);
     console.log("Market data sent successfully to Go backend.");
@@ -735,6 +712,7 @@ async function gatherMarketData() {
     throw error;
   }
 }
+
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
