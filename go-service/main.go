@@ -388,45 +388,49 @@ func isTokenHardcoded(tokenAddress string) bool {
 }
 
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
-    // Ensure the request is a POST
+    // Allow only POST requests
     if r.Method != http.MethodPost {
+        log.Printf("Invalid request method: %s", r.Method)
         http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
         return
     }
 
-    // Parse the request body
+    // Parse and decode the JSON request body
     var marketData struct {
         ChainID         int64                      `json:"chainId"`
         StartToken      string                     `json:"startToken"`
-        StartAmount     string                     `json:"startAmount"` // Use string to safely parse large values
+        StartAmount     string                     `json:"startAmount"` // Use string for large numbers
         MaxHops         int                        `json:"maxHops"`
-        ProfitThreshold string                     `json:"profitThreshold"` // Use string for consistency with big.Int
+        ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
         TokenPrices     map[string]float64        `json:"tokenPrices"`
         Liquidity       []LiquidityData           `json:"liquidity"`
     }
 
     if err := json.NewDecoder(r.Body).Decode(&marketData); err != nil {
         log.Printf("Failed to decode request body: %v", err)
-        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        http.Error(w, "Invalid request body. Please send valid JSON.", http.StatusBadRequest)
         return
     }
 
-    // Validate mandatory fields
+    // Validate required fields
     if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
-        http.Error(w, "Missing required fields in request body", http.StatusBadRequest)
+        log.Println("Missing required fields in the request body")
+        http.Error(w, "Missing required fields: 'startToken', 'startAmount', or 'liquidity'", http.StatusBadRequest)
         return
     }
 
     // Convert StartAmount and ProfitThreshold to *big.Int
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok {
-        http.Error(w, "Invalid startAmount value", http.StatusBadRequest)
+        log.Printf("Invalid startAmount value: %s", marketData.StartAmount)
+        http.Error(w, "Invalid 'startAmount' value. Must be a valid integer string.", http.StatusBadRequest)
         return
     }
 
     profitThreshold := new(big.Int)
     if _, ok := profitThreshold.SetString(marketData.ProfitThreshold, 10); !ok {
-        http.Error(w, "Invalid profitThreshold value", http.StatusBadRequest)
+        log.Printf("Invalid profitThreshold value: %s", marketData.ProfitThreshold)
+        http.Error(w, "Invalid 'profitThreshold' value. Must be a valid integer string.", http.StatusBadRequest)
         return
     }
 
@@ -439,12 +443,12 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         profitThreshold,
     )
     if err != nil {
-        log.Printf("Failed to generate routes: %v", err)
-        http.Error(w, "Failed to generate routes", http.StatusInternalServerError)
+        log.Printf("Error generating routes: %v", err)
+        http.Error(w, "Failed to generate routes. Internal server error.", http.StatusInternalServerError)
         return
     }
 
-    // Respond with the generated routes
+    // Prepare and send the response
     response := struct {
         Routes []Route `json:"routes"`
     }{
@@ -454,13 +458,12 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     if err := json.NewEncoder(w).Encode(response); err != nil {
         log.Printf("Failed to encode response: %v", err)
-        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+        http.Error(w, "Failed to encode response. Internal server error.", http.StatusInternalServerError)
         return
     }
 
-    log.Println("Routes generated and sent successfully")
+    log.Println("Routes generated and sent successfully.")
 }
-
 
 func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
       // Declare result and err
@@ -3521,18 +3524,19 @@ func wsBroadcastManager() {
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // Allow requests from all origins (you can restrict this if needed)
+        // Set CORS headers
         w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        
+
         // Handle preflight (OPTIONS) requests
-        if r.Method == "OPTIONS" {
+        if r.Method == http.MethodOptions {
+            log.Println("Handling CORS preflight request")
             w.WriteHeader(http.StatusOK)
             return
         }
 
-        // Call the next handler
+        // Call the next handler for other methods
         next(w, r)
     }
 }
