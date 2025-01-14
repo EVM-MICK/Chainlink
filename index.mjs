@@ -854,36 +854,26 @@ async function sendMarketDataToGo(marketData) {
   try {
     console.log("Sending market data to Go backend...");
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
+    console.log("Go backend URL:", process.env.GO_BACKEND_URL);
 
-    // Use retryRequest3 with proper return
+    // Ensure POST method is used
     const response = await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 5000, // Timeout in milliseconds
-      });
-  
+      headers: { "Content-Type": "application/json" },
+      timeout: 5000,
+    });
 
-    // Handle successful response
-    if (response.status === 200) {
-      console.log("Market data successfully sent to Go backend:", response.data);
-      return response.data;
-    } else {
-      console.error(
-        `Go backend responded with error: ${response.status} - ${response.statusText}`
-      );
-      throw new Error(`Unexpected response from backend: ${response.statusText}`);
-    }
+    console.log("Market data successfully sent to Go backend:", response.data);
+    return response.data;
   } catch (error) {
     console.error("Error sending market data to Go backend:", error.message);
-
-    // Log detailed backend response for debugging
+    console.error("Request method likely used:", error.config?.method || "unknown");
     if (error.response) {
-      console.error("Backend response data:", error.response.data);
-      console.error("Backend response status:", error.response.status);
+      console.error("Backend response:", error.response.data);
     }
-
-    throw error; // Rethrow to allow higher-level handling
+    throw error;
   }
 }
+
 
 async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   let attempts = 0;
