@@ -850,24 +850,16 @@ function checkCircuitBreaker() {
 // Function to send data to the Go backend for computation
 async function sendMarketDataToGo(marketData) {
   try {
-    // Log payload before sending
     console.log("Sending market data to Go backend...");
-    console.log("Payload being sent:", JSON.stringify(marketData, null, 2)); // Debugging
+    console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
-    // Validate required fields in marketData
-    if (!marketData || typeof marketData !== "object" || !marketData.chainId) {
-      throw new Error("Invalid market data payload: Missing required fields");
-    }
-
-    // Define retry logic
     const response = await retryRequest3(async () => {
-      return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData, {
-        headers: { "Content-Type": "application/json" }, // Ensure JSON payload is specified
-        timeout: 5000, // Set a timeout to avoid hanging requests
+      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+        headers: { "Content-Type": "application/json" }, // Specify JSON payload
+        timeout: 5000,
       });
     });
 
-    // Handle success and non-200 responses
     if (response.status === 200) {
       console.log("Market data successfully sent to Go backend:", response.data);
       return response.data;
@@ -878,17 +870,14 @@ async function sendMarketDataToGo(marketData) {
       throw new Error(`Unexpected response from backend: ${response.statusText}`);
     }
   } catch (error) {
-    // Log and rethrow errors for higher-level handling
     console.error("Error sending market data to Go backend:", error.message);
-    console.error("Stack trace:", error.stack);
-
     if (error.response) {
       console.error("Backend response:", error.response.data);
     }
-
     throw error;
   }
 }
+
 
 async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   let attempts = 0;
