@@ -856,12 +856,11 @@ async function sendMarketDataToGo(marketData) {
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
     // Use retryRequest3 with proper return
-    const response = await retryRequest3(async () => {
-      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+    const response = await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
         headers: { "Content-Type": "application/json" },
         timeout: 5000, // Timeout in milliseconds
       });
-    });
+  
 
     // Handle successful response
     if (response.status === 200) {
