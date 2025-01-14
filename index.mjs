@@ -703,7 +703,7 @@ async function gatherMarketData() {
       tokenPrices, // Token prices fetched earlier
       liquidity: compiledLiquidity, // Transformed liquidity data
     };
-  console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
+  //console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
 
      const cacheKey = "marketData";
     console.log(`Caching market data with key: ${cacheKey}`);
@@ -714,11 +714,7 @@ async function gatherMarketData() {
     await sendMarketDataToGo(marketData);
     console.log("Market data sent successfully to Go backend.");
 
-
-
     // Log the compiled payload for debugging
-    
-
     // // Send the compiled data to the Go backend
     // const response1 = await sendMarketDataToGo(marketData);
 
@@ -865,13 +861,15 @@ async function sendMarketDataToGo(marketData) {
     console.log("Sending market data to Go backend...");
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
+    // Use retryRequest3 with proper return
     const response = await retryRequest3(async () => {
-  return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
-    headers: { "Content-Type": "application/json" },
-    timeout: 5000,
-  });
-  });
+      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 5000, // Timeout in milliseconds
+      });
+    });
 
+    // Handle successful response
     if (response.status === 200) {
       console.log("Market data successfully sent to Go backend:", response.data);
       return response.data;
@@ -883,12 +881,15 @@ async function sendMarketDataToGo(marketData) {
     }
   } catch (error) {
     console.error("Error sending market data to Go backend:", error.message);
+
+    // Log detailed backend response for debugging
     if (error.response) {
-      console.error("Backend response:", error.response.data);
+      console.error("Backend response data:", error.response.data);
+      console.error("Backend response status:", error.response.status);
     }
-    throw error;
+
+    throw error; // Rethrow to allow higher-level handling
   }
-}
 
 async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   let attempts = 0;
