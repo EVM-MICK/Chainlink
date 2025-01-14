@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import dotenv from "dotenv"
 import fetch from "node-fetch"; // Ensure you have node-fetch installed
 import express from "express";
 import axios from "axios";
