@@ -1,4 +1,4 @@
-import dotenv from "dotenv"
+import dotenv from "dotenv";
 import fetch from "node-fetch"; // Ensure you have node-fetch installed
 import express from "express";
 import axios from "axios";
@@ -854,10 +854,18 @@ async function sendMarketDataToGo(marketData) {
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
     const response = await retryRequest3(async () => {
-      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
-        headers: { "Content-Type": "application/json" }, // Specify JSON payload
-        timeout: 5000,
-      });
+      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, {
+  chainId: marketData.chainId,
+  startToken: marketData.startToken,
+  startAmount: marketData.startAmount,
+  maxHops: marketData.maxHops,
+  profitThreshold: marketData.profitThreshold,
+  tokenPrices: marketData.tokenPrices,
+  liquidity: marketData.liquidity,
+}, {
+  headers: { "Content-Type": "application/json" },
+  timeout: 5000,
+})
     });
 
     if (response.status === 200) {
@@ -899,7 +907,6 @@ async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   }
 }
 
-
 // Integration with Go Backend
 async function executeRoute(route, amount) {
   try {
@@ -918,7 +925,6 @@ async function executeRoute(route, amount) {
   }
 }
 
-
 // Main function
 async function processMarketData() {
   try {
@@ -930,13 +936,12 @@ async function processMarketData() {
     console.log("Market data cached successfully.");
 
     // Send data to Go backend
-    await sendMarketDataToGo(marketData);
+    //await sendMarketDataToGo(marketData);
   } catch (error) {
     console.error("Error in processing market data:", error.message);
     await sendTelegramMessage(`❌ Error in market data processing: ${error.message}`, true);
   }
 }
-
 
 async function fetchLiquidityForAllPairs(baseToken, amount) {
   try {
@@ -960,7 +965,6 @@ async function fetchLiquidityForAllPairs(baseToken, amount) {
     throw error;
   }
 }
-
 
 // Mempool Monitoring and Live Data Retrieval
 async function monitorMempool(targetContracts) {
