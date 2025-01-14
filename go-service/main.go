@@ -388,7 +388,7 @@ func isTokenHardcoded(tokenAddress string) bool {
 }
 
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
-    // Allow only POST requests
+    log.Printf("Incoming request: %s %s\n", r.Method, r.URL.Path)
     if r.Method != http.MethodPost {
         log.Printf("Invalid request method: %s", r.Method)
         http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
