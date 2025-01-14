@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import fetch from "node-fetch"; // Ensure you have node-fetch installed
+import express from "express";
 import axios from "axios";
 import Web3 from "web3";
 import { BigNumber } from "bignumber.js";
@@ -137,6 +138,10 @@ const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
 
 // Initialize Permit2 contract instance
 const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
+// Initialize Express app
+const app = express();
+app.use(express.json());
+
 
 // Add private key to Web3 wallet
 const account = web3.eth.accounts.privateKeyToAccount(PRIVATE_KEY);
@@ -828,6 +833,38 @@ async function sendTelegramMessage(message) {
     console.error('Failed to send Telegram message:', error.message);
   }
 }
+
+// Endpoint to receive profitable routes
+app.post('/notify-routes', async (req, res) => {
+    const { routes } = req.body;
+
+    if (!routes || routes.length === 0) {
+        return res.status(400).json({ message: "No routes provided." });
+    }
+
+    // Format the message for Telegram
+    const message = routes
+        .map((route, index) => {
+            return `Route ${index + 1}:\nPath: ${route.path.join(' ➡️ ')}\nProfit: ${(parseFloat(route.profit) / 1e18).toFixed(2)} USDC`;
+        })
+        .join('\n\n');
+
+    // Send the formatted message to Telegram
+    try {
+        await sendTelegramMessage(`Profitable Routes Found:\n\n${message}`);
+        console.log("Notification sent to Telegram.");
+        res.status(200).json({ message: "Notification sent successfully." });
+    } catch (error) {
+        console.error("Failed to send Telegram notification:", error.message);
+        res.status(500).json({ message: "Failed to send Telegram notification." });
+    }
+});
+
+// Start the Express server
+const PORT = process.env.PORT ||  8080;
+app.listen(PORT, () => {
+    console.log(`Node.js server listening on port ${PORT}`);
+});
 
 async function handleCriticalError(error, context = '') {
   log(`Critical Error: ${error.message} ${context}`, 'error');
