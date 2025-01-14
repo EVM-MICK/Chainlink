@@ -1513,7 +1513,6 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
             log.Printf("Skipping liquidity item due to invalid dstAmount: %+v", liquidityItem)
             continue
         }
-
         gas := uint64(0)
         if gasFloat, ok := liquidityItem["gas"].(float64); ok {
             gas = uint64(gasFloat)
