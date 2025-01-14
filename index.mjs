@@ -705,10 +705,10 @@ async function gatherMarketData() {
     };
   //console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
 
-     const cacheKey = "marketData";
-    console.log(`Caching market data with key: ${cacheKey}`);
-    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
-    console.log("Market data cached successfully.");
+    //  const cacheKey = "marketData";
+    // console.log(`Caching market data with key: ${cacheKey}`);
+    // await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
+    // console.log("Market data cached successfully.");
 
     console.log("Sending market data to Go backend...");
     await sendMarketDataToGo(marketData);
