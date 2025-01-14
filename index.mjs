@@ -496,6 +496,10 @@ async function cachedFetchPrices(tokenAddresses) {
   });
 }
 
+axios.interceptors.request.use((config) => {
+  console.log("Axios Request Config:", JSON.stringify(config, null, 2));
+  return config;
+});
 
 async function fetchTokenPrices(tokens) {
   validateAddresses(tokens);
@@ -852,8 +856,9 @@ async function sendMarketDataToGo(marketData) {
   headers: { "Content-Type": "application/json" },
  });
 console.log("Market data gathered:", JSON.stringify(marketData, null, 2));
+    const url = `${process.env.GO_BACKEND_URL}/process-market-data`;
     // Ensure POST method is used
-    const response = await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+  const response = await axios.post(url, marketData, {
       headers: { "Content-Type": "application/json" },
       timeout: 5000,
     });
