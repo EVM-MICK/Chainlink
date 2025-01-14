@@ -854,7 +854,7 @@ async function sendMarketDataToGo(marketData) {
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
     const response = await retryRequest3(async () => {
-      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, {
+      await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, {
   chainId: marketData.chainId,
   startToken: marketData.startToken,
   startAmount: marketData.startAmount,
