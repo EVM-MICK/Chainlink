@@ -967,7 +967,7 @@ async function executeRoute(route, amount) {
   try {
     log(`Executing route: ${route.join(' ➡️ ')} with amount: ${amount.toFixed()}`);
     const response = await retryRequest(() =>
-      axios.post(`${process.env.}/execute`, { route, amount: amount.toFixed() })
+      axios.post(`${process.env.GO_BACKEND_URL}/execute`, { route, amount: amount.toFixed() })
     );
     if (response.status !== 200) {
       throw new Error(`Execution failed with status: ${response.status}`);
