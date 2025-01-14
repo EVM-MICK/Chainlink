@@ -866,11 +866,11 @@ async function sendMarketDataToGo(marketData) {
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
     const response = await retryRequest3(async () => {
-    axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
-  headers: { "Content-Type": "application/json" }, // Specify JSON payload
-  timeout: 5000,
-})
-    });
+  return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 5000,
+  });
+  });
 
     if (response.status === 200) {
       console.log("Market data successfully sent to Go backend:", response.data);
@@ -890,7 +890,6 @@ async function sendMarketDataToGo(marketData) {
   }
 }
 
-
 async function retryRequest3(requestFn, retries = 3, delay = 1000) {
   let attempts = 0;
 
@@ -902,14 +901,18 @@ async function retryRequest3(requestFn, retries = 3, delay = 1000) {
 
       if (attempts >= retries) {
         console.error(`Failed after ${retries} attempts:`, error.message);
+        if (error.response) {
+          console.error("Error response data:", error.response.data);
+        }
         throw error;
       }
 
-      console.warn(`Retrying request (${attempts}/${retries})...`);
+      console.warn(`Retrying request (${attempts}/${retries}) due to error: ${error.message}`);
       await new Promise((resolve) => setTimeout(resolve, delay * attempts)); // Exponential backoff
     }
   }
 }
+
 
 // Integration with Go Backend
 async function executeRoute(route, amount) {
