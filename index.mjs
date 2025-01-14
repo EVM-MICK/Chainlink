@@ -176,8 +176,6 @@ validateEnvVars([
   "CHAIN_ID",
 ]);
 
-
-
 // Helper function to construct 1inch API URLs
 /**
  * Generic function to make HTTP GET requests using Axios.
@@ -691,7 +689,6 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-
 async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -724,52 +721,6 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
   throw new Error("Maximum retry attempts exceeded.");
 }
-
-
-// Main function to gather all critical data
-// async function gatherMarketData() {
-//   try {
-//     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-//     const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-//     const amount = "100000000000";
-
-//     // Fetch and validate all liquidity data
-//     const liquidityData = await fetchAllLiquidityData(baseToken, amount, HARDCODED_STABLE_ADDRESSES);
-
-//     if (!liquidityData || liquidityData.length === 0) {
-//       throw new Error("No valid liquidity data found.");
-//     }
-
-//     // Transform liquidity data into the correct structure for the Go backend
-//     const compiledLiquidity = liquidityData
-//       .filter((entry) => entry && entry.includeProtocols && Array.isArray(entry.includeProtocols)) // Filter out invalid entries
-//       .map((entry) =>
-//         entry.includeProtocols.map((protocol) => ({
-//           name: protocol.name,
-//           part: protocol.part,
-//           fromTokenAddress: protocol.fromTokenAddress,
-//           toTokenAddress: protocol.toTokenAddress,
-//         }))
-//       );
-
-//     const marketData = {
-//       chainId: CHAIN_ID,
-//       startToken: baseToken,
-//       startAmount: amount,
-//       maxHops: 3,
-//       profitThreshold: "500000000", // Adjust as per your logic
-//       tokenPrices,
-//       liquidity: compiledLiquidity,
-//     };
-
-//     console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2)); // Debugging
-
-//     return marketData;
-//   } catch (error) {
-//     console.error("Error gathering market data:", error.message);
-//     throw error;
-//   }
-// }
 
 async function gatherMarketData() {
   try {
@@ -815,8 +766,6 @@ async function gatherMarketData() {
   }
 }
 
-
-
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -861,7 +810,7 @@ app.post('/notify-routes', async (req, res) => {
 });
 
 // Start the Express server
-const PORT = process.env.PORT ||  8080;
+const PORT = process.env.PORT1 || 3000;
 app.listen(PORT, () => {
     console.log(`Node.js server listening on port ${PORT}`);
 });
