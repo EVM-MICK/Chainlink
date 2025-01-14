@@ -387,6 +387,80 @@ func isTokenHardcoded(tokenAddress string) bool {
 	return false
 }
 
+func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
+    // Ensure the request is a POST
+    if r.Method != http.MethodPost {
+        http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
+        return
+    }
+
+    // Parse the request body
+    var marketData struct {
+        ChainID         int64                      `json:"chainId"`
+        StartToken      string                     `json:"startToken"`
+        StartAmount     string                     `json:"startAmount"` // Use string to safely parse large values
+        MaxHops         int                        `json:"maxHops"`
+        ProfitThreshold string                     `json:"profitThreshold"` // Use string for consistency with big.Int
+        TokenPrices     map[string]float64        `json:"tokenPrices"`
+        Liquidity       []LiquidityData           `json:"liquidity"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&marketData); err != nil {
+        log.Printf("Failed to decode request body: %v", err)
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // Validate mandatory fields
+    if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
+        http.Error(w, "Missing required fields in request body", http.StatusBadRequest)
+        return
+    }
+
+    // Convert StartAmount and ProfitThreshold to *big.Int
+    startAmount := new(big.Int)
+    if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok {
+        http.Error(w, "Invalid startAmount value", http.StatusBadRequest)
+        return
+    }
+
+    profitThreshold := new(big.Int)
+    if _, ok := profitThreshold.SetString(marketData.ProfitThreshold, 10); !ok {
+        http.Error(w, "Invalid profitThreshold value", http.StatusBadRequest)
+        return
+    }
+
+    // Call the generateRoutes function
+    routes, err := generateRoutes(
+        marketData.ChainID,
+        marketData.StartToken,
+        startAmount,
+        marketData.MaxHops,
+        profitThreshold,
+    )
+    if err != nil {
+        log.Printf("Failed to generate routes: %v", err)
+        http.Error(w, "Failed to generate routes", http.StatusInternalServerError)
+        return
+    }
+
+    // Respond with the generated routes
+    response := struct {
+        Routes []Route `json:"routes"`
+    }{
+        Routes: routes,
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(response); err != nil {
+        log.Printf("Failed to encode response: %v", err)
+        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+        return
+    }
+
+    log.Println("Routes generated and sent successfully")
+}
+
 
 func fetchWithRetry(url string, headers map[string]string) ([]byte, error) {
       // Declare result and err
@@ -1333,7 +1407,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 }
 
 // REST API Handler for Route Generation
-func generateRoutesHandler(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
+func generateRoutes(chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
     // Validate the start token address
     if !common.IsHexAddress(startToken) {
         return nil, fmt.Errorf("invalid start token address: %s", startToken)
@@ -1351,7 +1425,7 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
     }
 
     // Generate token pairs and convert to LiquidityData
-    tokenPairs := generateTokenPairs(hardcodedStableTokens)
+    tokenPairs := generateTokenPairs(hardcodedStableAddresses)
     liquidityData := convertToLiquidityData(tokenPairs)
 
     // Build and process the graph using LiquidityData
@@ -3269,9 +3343,6 @@ func logMemoryUsage() {
         memStats.Alloc/1024, memStats.TotalAlloc/1024, memStats.Sys/1024, memStats.NumGC)
 }
 
-
-
-
 func monitorClientConnection(client *WebSocketClient) {
 	select {
 	case <-client.Disconnected:
@@ -3364,7 +3435,6 @@ func cleanupInactiveClients() {
     }
 }
 
-
 // Handle messages from a WebSocket client
 func handleMessages(client *WebSocketClient) {
 	defer func() {
@@ -3411,7 +3481,6 @@ func broadcastMessages() {
 		clientsMutex.Unlock() // Unlock after iterating
 	}
 }
-
 
 // Broadcast opportunities to WebSocket clients
 func wsBroadcastManager() {
@@ -3505,66 +3574,62 @@ func notifyNodeOfRoutes(routes []Route) error {
     return nil
 }
 
-
-
 // Main function
 func main() {
-	// Validate required environment variables
-	requiredVars := []string{"RPC_URL", "NODE_API_URL", "PRIVATE_KEY", "WALLET_ADDRESS"}
-	if err := validateEnvVars(requiredVars); err != nil {
-		log.Fatalf("Environment variables validation failed: %v", err)
-	}
+    // Validate required environment variables
+    requiredVars := []string{"RPC_URL", "NODE_API_URL", "PRIVATE_KEY", "WALLET_ADDRESS"}
+    if err := validateEnvVars(requiredVars); err != nil {
+        log.Fatalf("Environment variables validation failed: %v", err)
+    }
 
-	// Context with cancel function for graceful shutdown
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
+    // Context with cancel function for graceful shutdown
+    ctx, cancelFunc := context.WithCancel(context.Background())
+    defer cancelFunc()
 
-	// Handle OS signals for graceful shutdown
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-		log.Println("Shutdown signal received, cleaning up resources...")
-		cancelFunc()
-		shutdownWebSocketServer()
-	}()
-         
-         http.HandleFunc("/health", healthHandler)
-
-	// Define the `/process-market-data` route with CORS middleware
-	http.HandleFunc("/process-market-data", enableCORS(generateRoutesHandler))
-
-	// Start the HTTP server
-	port := ":8080" // Adjust as needed
-	log.Printf("Server running on port %s...", port)
-	if err := http.ListenAndServe(port, nil); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-	// Define target contracts for mempool monitoring
-	targetContracts := map[string]bool{
-		"0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
-		"0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
-	}
-
-	// Start monitoring the mempool
-	go func() {
-	if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("RPC_URL")); err != nil {
-		log.Printf("Mempool monitoring terminated: %v", err)
-		cancelFunc()
-	}
+    // Handle OS signals for graceful shutdown
+    go func() {
+        c := make(chan os.Signal, 1)
+        signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+        <-c
+        log.Println("Shutdown signal received, cleaning up resources...")
+        cancelFunc()
+        shutdownWebSocketServer()
     }()
 
-	// Start REST API server for route generation
-	http.HandleFunc("/generate-routes", generateRoutesHandler)
+    // Health endpoint
+    http.HandleFunc("/health", healthHandler)
 
-	// Monitor system health periodically
-	go monitorSystemHealth()
+    // Define the `/process-market-data` route with CORS middleware
+    http.HandleFunc("/process-market-data", enableCORS(generateRoutesHTTPHandler))
 
-	// Wait for shutdown
-	<-ctx.Done()
-	log.Println("System shutdown complete.")
+    // Start the HTTP server
+    port := ":8080" // Adjust as needed
+    log.Printf("Server running on port %s...", port)
+    if err := http.ListenAndServe(port, nil); err != nil {
+        log.Fatalf("Failed to start server: %v", err)
+    }
+
+    // Define target contracts for mempool monitoring
+    targetContracts := map[string]bool{
+        "0xE592427A0AEce92De3Edee1F18E0157C05861564": true, // Uniswap V3
+        "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F": true, // SushiSwap
+    }
+
+    // Start monitoring the mempool
+    go func() {
+        if err := monitorMempoolWithRetry(ctx, targetContracts, os.Getenv("RPC_URL")); err != nil {
+            log.Printf("Mempool monitoring terminated: %v", err)
+            cancelFunc()
+        }
+    }()
+
+    // Monitor system health periodically
+    go monitorSystemHealth()
+
+    // Wait for shutdown
+    <-ctx.Done()
+    log.Println("System shutdown complete.")
 }
-
 
 
 // Helper function to validate token address
