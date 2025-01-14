@@ -703,15 +703,27 @@ async function gatherMarketData() {
       tokenPrices, // Token prices fetched earlier
       liquidity: compiledLiquidity, // Transformed liquidity data
     };
+  console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
+
+     const cacheKey = "marketData";
+    console.log(`Caching market data with key: ${cacheKey}`);
+    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
+    console.log("Market data cached successfully.");
+
+    console.log("Sending market data to Go backend...");
+    await sendMarketDataToGo(marketData);
+    console.log("Market data sent successfully to Go backend.");
+
+
 
     // Log the compiled payload for debugging
-    console.log("Compiled market data payload:", JSON.stringify(marketData, null, 2));
+    
 
-    // Send the compiled data to the Go backend
-    const response = await sendMarketDataToGo(marketData);
+    // // Send the compiled data to the Go backend
+    // const response1 = await sendMarketDataToGo(marketData);
 
-    console.log("Go backend response:", response.data);
-    return response.data;
+    // console.log("Go backend response:", response.data);
+    // return response1.data;
   } catch (error) {
     console.error("Error gathering market data:", error.message);
     throw error;
@@ -930,10 +942,10 @@ async function processMarketData() {
   try {
     const marketData = await gatherMarketData();
 
-    // Cache compiled market data
-    const cacheKey = "marketData";
-    await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
-    console.log("Market data cached successfully.");
+    // // Cache compiled market data
+    // const cacheKey = "marketData";
+    // await setAsync(cacheKey, JSON.stringify(marketData), "EX", 60);
+    // console.log("Market data cached successfully.");
 
     // Send data to Go backend
     //await sendMarketDataToGo(marketData);
