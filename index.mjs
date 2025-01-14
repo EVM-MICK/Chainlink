@@ -106,7 +106,7 @@ const API_BASE_URL = `https://api.1inch.dev/price/v1.1/42161`;
 const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0/42161";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
-const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "https://chainlink-production-b42d.up.railway.app"; // Go service endpoint
+const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://successful-unity-production.up.railway.app"; // Go service endpoint
 const MARKET_DATA_INTERVAL_MS = 1 * 60 * 1000; // Every 1 minutes
 const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
@@ -963,7 +963,7 @@ async function sendMarketDataToGo(marketData) {
 
     // Define retry logic
     const response = await retryRequest3(async () => {
-      return axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData, {
+      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
         headers: { "Content-Type": "application/json" }, // Ensure JSON payload is specified
         timeout: 5000, // Set a timeout to avoid hanging requests
       });
