@@ -353,18 +353,6 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 }
 
 
-// Redis Cache Helper
-// async function cachedFetch(key, fetchFn, duration = CACHE_DURATION) {
-//   const cached = await redis.get(key);
-//   if (cached) {
-//     return JSON.parse(cached);
-//   }
-
-//   const data = await fetchFn();
-//   await redis.setex(key, duration, JSON.stringify(data));
-//   return data;
-// }
-
 async function cacheLiquidityData(baseToken, targetToken, liquidityData) {
   const cacheKey = `liquidity:${baseToken}-${targetToken}`;
   await redisClient.set(cacheKey, JSON.stringify(liquidityData), "EX", 300); // Cache for 5 minutes
@@ -576,42 +564,6 @@ async function fetchLiquidityData(fromToken, toToken, amount) {
     }
   });
 }
-
-
-/**
- * Fetch liquidity data for all token pairs relative to a base token.
- * @param {string} baseToken - The base token address (e.g., USDC).
- * @param {string} amount - The amount in the base token's smallest units.
- * @param {Array<string>} stableAddresses - List of target stable token addresses.
- * @returns {Promise<Array<object>>} - Array of liquidity data for each token pair.
- */
-// async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
-//   console.log(`Fetching liquidity data for base token: ${baseToken}`);
-
-//   const results = [];
-
-//   for (const targetToken of stableAddresses) {
-//     if (targetToken !== baseToken) {
-//       try {
-//         const data = await rateLimitedRequest1(() =>
-//           fetchLiquidityData(baseToken, targetToken, amount)
-//         );
-//         console.log(
-//           `Liquidity data for ${baseToken} -> ${targetToken}:`,
-//           JSON.stringify(data, null, 2)
-//         );
-//         results.push({ baseToken, targetToken, data });
-//       } catch (error) {
-//         console.error(
-//           `Error fetching liquidity for ${baseToken} -> ${targetToken}:`,
-//           error.message
-//         );
-//       }
-//     }
-//   }
-
-//   return results;
-// }
 
 async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
   console.log(`Fetching liquidity data for base token: ${baseToken}`);
@@ -840,9 +792,6 @@ async function sendErrorSummary() {
   errorSummary.clear(); // Reset the summary map after sending
 }
 
-// Schedule periodic error summaries
-//setInterval(sendErrorSummary, ERROR_SUMMARY_INTERVAL);
-
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
     const domain = {
@@ -1064,7 +1013,7 @@ async function monitorMempool(targetContracts) {
 
             // Call backend to evaluate transaction profitability
             const response = await retryRequest(() =>
-              axios.post(`${process.env.}/evaluate`, { txHash: tx.hash, tokenPrices })
+              axios.post(`${process.env.INFURA_WS_URL}/evaluate`, { txHash: tx.hash, tokenPrices })
             );
 
             if (response.status === 200 && response.data.profit > 0) {
