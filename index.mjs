@@ -866,16 +866,8 @@ async function sendMarketDataToGo(marketData) {
     console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
 
     const response = await retryRequest3(async () => {
-      await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, {
-  chainId: marketData.chainId,
-  startToken: marketData.startToken,
-  startAmount: marketData.startAmount,
-  maxHops: marketData.maxHops,
-  profitThreshold: marketData.profitThreshold,
-  tokenPrices: marketData.tokenPrices,
-  liquidity: marketData.liquidity,
-}, {
-  headers: { "Content-Type": "application/json" },
+    axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+  headers: { "Content-Type": "application/json" }, // Specify JSON payload
   timeout: 5000,
 })
     });
