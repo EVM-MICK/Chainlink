@@ -3522,20 +3522,27 @@ func wsBroadcastManager() {
     }
 }
 
+func logRequests(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        log.Printf("Incoming request: %s %s %s", r.Method, r.URL.Path, r.Proto)
+        next.ServeHTTP(w, r)
+    })
+}
+
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        
-        if r.Method == "OPTIONS" {
+
+        if r.Method == http.MethodOptions {
             w.WriteHeader(http.StatusOK)
             return
         }
-
         next(w, r)
     }
 }
+
 
 func notifyNodeOfRoutes(routes []Route) error {
     if len(routes) == 0 {
@@ -3598,9 +3605,11 @@ func main() {
 
     // Health endpoint
     http.HandleFunc("/health", healthHandler)
-
-    // Define the `/process-market-data` route with CORS middleware
-    http.HandleFunc("/process-market-data", enableCORS(generateRoutesHTTPHandler))
+    http.Handle("/process-market-data", logRequests(enableCORS(generateRoutesHTTPHandler)))
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        log.Printf("Received %s request for %s", r.Method, r.URL.Path)
+        http.NotFound(w, r)
+    })
 
     // Start the HTTP server
     port := ":8080" // Adjust as needed
