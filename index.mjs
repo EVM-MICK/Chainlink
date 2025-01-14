@@ -853,8 +853,12 @@ function checkCircuitBreaker() {
 async function sendMarketDataToGo(marketData) {
   try {
     console.log("Sending market data to Go backend...");
-    console.log("Payload being sent:", JSON.stringify(marketData, null, 2));
-    console.log("Go backend URL:", process.env.GO_BACKEND_URL);
+  console.log("Request being sent:", {
+  url: `${process.env.GO_BACKEND_URL}/process-market-data`,
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  data: JSON.stringify(marketData, null, 2),
+ });
 
     // Ensure POST method is used
     const response = await axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
