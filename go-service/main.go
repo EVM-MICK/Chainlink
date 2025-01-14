@@ -1339,17 +1339,19 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
         return nil, fmt.Errorf("invalid start token address: %s", startToken)
     }
 
+    // Validate positive start amount and profit threshold
     if startAmount.Cmp(big.NewInt(0)) <= 0 || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("startAmount and profitThreshold must be positive values")
     }
 
     // Use hardcoded stable tokens to generate token pairs
     var stableTokenAddresses []string
-   for _, token := range hardcodedStableTokens {
-    stableTokenAddresses = append(stableTokenAddresses, token.Address)
-}
+    for _, token := range hardcodedStableTokens {
+        stableTokenAddresses = append(stableTokenAddresses, token.Address)
+    }
 
-   tokenPairs := generateTokenPairs(stableTokenAddresses)
+    // Generate token pairs and convert to LiquidityData
+    tokenPairs := generateTokenPairs(hardcodedStableTokens)
     liquidityData := convertToLiquidityData(tokenPairs)
 
     // Build and process the graph using LiquidityData
@@ -1357,11 +1359,12 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
-    // Calculate average liquidity to adjust the max hops
-  averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
-  if err != nil {
-    log.Fatalf("Failed to calculate average liquidity: %v", err)
-     }
+
+    // Calculate average liquidity to adjust max hops
+    averageLiquidity, err := calculateAverageLiquidity(stableTokenAddresses, chainID, startToken)
+    if err != nil {
+        log.Fatalf("Failed to calculate average liquidity: %v", err)
+    }
     log.Printf("Average Liquidity: %s", averageLiquidity.String())
     maxHops = adjustMaxHops(maxHops, averageLiquidity)
 
@@ -1369,7 +1372,7 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
     var mu sync.Mutex
     var wg sync.WaitGroup
 
-    // Iterate over all end tokens and find routes
+    // Iterate over all end tokens and find profitable routes
     for _, endToken := range hardcodedStableTokens {
         if strings.EqualFold(endToken.Address, startToken) {
             continue
@@ -1379,13 +1382,13 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
         go func(endToken Token) {
             defer wg.Done()
 
-            // Use Dijkstra's algorithm to find the shortest path
+            // Find the shortest path using Dijkstra's algorithm
             path, cost, err := ComputeOptimalRoute(graph, startToken, endToken.Address, false)
             if err != nil || len(path) <= 1 {
                 return
             }
 
-            // Convert `cost` from *big.Float to *big.Int for compatibility
+            // Convert cost from *big.Float to *big.Int for compatibility
             costInt := new(big.Int)
             cost.Int(costInt)
 
@@ -1404,6 +1407,11 @@ func generateRoutesHandler(chainID int64, startToken string, startAmount *big.In
     }
 
     wg.Wait()
+
+    // Notify Node.js script of the profitable routes
+    if err := notifyNodeOfRoutes(profitableRoutes); err != nil {
+        log.Printf("Failed to notify Node.js script of routes: %v", err)
+    }
 
     // Execute profitable routes
     for _, route := range profitableRoutes {
@@ -3459,6 +3467,43 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
         // Call the next handler
         next(w, r)
     }
+}
+
+func notifyNodeOfRoutes(routes []Route) error {
+    if len(routes) == 0 {
+        log.Println("No profitable routes to notify.")
+        return nil
+    }
+
+    // Construct the payload
+    payload := map[string]interface{}{
+        "routes": routes,
+    }
+
+    // Convert payload to JSON
+    jsonData, err := json.Marshal(payload)
+    if err != nil {
+        return fmt.Errorf("failed to marshal routes payload: %v", err)
+    }
+
+    // Send to Node.js script
+    nodeURL := os.Getenv("NODE_URL") // URL of the Node.js script
+    if nodeURL == "" {
+        return fmt.Errorf("NODE_URL environment variable is not set")
+    }
+
+    resp, err := http.Post(nodeURL, "application/json", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return fmt.Errorf("failed to send routes to Node.js script: %v", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("received non-OK response from Node.js script: %d", resp.StatusCode)
+    }
+
+    log.Println("Successfully notified Node.js script of profitable routes.")
+    return nil
 }
 
 
