@@ -962,12 +962,17 @@ async function sendMarketDataToGo(marketData) {
     }
 
     // Define retry logic
-    const response = await retryRequest3(async () => {
-      return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
-        headers: { "Content-Type": "application/json" }, // Ensure JSON payload is specified
-        timeout: 5000, // Set a timeout to avoid hanging requests
-      });
-    });
+    const response = await axios.post(`${GO_BACKEND_URL}/process-market-data`, marketData, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 5000,
+});
+
+// await retryRequest3(async () => {
+//       return axios.post(`${process.env.GO_BACKEND_URL}/process-market-data`, marketData, {
+//         headers: { "Content-Type": "application/json" }, // Ensure JSON payload is specified
+//         timeout: 5000, // Set a timeout to avoid hanging requests
+//       });
+//     });
 
     // Handle success and non-200 responses
     if (response.status === 200) {
