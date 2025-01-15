@@ -612,7 +612,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
+async function rateLimitedRequest1(fn, retries = 3, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const now = Date.now();
@@ -625,18 +625,18 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
       }
 
       lastRequestTimestamp = Date.now(); // Update timestamp
-      return await fn(); // Execute the request
+      return await fn(); // Execute the function
     } catch (err) {
       if (err.response?.status === 429) {
-        const retryAfter = parseInt(err.response.headers["retry-after"], 10) || delay / 1000;
+        const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
         console.warn(`Rate-limited. Retrying after ${retryAfter} seconds...`);
         await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
       } else if (attempt === retries) {
         console.error(`Request failed after ${retries} retries:`, err.message);
         throw err;
       } else {
-        const backoff = delay * Math.pow(2, attempt - 1);
-        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms: ${err.message}`);
+        const backoff = delay * Math.pow(2, attempt - 1); // Exponential backoff
+        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms due to error: ${err.message}`);
         await new Promise((resolve) => setTimeout(resolve, backoff));
       }
     }
@@ -644,6 +644,7 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
 
   throw new Error("Maximum retry attempts exceeded.");
 }
+
 
 async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
   const tokenPriceInUSD = tokenPrices[baseToken.toLowerCase()]; // Fetch price for baseToken
