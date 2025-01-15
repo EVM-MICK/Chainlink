@@ -21,7 +21,6 @@ import (
 	"math"
         "runtime"
 	"errors"
-        "sort"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -125,6 +124,16 @@ type PermitDetails struct {
 type WeightedGraph struct {
 	AdjacencyList map[string]map[string]EdgeWeight // Nested maps for graph edges
 }
+
+type marketData struct {
+        ChainID         int64                      `json:"chainId"`
+        StartToken      string                     `json:"startToken"`
+        StartAmount     string                     `json:"startAmount"` // Use string for large numbers
+        MaxHops         int                        `json:"maxHops"`
+        ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
+        TokenPrices     map[string]float64        `json:"tokenPrices"`
+        Liquidity       []LiquidityData           `json:"liquidity"`
+    }
 
 type EdgeWeight struct {
 	Weight    *big.Float // Weight of the edge (e.g., price or inverse liquidity)
@@ -1347,7 +1356,6 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
     log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
 
-    // Ignore GET requests (e.g., health checks) to /process-market-data
     if r.Method == http.MethodGet {
         log.Println("Ignoring health check GET request")
         w.WriteHeader(http.StatusOK)
@@ -1355,41 +1363,27 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Allow only POST requests
     if r.Method != http.MethodPost {
         log.Printf("Invalid request method: %s", r.Method)
         http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
         return
     }
 
-    // Process the POST request as usual
     log.Println("Processing POST request to /process-market-data")
 
-    // Parse and decode the JSON request body
-    var marketData struct {
-        ChainID         int64                      `json:"chainId"`
-        StartToken      string                     `json:"startToken"`
-        StartAmount     string                     `json:"startAmount"` // Use string for large numbers
-        MaxHops         int                        `json:"maxHops"`
-        ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
-        TokenPrices     map[string]float64        `json:"tokenPrices"`
-        Liquidity       []LiquidityData           `json:"liquidity"`
-    }
-
+    var marketData MarketData
     if err := json.NewDecoder(r.Body).Decode(&marketData); err != nil {
         log.Printf("Failed to decode request body: %v", err)
         http.Error(w, "Invalid request body. Please send valid JSON.", http.StatusBadRequest)
         return
     }
 
-    // Validate required fields
     if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
         log.Println("Missing required fields in the request body")
         http.Error(w, "Missing required fields: 'startToken', 'startAmount', or 'liquidity'", http.StatusBadRequest)
         return
     }
 
-    // Convert StartAmount and ProfitThreshold to *big.Int
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok {
         log.Printf("Invalid startAmount value: %s", marketData.StartAmount)
@@ -1404,21 +1398,14 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Call the generateRoutes function
-    routes, err := generateRoutes(
-        marketData.ChainID,
-        marketData.StartToken,
-        startAmount,
-        marketData.MaxHops,
-        profitThreshold,
-    )
+    // Call generateRoutes with MarketData directly
+    routes, err := generateRoutes(marketData)
     if err != nil {
         log.Printf("Error generating routes: %v", err)
         http.Error(w, "Failed to generate routes. Internal server error.", http.StatusInternalServerError)
         return
     }
 
-    // Prepare and send the response
     response := struct {
         Routes []Route `json:"routes"`
     }{
@@ -1666,6 +1653,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var wg sync.WaitGroup
 
     for _, endToken := range stableTokenAddresses {
+        // Skip routes where the start and end token are the same
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
         }
@@ -1683,6 +1671,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
+            // Calculate profit and check if it's above the threshold
             profit := new(big.Int).Sub(startAmount, costInt)
             if profit.Cmp(profitThreshold) > 0 {
                 mu.Lock()
@@ -1703,6 +1692,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
 
+    log.Printf("Generated %d profitable routes.", len(profitableRoutes))
     return profitableRoutes, nil
 }
 
@@ -2430,6 +2420,7 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
 }
 
 func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
+    // Initialize the graph structure
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
     var wg sync.WaitGroup
     edgeChan := make(chan struct {
@@ -2444,10 +2435,13 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
         go func(pair TokenPair) {
             defer wg.Done()
 
-            // Calculate weight
+            // Convert pair.Weight to *big.Float
+            weight := new(big.Float).SetFloat64(pair.Weight)
+
+            // Initialize edgeWeight with proper *big.Float types
             edgeWeight := EdgeWeight{
-                Weight:    pair.Weight,
-                Liquidity: 0, // Set Liquidity if available or remove if not needed
+                Weight:    weight,
+                Liquidity: big.NewFloat(0), // Default liquidity as 0
             }
 
             // Send edge data to the channel
@@ -2480,7 +2474,6 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
     log.Printf("Graph built with %d edges", len(graph.AdjacencyList))
     return graph, nil
 }
-
 
 func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilityFactor float64) float64 {
     gasPriceFloat, _ := gasPrice.Float64() // Convert *big.Float to float64
@@ -2581,14 +2574,10 @@ func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken
     // Iterate over liquidity data to compute total liquidity and count
     for _, entry := range liquidityData {
         if strings.EqualFold(entry.BaseToken, startToken) {
-            // Parse dstAmount into a *big.Float
-            liquidity, err := parseDstAmount(entry.DstAmount)
-            if err != nil {
-                log.Printf("Failed to parse liquidity for %s -> %s: %v", entry.BaseToken, entry.TargetToken, err)
-                continue
-            }
+            // Convert DstAmount from *big.Int to *big.Float
+            liquidity := new(big.Float).SetInt(entry.DstAmount)
 
-            // Accumulate total liquidity and increment count
+            // Accumulate total liquidity and increment count if liquidity is greater than zero
             if liquidity.Cmp(big.NewFloat(0)) > 0 {
                 totalLiquidity.Add(totalLiquidity, liquidity)
                 count++
