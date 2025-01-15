@@ -392,7 +392,7 @@ func isTokenHardcoded(tokenAddress string) bool {
 }
 
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
-   log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
+    log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
 
     // Ignore GET requests (e.g., health checks) to /process-market-data
     if r.Method == http.MethodGet {
@@ -451,13 +451,24 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Call the generateRoutes function
-    routes, err := generateRoutes(
+    // Calculate average liquidity using marketData.Liquidity
+    averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
+    if err != nil {
+        log.Printf("Failed to calculate average liquidity: %v", err)
+        http.Error(w, "Failed to calculate average liquidity. Internal server error.", http.StatusInternalServerError)
+        return
+    }
+
+    log.Printf("Average liquidity calculated: %f", averageLiquidity)
+
+    // Generate routes based on the liquidity and other parameters
+    routes, err := generateRoutesUsingLiquidityData(
         marketData.ChainID,
         marketData.StartToken,
         startAmount,
         marketData.MaxHops,
         profitThreshold,
+        marketData.Liquidity,
     )
     if err != nil {
         log.Printf("Error generating routes: %v", err)
