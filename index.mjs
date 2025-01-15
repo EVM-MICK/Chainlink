@@ -1127,18 +1127,18 @@ async function runArbitrageBot() {
   }, MARKET_DATA_INTERVAL_MS);
 
   // Health check for Go backend
-  cron.schedule('* * * * *', async () => {
-    try {
-      const response = await axios.get(`${GO_BACKEND_URL}/health`);
-      if (response.status !== 200) {
-        throw new Error('Go backend health check failed');
-      }
-      log('Go backend is healthy.', 'info');
-    } catch (err) {
-      log('Health check failed. Attempting recovery...', 'error');
-      await handleCriticalError(err, 'Health Check');
-    }
-  });
+  // cron.schedule('* * * * *', async () => {
+  //   try {
+  //     const response = await axios.get(`${GO_BACKEND_URL}/health`);
+  //     if (response.status !== 200) {
+  //       throw new Error('Go backend health check failed');
+  //     }
+  //     log('Go backend is healthy.', 'info');
+  //   } catch (err) {
+  //     log('Health check failed. Attempting recovery...', 'error');
+  //     await handleCriticalError(err, 'Health Check');
+  //   }
+  // });
 }
 
 // Start Bot
