@@ -388,12 +388,25 @@ func isTokenHardcoded(tokenAddress string) bool {
 }
 
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
-    log.Printf("Incoming request: %s %s\n", r.Method, r.URL.Path)
+   log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
+
+    // Ignore GET requests (e.g., health checks) to /process-market-data
+    if r.Method == http.MethodGet {
+        log.Println("Ignoring health check GET request")
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("Health check acknowledged"))
+        return
+    }
+
+    // Allow only POST requests
     if r.Method != http.MethodPost {
         log.Printf("Invalid request method: %s", r.Method)
         http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
         return
     }
+
+    // Process the POST request as usual
+    log.Println("Processing POST request to /process-market-data")
 
     // Parse and decode the JSON request body
     var marketData struct {
