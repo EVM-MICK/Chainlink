@@ -2368,10 +2368,10 @@ func filterValidAddresses(tokens []StableToken) []string {
 }
 
 func buildAndProcessGraph(liquidityData []LiquidityData) (*WeightedGraph, error) {
-    // Convert LiquidityData to token pairs and weights
-    tokenPairs := convertToTokenPairsWithWeights(liquidityData)
+    // Convert LiquidityData to TokenPair
+    tokenPairs := convertToTokenPairs(liquidityData)
 
-    // Build the graph using the token pairs and weights
+    // Call BuildGraph with the correct parameters
     graph, err := BuildGraph(tokenPairs)
     if err != nil {
         log.Printf("Error building graph: %v", err)
