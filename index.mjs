@@ -662,18 +662,21 @@ async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
-    // Step 1: Fetch token prices for all hardcoded stable addresses
+    // Step 1: Fetch token prices for the hardcoded stable addresses
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
     console.log("Token prices fetched successfully.");
 
-    // Step 2: Define the amount for the base token
-    const usdAmount = 100000; // $100,000
-    // Step 3: Fetch all liquidity data for all token pairs
+    // Step 2: Fetch all liquidity data for all token pairs
     console.log("Fetching liquidity data for all possible token pairs...");
     const liquidityData = [];
 
+    // USD amount to be converted to base token's equivalent
+    const usdAmount = 100000; // $100,000
+
     for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
+      // Calculate equivalent amount in the base token
       const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
+
       for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
         // Skip cases where the base token is the same as the target token
         if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
@@ -681,14 +684,14 @@ async function gatherMarketData() {
         try {
           // Fetch liquidity data for the current baseToken -> targetToken pair
           const data = await fetchLiquidityData(baseToken, targetToken, amount);
+
           if (data) {
-            // Push the pair's liquidity data into the array
             liquidityData.push({
-              baseToken,               // Source token address
-              targetToken,             // Destination token address
-              dstAmount: data.dstAmount, // Destination amount
-              gas: data.gas,            // Gas required
-              protocols: data.protocols, // Nested protocols information
+              baseToken,
+              targetToken,
+              dstAmount: data.dstAmount,
+              gas: data.gas,
+              protocols: data.protocols,
             });
 
             console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
@@ -705,13 +708,13 @@ async function gatherMarketData() {
 
     // Step 4: Construct the market data payload
     const marketData = {
-      chainId: CHAIN_ID, // Ensure CHAIN_ID is defined elsewhere in your code
-      startToken: HARDCODED_STABLE_ADDRESSES[0], // Starting token (e.g., USDC)
-      startAmount: amount, // The amount in base token
-      maxHops: 3, // Maximum hops allowed in the route
-      profitThreshold: "500000000", // Minimum profit threshold (adjust as needed)
-      tokenPrices, // Token prices fetched earlier
-      liquidity: liquidityData, // Full liquidity data for all pairs
+      chainId: CHAIN_ID,
+      startToken: HARDCODED_STABLE_ADDRESSES[0],
+      startAmount: usdAmount, // Dynamic amount
+      maxHops: 3,
+      profitThreshold: "500000000",
+      tokenPrices,
+      liquidity: liquidityData,
     };
 
     console.log("Market data compiled successfully:");
@@ -728,6 +731,7 @@ async function gatherMarketData() {
     throw error;
   }
 }
+
 
 
 // Error Handling and Notifications
