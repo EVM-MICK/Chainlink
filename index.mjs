@@ -120,17 +120,16 @@ const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
 const HARDCODED_STABLE_ADDRESSES = [
+"0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
   "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
   "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
 ];
 
-
 const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
+   "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
   "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
   "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
@@ -646,46 +645,59 @@ async function rateLimitedRequest1(fn, retries = RETRY_LIMIT, delay = RETRY_DELA
   throw new Error("Maximum retry attempts exceeded.");
 }
 
+async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
+  const tokenPriceInUSD = tokenPrices[baseToken.toLowerCase()]; // Fetch price for baseToken
+  if (!tokenPriceInUSD) {
+    throw new Error(`Price for base token ${baseToken} not found in tokenPrices.`);
+  }
+
+  // Calculate equivalent amount in the base token's smallest unit
+  const baseTokenAmount = new BigNumber(usdAmount).dividedBy(tokenPriceInUSD).toFixed(0); // Use BigNumber for precision
+  console.log(`Equivalent of $${usdAmount} in ${baseToken}: ${baseTokenAmount}`);
+  return baseTokenAmount; // Returns the amount as a string
+}
+
+
 async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
-    // Step 1: Fetch token prices for the hardcoded stable addresses
+    // Step 1: Fetch token prices for all hardcoded stable addresses
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
     console.log("Token prices fetched successfully.");
 
-    // Step 2: Define base token and amount
-    const baseToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-    const amount = "100000000000"; // Example amount
-
-    // Step 3: Fetch all liquidity data for the token pairs
-    console.log("Fetching liquidity data for all token pairs...");
+    // Step 2: Define the amount for the base token
+    const usdAmount = 100000; // $100,000
+    // Step 3: Fetch all liquidity data for all token pairs
+    console.log("Fetching liquidity data for all possible token pairs...");
     const liquidityData = [];
 
-    for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-      // Skip base token to itself
-      if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
+    for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
+      const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
+      for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
+        // Skip cases where the base token is the same as the target token
+        if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
-      try {
-        // Fetch liquidity data for the base token to the current target token
-        const data = await fetchLiquidityData(baseToken, targetToken, amount);
+        try {
+          // Fetch liquidity data for the current baseToken -> targetToken pair
+          const data = await fetchLiquidityData(baseToken, targetToken, amount);
+          if (data) {
+            // Push the pair's liquidity data into the array
+            liquidityData.push({
+              baseToken,               // Source token address
+              targetToken,             // Destination token address
+              dstAmount: data.dstAmount, // Destination amount
+              gas: data.gas,            // Gas required
+              protocols: data.protocols, // Nested protocols information
+            });
 
-        // Ensure the response has data and add it to the liquidity array
-        if (data) {
-          liquidityData.push({
-            baseToken,                // Source token address (e.g., USDC)
-            targetToken,              // Target token address (e.g., WBTC)
-            dstAmount: data.dstAmount, // Destination amount
-            gas: data.gas,             // Gas information
-            protocols: data.protocols, // Nested protocols information
-          });
-
-          console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
-        } else {
-          console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
+            console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
+          } else {
+            console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
+          }
+        } catch (error) {
+          console.error(`Error fetching liquidity data for ${baseToken} -> ${targetToken}:`, error.message);
         }
-      } catch (error) {
-        console.error(`Error fetching liquidity data for ${baseToken} -> ${targetToken}:`, error.message);
       }
     }
 
@@ -694,7 +706,7 @@ async function gatherMarketData() {
     // Step 4: Construct the market data payload
     const marketData = {
       chainId: CHAIN_ID, // Ensure CHAIN_ID is defined elsewhere in your code
-      startToken: baseToken, // The base token (e.g., USDC)
+      startToken: HARDCODED_STABLE_ADDRESSES[0], // Starting token (e.g., USDC)
       startAmount: amount, // The amount in base token
       maxHops: 3, // Maximum hops allowed in the route
       profitThreshold: "500000000", // Minimum profit threshold (adjust as needed)
