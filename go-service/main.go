@@ -2570,9 +2570,6 @@ func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float6
 }
 
 func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken string) (*big.Float, error) {
-   log.Printf("Processing liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
-    liquidityData.BaseToken, liquidityData.TargetToken, liquidityData.DstAmount.String())
-
     // Initialize total liquidity and count variables
     totalLiquidity := big.NewFloat(0)
     count := 0
