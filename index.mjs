@@ -713,7 +713,10 @@ async function gatherMarketData() {
     }
 
     console.log(`Total liquidity data collected: ${liquidityData.length} pairs.`);
-
+        // Convert tokenPrices values to floats
+     const formattedTokenPrices = Object.fromEntries(
+        Object.entries(tokenPrices).map(([token, price]) => [token, parseFloat(price)])
+    );
     // Step 4: Construct the payload
     const marketData = {
       chainId: CHAIN_ID,
@@ -721,7 +724,7 @@ async function gatherMarketData() {
       startAmount: startAmount.toString(), // Use the calculated start amount
       maxHops: 3,
       profitThreshold: "500000000", // String for *big.Int compatibility
-      tokenPrices,
+      tokenPrices: formattedTokenPrices, // Ensure prices are floats
       liquidity: liquidityData,
     };
 
