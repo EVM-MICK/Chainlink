@@ -693,7 +693,7 @@ async function gatherMarketData() {
             liquidityData.push({
               baseToken,
               targetToken,
-              dstAmount: data.dstAmount.toString(), // Ensure string for *big.Int compatibility
+              dstAmount: parseInt(data.dstAmount, 10), // Ensure string for *big.Int compatibility
               gas: data.gas,
               protocols: data.protocols,
             });
