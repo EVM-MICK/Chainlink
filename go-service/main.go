@@ -2420,7 +2420,6 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
 }
 
 func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
-  log.Printf("Processing token pair: %s -> %s", tokenPairs.SrcToken, tokenPairs.DstToken)
     // Initialize the graph structure
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
     var wg sync.WaitGroup
@@ -2473,7 +2472,6 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
     }
    if len(graph.AdjacencyList) == 0 {
     log.Println("Graph is empty. No edges were added.")
-    log.Printf("Liquidity data processed: %v", liquidityData)
 }
 
     log.Printf("Graph built with %d edges", len(graph.AdjacencyList))
@@ -2505,9 +2503,6 @@ func calculateWeightFromLiquidity(dstAmount, gas float64) float64 {
 
     // Final weight calculation
     weight := dampenedDstAmount - dampenedGas // Subtract gas impact
-   log.Printf("Calculated weight: Price=%.4f, Liquidity=%.4f, Weight=%.4f",
-    dampenedDstAmount, liquidityFactor, weight.Float64())
-
     return weight
 }
 
