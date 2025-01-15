@@ -520,9 +520,9 @@ async function fetchTokenPrices(tokens) {
       const response = await axios.get(url, config);
       const prices = response.data;
 
-      // Ensure token keys are lowercase
+      // Ensure token keys are lowercase and values are floats
       return Object.fromEntries(
-        Object.entries(prices).map(([token, price]) => [token.toLowerCase(), price.toString()])
+        Object.entries(prices).map(([token, price]) => [token.toLowerCase(), parseFloat(price)])
       );
     } catch (error) {
       console.error("Error fetching token prices:", error.response?.data || error.message);
