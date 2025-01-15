@@ -1337,7 +1337,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 }
 
 // REST API Handler for Route Generation
-func HTTPHandler(w http.ResponseWriter, r *http.Request) {
+func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
    log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
 
     // Ignore GET requests (e.g., health checks) to /process-market-data
