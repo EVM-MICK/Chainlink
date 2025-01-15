@@ -314,9 +314,15 @@ type PathSegment struct {
 
 var apiRateLimits = make(map[string]*RateLimitTracker)
 
+// type TokenPair struct {
+// 	SrcToken string `json:"srcToken"`
+// 	DstToken string `json:"dstToken"`
+// }
+
 type TokenPair struct {
-	SrcToken string `json:"srcToken"`
-	DstToken string `json:"dstToken"`
+    SrcToken string `json:"srcToken"`
+    DstToken string `json:"dstToken"`
+    Weight   float64 // Added Weight field
 }
 
 type Route struct {
@@ -2375,12 +2381,13 @@ func buildAndProcessGraph(liquidityData []LiquidityData) (*WeightedGraph, error)
     return graph, nil
 }
 
+// Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
     var tokenPairs []TokenPair
 
     for _, entry := range liquidityData {
-        // Parse dstAmount and gas as float values for weight calculations
-        dstAmount, err := parseDstAmount(entry.DstAmount)
+        // Parse dstAmount as a float64 for weight calculations
+        dstAmount, err := parseDstAmount(entry.DstAmount.String()) // Convert *big.Int to string
         if err != nil {
             log.Printf("Skipping liquidity entry due to invalid dstAmount: %v", err)
             continue
@@ -2402,7 +2409,7 @@ func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
     return tokenPairs
 }
 
-
+// Updated convertToTokenPairs function
 func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
     var tokenPairs []TokenPair
 
@@ -2424,23 +2431,56 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
 
 func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
     graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
+    var wg sync.WaitGroup
+    edgeChan := make(chan struct {
+        SrcToken   string
+        DstToken   string
+        EdgeWeight EdgeWeight
+    }, len(tokenPairs))
 
+    // Process each token pair concurrently
     for _, pair := range tokenPairs {
-        // Initialize adjacency list if not already present
-        if graph.AdjacencyList[pair.SrcToken] == nil {
-            graph.AdjacencyList[pair.SrcToken] = make(map[string]EdgeWeight)
-        }
+        wg.Add(1)
+        go func(pair TokenPair) {
+            defer wg.Done()
 
-        // Add edge with weight
-        graph.AdjacencyList[pair.SrcToken][pair.DstToken] = EdgeWeight{
-            Weight:    pair.Weight,
-            Liquidity: pair.Weight, // Use weight as liquidity for now (adjust if needed)
+            // Calculate weight
+            edgeWeight := EdgeWeight{
+                Weight:    pair.Weight,
+                Liquidity: 0, // Set Liquidity if available or remove if not needed
+            }
+
+            // Send edge data to the channel
+            edgeChan <- struct {
+                SrcToken   string
+                DstToken   string
+                EdgeWeight EdgeWeight
+            }{
+                SrcToken:   pair.SrcToken,
+                DstToken:   pair.DstToken,
+                EdgeWeight: edgeWeight,
+            }
+        }(pair)
+    }
+
+    // Close the channel once all Goroutines are done
+    go func() {
+        wg.Wait()
+        close(edgeChan)
+    }()
+
+    // Collect edges from the channel and add them to the graph
+    for edge := range edgeChan {
+        if graph.AdjacencyList[edge.SrcToken] == nil {
+            graph.AdjacencyList[edge.SrcToken] = make(map[string]EdgeWeight)
         }
+        graph.AdjacencyList[edge.SrcToken][edge.DstToken] = edge.EdgeWeight
     }
 
     log.Printf("Graph built with %d edges", len(graph.AdjacencyList))
     return graph, nil
 }
+
 
 func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilityFactor float64) float64 {
     gasPriceFloat, _ := gasPrice.Float64() // Convert *big.Float to float64
@@ -2470,49 +2510,6 @@ func calculateWeightFromLiquidity(dstAmount, gas float64) float64 {
     return weight
 }
 
-
-// Dynamic weight calculation function
-// func calculateWeight(price, liquidity *big.Float) *big.Float {
-//     // Fetch configurable factors from environment variables
-//     weightFactor := getEnvAsFloat("WEIGHT_FACTOR", 1.0)       // Default to 1.0 if not set
-//     liquidityFactor := getEnvAsFloat("LIQUIDITY_FACTOR", 1.0) // Default to 1.0 if not set
-
-//     // Ensure price is greater than zero to avoid division or log errors
-//     if price.Cmp(big.NewFloat(0)) <= 0 {
-//         log.Println("Price must be greater than zero for weight calculation")
-//         return big.NewFloat(0)
-//     }
-
-//     // Ensure liquidity is greater than zero for meaningful calculations
-//     if liquidity.Cmp(big.NewFloat(0)) <= 0 {
-//         log.Println("Liquidity must be greater than zero for weight calculation")
-//         return big.NewFloat(0)
-//     }
-
-//     // Compute natural log of price
-//     priceFloat, _ := price.Float64()
-//     logPrice := math.Log(priceFloat)
-
-//     // Apply weight factor to log(price)
-//     dampenedPrice := new(big.Float).Mul(big.NewFloat(logPrice), big.NewFloat(weightFactor))
-
-//     // Compute natural log of liquidity
-//     liquidityFloat, _ := liquidity.Float64()
-//     logLiquidity := math.Log(liquidityFloat)
-
-//     // Apply liquidity factor to log(liquidity)
-//     dampenedLiquidity := new(big.Float).Mul(big.NewFloat(logLiquidity), big.NewFloat(liquidityFactor))
-
-//     // Calculate final weight as the sum of dampened components
-//     finalWeight := new(big.Float).Add(dampenedPrice, dampenedLiquidity)
-
-//     // Log the components for debugging
-//     log.Printf("Weight Calculation: Price=%.4f, Liquidity=%.4f, Weight=%.4f",
-//         priceFloat, liquidityFloat, finalWeight)
-
-//     return finalWeight
-// }
-
 // Helper function to fetch environment variables as floats
 func getEnvAsFloat(key string, defaultValue float64) float64 {
     value := os.Getenv(key)
@@ -2525,7 +2522,8 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
     return defaultValue
 }
 
-func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval time.Duration, graphChan chan *WeightedGraph, baseThreshold float64, volatilityFactor float64, chainID int64) {
+// Updated MonitorMarketAndRebuildGraph function
+func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval time.Duration, graphChan chan *WeightedGraph, baseThreshold float64, volatilityFactor float64) {
     ticker := time.NewTicker(updateInterval)
     defer ticker.Stop()
 
@@ -2554,7 +2552,7 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
         filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
 
         // Build the graph with the filtered liquidity data
-        graph, err := buildAndProcessGraph(filteredLiquidity, chainID)
+        graph, err := buildAndProcessGraph(filteredLiquidity)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
@@ -2564,26 +2562,6 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
         graphChan <- graph
         log.Println("Graph updated successfully.")
     }
-}
-
-func fetchTokenPairData(srcToken, dstToken string, chainID int64) (*big.Float, *big.Float, error) {
-    prices, err := FetchTokenPrices([]string{srcToken, dstToken})
-    if err != nil {
-        return nil, nil, fmt.Errorf("failed to fetch prices: %w", err)
-    }
-
-    srcPrice, srcExists := prices[srcToken]
-    dstPrice, dstExists := prices[dstToken]
-    if !srcExists || !dstExists {
-        return nil, nil, fmt.Errorf("price data missing for tokens")
-    }
-
-    liquidity, err := estimateLiquidity(chainID, srcToken, dstToken)
-    if err != nil {
-        return nil, nil, fmt.Errorf("failed to estimate liquidity: %w", err)
-    }
-
-    return big.NewFloat(srcPrice / dstPrice), liquidity, nil
 }
 
 // Helper to convert token prices
