@@ -658,7 +658,6 @@ async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
   return baseTokenAmount; // Returns the amount as a string
 }
 
-
 async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
@@ -667,13 +666,21 @@ async function gatherMarketData() {
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
     console.log("Token prices fetched successfully:", tokenPrices);
 
-    // Step 2: Fetch all liquidity data
+    // Step 2: Define the USD amount and calculate equivalent for the first base token
+    const usdAmount = 100000; // $100,000
+    const startToken = HARDCODED_STABLE_ADDRESSES[0]; // First token as the default start token
+    const startAmount = await getAmountInBaseToken(startToken, usdAmount, tokenPrices);
+
+    console.log(
+      `Start token: ${startToken}, Start amount: ${startAmount} (${usdAmount} USD equivalent)`
+    );
+
+    // Step 3: Fetch all liquidity data for all possible token pairs
     console.log("Fetching liquidity data for all possible token pairs...");
     const liquidityData = [];
-    const usdAmount = 100000; // $100,000
 
     for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-      // Calculate equivalent amount in the base token
+      // Calculate the equivalent amount in the base token
       const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
       for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
@@ -709,8 +716,8 @@ async function gatherMarketData() {
     // Step 4: Construct the payload
     const marketData = {
       chainId: CHAIN_ID,
-      startToken: HARDCODED_STABLE_ADDRESSES[0], // First token in the list
-      startAmount: amount.toString(), // Dynamic amount for the first token
+      startToken,
+      startAmount: startAmount.toString(), // Use the calculated start amount
       maxHops: 3,
       profitThreshold: "500000000", // String for *big.Int compatibility
       tokenPrices,
