@@ -663,15 +663,13 @@ async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
 
-    // Step 1: Fetch token prices for the hardcoded stable addresses
+    // Step 1: Fetch token prices
     const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token prices fetched successfully.");
+    console.log("Token prices fetched successfully:", tokenPrices);
 
-    // Step 2: Fetch all liquidity data for all token pairs
+    // Step 2: Fetch all liquidity data
     console.log("Fetching liquidity data for all possible token pairs...");
     const liquidityData = [];
-
-    // USD amount to be converted to base token's equivalent
     const usdAmount = 100000; // $100,000
 
     for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
@@ -679,60 +677,59 @@ async function gatherMarketData() {
       const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
       for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-        // Skip cases where the base token is the same as the target token
-        if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
+        if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue; // Skip same token pairs
 
         try {
-          // Fetch liquidity data for the current baseToken -> targetToken pair
           const data = await fetchLiquidityData(baseToken, targetToken, amount);
 
           if (data) {
             liquidityData.push({
               baseToken,
               targetToken,
-              dstAmount: parseInt(data.dstAmount, 10),
+              dstAmount: data.dstAmount.toString(), // Ensure string for *big.Int compatibility
               gas: data.gas,
               protocols: data.protocols,
             });
 
-            console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
+            console.log(`Liquidity data collected: ${baseToken} -> ${targetToken}`);
           } else {
             console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
           }
         } catch (error) {
-          console.error(`Error fetching liquidity data for ${baseToken} -> ${targetToken}:`, error.message);
+          console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
         }
+
+        // Respect API rate limits
+        await delay(1500); // 1.5 seconds
       }
     }
 
     console.log(`Total liquidity data collected: ${liquidityData.length} pairs.`);
 
-    // Step 4: Construct the market data payload
+    // Step 4: Construct the payload
     const marketData = {
       chainId: CHAIN_ID,
-      startToken: HARDCODED_STABLE_ADDRESSES[0],
-      startAmount: usdAmount, // Dynamic amount
+      startToken: HARDCODED_STABLE_ADDRESSES[0], // First token in the list
+      startAmount: amount.toString(), // Dynamic amount for the first token
       maxHops: 3,
-      profitThreshold: "500000000",
+      profitThreshold: "500000000", // String for *big.Int compatibility
       tokenPrices,
       liquidity: liquidityData,
     };
 
-    console.log("Market data compiled successfully:");
-    console.log(JSON.stringify(marketData, null, 2));
+    console.log("Market data payload constructed successfully:", JSON.stringify(marketData, null, 2));
 
-    // Step 5: Send the compiled data to the Go backend
-    console.log("Sending market data to Go backend...");
+    // Step 5: Send data to the Go backend
+    console.log("Sending market data to the Go backend...");
     await sendMarketDataToGo(marketData);
-    console.log("Market data sent successfully to Go backend.");
+    console.log("Market data sent successfully.");
 
     return marketData;
   } catch (error) {
-    console.error("Error gathering market data:", error.message);
+    console.error("Error in gatherMarketData:", error.message);
     throw error;
   }
 }
-
 
 
 // Error Handling and Notifications
