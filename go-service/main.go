@@ -1339,7 +1339,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // REST API Handler for Route Generation
 func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
-   log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
+    log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
 
     // Ignore GET requests (e.g., health checks) to /process-market-data
     if r.Method == http.MethodGet {
@@ -1361,13 +1361,13 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
     // Parse and decode the JSON request body
     var marketData struct {
-        ChainID         int64                      json:"chainId"
-        StartToken      string                     json:"startToken"
-        StartAmount     string                     json:"startAmount" // Use string for large numbers
-        MaxHops         int                        json:"maxHops"
-        ProfitThreshold string                     json:"profitThreshold" // Use string for large numbers
-        TokenPrices     map[string]float64        json:"tokenPrices"
-        Liquidity       []LiquidityData           json:"liquidity"
+        ChainID         int64                      `json:"chainId"`
+        StartToken      string                     `json:"startToken"`
+        StartAmount     string                     `json:"startAmount"` // Use string for large numbers
+        MaxHops         int                        `json:"maxHops"`
+        ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
+        TokenPrices     map[string]float64        `json:"tokenPrices"`
+        Liquidity       []LiquidityData           `json:"liquidity"`
     }
 
     if err := json.NewDecoder(r.Body).Decode(&marketData); err != nil {
@@ -1414,7 +1414,7 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
     // Prepare and send the response
     response := struct {
-        Routes []Route json:"routes"
+        Routes []Route `json:"routes"`
     }{
         Routes: routes,
     }
@@ -1438,8 +1438,10 @@ func processAndValidateLiquidity(
 
     for _, data := range liquidity {
         var validPaths [][][]PathSegment // Correctly handle nested structure of Paths
+
         for _, path := range data.Paths { // Each path is [][]PathSegment
             var validSegments []PathSegment
+
             for _, segments := range path { // Each segments is []PathSegment
                 for _, segment := range segments { // Each segment is PathSegment
                     // Validate fields of each PathSegment
@@ -1492,7 +1494,6 @@ func processAndValidateLiquidity(
     return validLiquidity
 }
 
-
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
     if !ok {
@@ -1510,17 +1511,25 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
         // Parse and validate individual liquidity item
         dstAmount := new(big.Int)
         if dstStr, ok := liquidityItem["dstAmount"].(string); ok {
-            dstAmount.SetString(dstStr, 10)
+            if _, success := dstAmount.SetString(dstStr, 10); !success {
+                log.Printf("Skipping liquidity item due to invalid dstAmount: %+v", liquidityItem)
+                continue
+            }
         } else {
-            log.Printf("Skipping liquidity item due to invalid dstAmount: %+v", liquidityItem)
+            log.Printf("Skipping liquidity item due to missing dstAmount: %+v", liquidityItem)
             continue
         }
+
         gas := uint64(0)
         if gasFloat, ok := liquidityItem["gas"].(float64); ok {
             gas = uint64(gasFloat)
         }
 
-        paths := parsePaths(liquidityItem["paths"].([]interface{}))
+        paths, err := parsePaths(liquidityItem["paths"])
+        if err != nil {
+            log.Printf("Skipping liquidity item due to invalid paths: %+v", liquidityItem)
+            continue
+        }
 
         liquidityData = append(liquidityData, LiquidityData{
             BaseToken:   liquidityItem["baseToken"].(string),
@@ -1535,35 +1544,53 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
     return liquidityData, nil
 }
 
-func parsePaths(rawPaths []interface{}) [][][]PathSegment {
-    var paths [][][]PathSegment
+func parsePaths(rawPaths interface{}) ([][][]PathSegment, error) {
+    rawPathList, ok := rawPaths.([]interface{})
+    if !ok {
+        return nil, fmt.Errorf("invalid paths format")
+    }
 
-    for _, path := range rawPaths {
-        var parsedPath [][]PathSegment
-        rawSegments, ok := path.([]interface{})
+    var paths [][][]PathSegment
+    for _, rawPath := range rawPathList {
+        rawPathSegments, ok := rawPath.([]interface{})
         if !ok {
             continue
         }
 
-        for _, segment := range rawSegments {
-            rawSegment, ok := segment.(map[string]interface{})
+        var parsedPath [][]PathSegment
+        for _, rawSegmentGroup := range rawPathSegments {
+            rawSegmentList, ok := rawSegmentGroup.([]interface{})
             if !ok {
                 continue
             }
 
-            parsedSegment := PathSegment{
-                Name:             rawSegment["name"].(string),
-                Part:             rawSegment["part"].(float64),
-                FromTokenAddress: rawSegment["fromTokenAddress"].(string),
-                ToTokenAddress:   rawSegment["toTokenAddress"].(string),
+            var segmentGroup []PathSegment
+            for _, rawSegment := range rawSegmentList {
+                segmentData, ok := rawSegment.(map[string]interface{})
+                if !ok {
+                    continue
+                }
+
+                segment := PathSegment{
+                    Name:             segmentData["name"].(string),
+                    Part:             segmentData["part"].(float64),
+                    FromTokenAddress: segmentData["fromTokenAddress"].(string),
+                    ToTokenAddress:   segmentData["toTokenAddress"].(string),
+                }
+                segmentGroup = append(segmentGroup, segment)
             }
-            parsedPath = append(parsedPath, []PathSegment{parsedSegment})
+
+            if len(segmentGroup) > 0 {
+                parsedPath = append(parsedPath, segmentGroup)
+            }
         }
 
-        paths = append(paths, parsedPath)
+        if len(parsedPath) > 0 {
+            paths = append(paths, parsedPath)
+        }
     }
 
-    return paths
+    return paths, nil
 }
 
 func parseBigInt(value string) (*big.Int, error) {
@@ -1574,7 +1601,6 @@ func parseBigInt(value string) (*big.Int, error) {
     return parsedValue, nil
 }
 
-// Converts []LiquidityData to [][]map[string]interface{}
 func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{} {
     var liquidityMaps [][]map[string]interface{}
     for _, data := range liquidityData {
@@ -1595,7 +1621,6 @@ func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{}
     }
     return liquidityMaps
 }
-
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
     // Validate inputs
