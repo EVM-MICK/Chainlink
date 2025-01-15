@@ -125,7 +125,7 @@ type WeightedGraph struct {
 	AdjacencyList map[string]map[string]EdgeWeight // Nested maps for graph edges
 }
 
-type marketData struct {
+type MarketData struct {
         ChainID         int64                      `json:"chainId"`
         StartToken      string                     `json:"startToken"`
         StartAmount     string                     `json:"startAmount"` // Use string for large numbers
