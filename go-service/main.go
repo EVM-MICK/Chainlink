@@ -281,11 +281,15 @@ type Payload struct {
     ProfitThreshold float64
     Liquidity       []LiquidityData
 }
+type BigInt struct {
+    big.Int
+}
+
 
 type LiquidityData struct {
     BaseToken  string
     TargetToken string
-    DstAmount  *big.Int
+    DstAmount  BigInt
     Gas        uint64
     Paths      [][][]PathSegment
 }
@@ -353,6 +357,16 @@ var (
 type TokenPrice struct {
 	Price     *big.Float
 	Liquidity *big.Float
+}
+
+// UnmarshalJSON handles JSON decoding for big.Int
+func (b *BigInt) UnmarshalJSON(data []byte) error {
+    // Trim quotes if the value is a JSON-encoded string
+    if len(data) > 0 && data[0] == '"' {
+        data = data[1 : len(data)-1]
+    }
+    // Parse the big.Int value
+    return b.Int.UnmarshalJSON(data)
 }
 
 func (pq PriorityQueue) Len() int {
