@@ -2160,6 +2160,37 @@ func fetchTokenPrice(token string) (float64, error) {
 	return result.Price, nil
 }
 
+func extractStableTokens(liquidityData []LiquidityData) []string {
+    stableTokens := make(map[string]bool) // Use a map to avoid duplicates
+
+    for _, entry := range liquidityData {
+        if contains(hardcodedStableAddresses, entry.BaseToken) {
+            stableTokens[entry.BaseToken] = true
+        }
+        if contains(hardcodedStableAddresses, entry.TargetToken) {
+            stableTokens[entry.TargetToken] = true
+        }
+    }
+
+    // Convert the map keys to a slice
+    stableTokenList := make([]string, 0, len(stableTokens))
+    for token := range stableTokens {
+        stableTokenList = append(stableTokenList, token)
+    }
+
+    return stableTokenList
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+    for _, v := range slice {
+        if strings.EqualFold(v, item) {
+            return true
+        }
+    }
+    return false
+}
+
 
 func executeRoute(route []string, CAPITAL *big.Int) error {
     const maxRetries = 3
