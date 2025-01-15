@@ -690,7 +690,7 @@ async function gatherMarketData() {
             liquidityData.push({
               baseToken,
               targetToken,
-              dstAmount: data.dstAmount,
+              dstAmount: parseInt(data.dstAmount, 10),
               gas: data.gas,
               protocols: data.protocols,
             });
