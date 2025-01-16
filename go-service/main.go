@@ -1400,19 +1400,19 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
-    tokenPrices map[string]float64,
+    tokenPrices map[string]TokenPrice,
     minDstAmount float64,
 ) []LiquidityData {
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
-        var validPaths [][][]PathSegment // Correctly handle nested structure of Paths
+        var validPaths [][][]PathSegment
 
-        for _, path := range data.Paths { // Each path is [][]PathSegment
+        for _, path := range data.Paths {
             var validSegments []PathSegment
 
-            for _, segments := range path { // Each segments is []PathSegment
-                for _, segment := range segments { // Each segment is PathSegment
+            for _, segments := range path {
+                for _, segment := range segments {
                     // Validate fields of each PathSegment
                     if segment.Name == "" || segment.Part <= 0 ||
                         !common.IsHexAddress(segment.FromTokenAddress) ||
@@ -1429,25 +1429,22 @@ func processAndValidateLiquidity(
                     }
 
                     // Calculate destination amount in USD
-                    dstAmountInUSD := targetTokenPrice * segment.Part / math.Pow(10, 18) // Adjust for token decimals
-                    if dstAmountInUSD < minDstAmount {
-                        log.Printf("Path segment filtered out due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
+                    dstAmountInUSD := new(big.Float).Mul(targetTokenPrice.Price, new(big.Float).SetFloat64(segment.Part))
+                    if dstAmountInUSD.Cmp(big.NewFloat(minDstAmount)) < 0 {
+                        log.Printf("Path segment filtered due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
                             segment.ToTokenAddress, dstAmountInUSD)
                         continue
                     }
 
-                    // Add valid segment
                     validSegments = append(validSegments, segment)
                 }
             }
 
-            // Only append non-empty valid segments as paths
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, [][]PathSegment{validSegments})
             }
         }
 
-        // Append data with non-empty valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
                 BaseToken:   data.BaseToken,
@@ -1459,9 +1456,10 @@ func processAndValidateLiquidity(
         }
     }
 
-    log.Printf("Pre-Filtering completed: %d valid liquidity entries out of %d", len(validLiquidity), len(liquidity))
+    log.Printf("Validated %d liquidity entries.", len(validLiquidity))
     return validLiquidity
 }
+
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
@@ -1607,23 +1605,21 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
     }
 
-    // Extract stable token addresses from the provided liquidity data
+    // Extract stable token addresses
     stableTokenAddresses := extractStableTokens(marketData.Liquidity)
 
-    // Calculate average liquidity using marketData.Liquidity
+    // Calculate average liquidity
     averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
     if err != nil {
         return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
-    // Extract gas price from liquidity data
+    // Extract gas price and convert token prices
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
+    tokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
 
-    // Convert token prices to the expected format
-    tokenPrices := convertTokenPricesToMap(marketData.TokenPrices)
-
-    // Build and process the graph using LiquidityData, TokenPrices, and GasPrice
+    // Build and process the graph
     graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, tokenPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build and process graph: %v", err)
@@ -1635,7 +1631,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var wg sync.WaitGroup
 
     for _, endToken := range stableTokenAddresses {
-        // Skip routes where the start and end token are the same
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
         }
@@ -1644,17 +1639,21 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
-            // Compute the optimal route for the given start and end token
+            // Compute optimal route
             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
-            if err != nil || len(path) <= 1 {
+            if err != nil || len(path) <= 1 || !strings.EqualFold(path[0], marketData.StartToken) {
+                log.Printf("Skipping invalid or unprofitable path: %v", path)
                 return
             }
 
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Calculate profit and check if it's above the threshold
-            profit := new(big.Int).Sub(startAmount, costInt)
+            // Calculate profit, factoring in fees
+            gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+            totalCost := new(big.Int).Add(costInt, gasFee)
+            profit := new(big.Int).Sub(startAmount, totalCost)
+
             if profit.Cmp(profitThreshold) > 0 {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1669,7 +1668,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Notify Node.js script with computed routes
+    // Notify Node.js script
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1697,10 +1696,10 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
 
 
 func convertTokenPricesToMap(
-    rawPrices map[string]float64, 
+    rawPrices map[string]float64,
     liquidityData []LiquidityData,
-) map[string]map[string]TokenPrice {
-    tokenPrices := make(map[string]map[string]TokenPrice)
+) map[string]TokenPrice {
+    tokenPrices := make(map[string]TokenPrice)
 
     for _, entry := range liquidityData {
         if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
@@ -1725,22 +1724,16 @@ func convertTokenPricesToMap(
         // Convert DstAmount (liquidity) from *big.Int to *big.Float
         liquidity := new(big.Float).SetInt(entry.DstAmount)
 
-        // Initialize token pair map if not already present
-        if tokenPrices[entry.BaseToken] == nil {
-            tokenPrices[entry.BaseToken] = make(map[string]TokenPrice)
-        }
-
         // Add token price and liquidity information
-        tokenPrices[entry.BaseToken][entry.TargetToken] = TokenPrice{
-            Price:     new(big.Float).SetFloat64(dstPrice), // Use the target token price
+        tokenPrices[entry.BaseToken] = TokenPrice{
+            Price:     new(big.Float).SetFloat64(srcPrice),
             Liquidity: liquidity,
         }
     }
 
-    log.Printf("Converted %d token pairs to token price map.", len(liquidityData))
+    log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
-
 
 
 // Converts [][]map[string]interface{} back to []LiquidityData
