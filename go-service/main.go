@@ -2607,10 +2607,12 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
         // Adjust profit threshold dynamically based on gas price and volatility
         adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
-        // Validate and filter liquidity based on the adjusted profit threshold
+        // Convert rawTokenPrices to the expected TokenPrice map format
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
-        tokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity) // Pass updatedLiquidity
-        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, rawTokenPrices, adjustedThreshold)
+        tokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity) // Ensure correct conversion
+
+        // Validate and filter liquidity using the converted tokenPrices
+        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
 
         // Build the graph with the filtered liquidity data
         graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
