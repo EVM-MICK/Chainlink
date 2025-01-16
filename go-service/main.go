@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"context"
 	"encoding/json"
@@ -1618,14 +1617,14 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
-    // Fetch gas price from market data or a default value
-    gasPrice := new(big.Float).SetFloat64(1.0) // Example: replace with actual logic if gas price is provided
-    if marketData.GasPrice != nil {
-        gasPrice = marketData.GasPrice
-    }
+    // Extract gas price from liquidity data
+    gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
+
+    // Convert token prices to the expected format
+    tokenPrices := convertTokenPricesToMap(marketData.TokenPrices)
 
     // Build and process the graph using LiquidityData, TokenPrices, and GasPrice
-    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, marketData.TokenPrices, gasPrice)
+    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, tokenPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build and process graph: %v", err)
     }
@@ -1679,6 +1678,35 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     return finalRoutes, nil
 }
 
+func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
+    totalGas := big.NewInt(0)
+    count := 0
+
+    for _, entry := range liquidityData {
+        totalGas.Add(totalGas, new(big.Int).SetUint64(entry.Gas))
+        count++
+    }
+
+    if count == 0 {
+        return big.NewFloat(1.0) // Default gas price if no data is available
+    }
+
+    avgGas := new(big.Float).Quo(new(big.Float).SetInt(totalGas), big.NewFloat(float64(count)))
+    return avgGas
+}
+
+func convertTokenPricesToMap(rawPrices map[string]float64) map[string]TokenPrice {
+    tokenPrices := make(map[string]TokenPrice)
+    for token, price := range rawPrices {
+        tokenPrices[token] = TokenPrice{
+            Price:     new(big.Float).SetFloat64(price),
+            Liquidity: big.NewFloat(0), // Placeholder; set based on actual logic if needed
+        }
+    }
+    return tokenPrices
+}
+
+
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
     var liquidityData []LiquidityData
@@ -1725,7 +1753,6 @@ func adjustForTokenDecimals(token string, amount *big.Int) (*big.Int, error) {
 
     return adjustedAmount, nil
 }
-
 
 // Helper function to flatten [][]map[string]interface{} to []map[string]interface{}
 func flattenLiquidity(nestedLiquidity [][]map[string]interface{}) []map[string]interface{} {
