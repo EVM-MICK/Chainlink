@@ -1618,14 +1618,20 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
-    // Build and process the graph using LiquidityData
-    graph, err := buildAndProcessGraph(marketData.Liquidity)
-    if err != nil {
-        return nil, fmt.Errorf("failed to build graph: %v", err)
+    // Fetch gas price from market data or a default value
+    gasPrice := new(big.Float).SetFloat64(1.0) // Example: replace with actual logic if gas price is provided
+    if marketData.GasPrice != nil {
+        gasPrice = marketData.GasPrice
     }
-    log.Printf("Graph successfully built: %v", graph)
 
-    var profitableRoutes []Route
+    // Build and process the graph using LiquidityData, TokenPrices, and GasPrice
+    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, marketData.TokenPrices, gasPrice)
+    if err != nil {
+        return nil, fmt.Errorf("failed to build and process graph: %v", err)
+    }
+    log.Printf("Graph successfully built with profitable routes: %d", len(profitableRoutes))
+
+    var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
 
@@ -1652,7 +1658,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             profit := new(big.Int).Sub(startAmount, costInt)
             if profit.Cmp(profitThreshold) > 0 {
                 mu.Lock()
-                profitableRoutes = append(profitableRoutes, Route{
+                finalRoutes = append(finalRoutes, Route{
                     Path:   path,
                     Profit: profit,
                 })
@@ -1665,12 +1671,12 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     wg.Wait()
 
     // Notify Node.js script with computed routes
-    if err := notifyNodeOfRoutes(profitableRoutes); err != nil {
+    if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
 
-    log.Printf("Generated %d profitable routes.", len(profitableRoutes))
-    return profitableRoutes, nil
+    log.Printf("Generated %d profitable routes.", len(finalRoutes))
+    return finalRoutes, nil
 }
 
 // Converts [][]map[string]interface{} back to []LiquidityData
@@ -2548,8 +2554,8 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
         tokenPrices := convertTokenPrices(payload["tokenPrices"].(map[string]interface{}))
         filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
 
-        // Build the graph with the filtered liquidity data
-        graph, err := buildAndProcessGraph(filteredLiquidity)
+        // Build the graph with the filtered liquidity data, token prices, and gas price
+        graph, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
@@ -2571,15 +2577,17 @@ func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float6
 }
 
 func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken string) (*big.Float, error) {
-   log.Printf("Processing liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
-    liquidityData.BaseToken, liquidityData.TargetToken, liquidityData.DstAmount.String())
-
     // Initialize total liquidity and count variables
     totalLiquidity := big.NewFloat(0)
     count := 0
 
     // Iterate over liquidity data to compute total liquidity and count
     for _, entry := range liquidityData {
+        // Log details for each entry
+        log.Printf("Processing liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
+            entry.BaseToken, entry.TargetToken, entry.DstAmount.String())
+
+        // Check if the BaseToken matches the startToken
         if strings.EqualFold(entry.BaseToken, startToken) {
             // Convert DstAmount from *big.Int to *big.Float
             liquidity := new(big.Float).SetInt(entry.DstAmount)
