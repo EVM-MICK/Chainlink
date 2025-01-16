@@ -861,7 +861,6 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
 
 // calculateTotalGasCost calculates the total gas cost for a transaction.
 func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
-    // Ensure gas price and limit are valid
     if gasPrice == nil || gasPrice.Cmp(big.NewInt(0)) <= 0 {
         log.Println("Invalid or nil gas price provided. Defaulting to 50 Gwei.")
         gasPrice = big.NewInt(50 * 1e9) // Default to 50 Gwei
@@ -872,14 +871,13 @@ func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
         gasLimit = DefaultGasEstimate // Default gas limit
     }
 
-    // Calculate total gas cost: gas price * gas limit
     totalGasCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
 
-    // Log for debugging
     log.Printf("Calculated total gas cost: %s wei (Gas Price: %s wei, Gas Limit: %d)", totalGasCost.String(), gasPrice.String(), gasLimit)
 
     return totalGasCost
 }
+
 
 // Helper to convert *big.Float to *big.Int
 func convertBigFloatToInt(input interface{}) *big.Int {
@@ -1615,8 +1613,14 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
-    // Extract gas price and convert token prices
+    // Extract gas price from liquidity data
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
+
+    // Convert gasPrice to *big.Int
+    gasPriceInt := new(big.Int)
+    gasPrice.Int(gasPriceInt)
+
+    // Convert token prices to the expected format
     tokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
 
     // Build and process the graph
@@ -1624,7 +1628,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     if err != nil {
         return nil, fmt.Errorf("failed to build and process graph: %v", err)
     }
-    log.Printf("Graph successfully built with profitable routes: %d", len(profitableRoutes))
+    log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
 
     var finalRoutes []Route
     var mu sync.Mutex
@@ -1639,10 +1643,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
-            // Compute optimal route
             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
-            if err != nil || len(path) <= 1 || !strings.EqualFold(path[0], marketData.StartToken) {
-                log.Printf("Skipping invalid or unprofitable path: %v", path)
+            if err != nil || len(path) <= 1 {
                 return
             }
 
@@ -1650,7 +1652,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             cost.Int(costInt)
 
             // Calculate profit, factoring in fees
-            gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+            gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
             totalCost := new(big.Int).Add(costInt, gasFee)
             profit := new(big.Int).Sub(startAmount, totalCost)
 
@@ -1668,7 +1670,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Notify Node.js script
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -2608,8 +2609,8 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
 
         // Validate and filter liquidity based on the adjusted profit threshold
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
-        tokenPrices := convertTokenPricesToMap(rawTokenPrices)
-        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
+        tokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity) // Pass updatedLiquidity
+        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, rawTokenPrices, adjustedThreshold)
 
         // Build the graph with the filtered liquidity data
         graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
