@@ -923,6 +923,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
             return nil, fmt.Errorf("missing price data for token: %s", toToken)
         }
 
+        // Adjust amount for slippage and compute trade amount
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
             return nil, fmt.Errorf("slippage adjustment failed: %v", err)
@@ -946,7 +947,6 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
-
     if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
         return nil, nil
     }
@@ -2338,7 +2338,7 @@ func buildAndProcessGraph(liquidityData []LiquidityData, tokenPrices map[string]
     // Convert LiquidityData to TokenPair with weights
     tokenPairs := convertToTokenPairsWithWeights(liquidityData)
 
-    // Call BuildGraph with the token pairs
+    // Call BuildGraph to construct the graph
     graph, err := BuildGraph(tokenPairs)
     if err != nil {
         log.Printf("Error building graph: %v", err)
@@ -2369,7 +2369,7 @@ func buildAndProcessGraph(liquidityData []LiquidityData, tokenPrices map[string]
     if len(profitableRoutes) == 0 {
         log.Println("No profitable routes found.")
     } else {
-        log.Printf("Generated %d profitable routes", len(profitableRoutes))
+        log.Printf("Generated %d profitable routes.", len(profitableRoutes))
     }
 
     return graph, profitableRoutes, nil
@@ -2380,9 +2380,10 @@ func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
     var tokenPairs []TokenPair
 
     for _, entry := range liquidityData {
+        // Parse dstAmount
         dstAmount, err := parseDstAmount(entry.DstAmount.String()) // Convert *big.Int to string
         if err != nil {
-            log.Printf("Skipping liquidity entry due to invalid dstAmount: %v", err)
+            log.Printf("Skipping invalid dstAmount in liquidity entry: %v", err)
             continue
         }
 
@@ -2391,7 +2392,7 @@ func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
         // Calculate weight using dstAmount and gas
         weight := calculateWeightFromLiquidity(dstAmount, gas)
 
-        // Append token pair with weight
+        // Append token pair with calculated weight
         tokenPairs = append(tokenPairs, TokenPair{
             SrcToken: entry.BaseToken,
             DstToken: entry.TargetToken,
