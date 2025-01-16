@@ -1695,16 +1695,52 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     return avgGas
 }
 
-func convertTokenPricesToMap(rawPrices map[string]float64) map[string]TokenPrice {
-    tokenPrices := make(map[string]TokenPrice)
-    for token, price := range rawPrices {
-        tokenPrices[token] = TokenPrice{
-            Price:     new(big.Float).SetFloat64(price),
-            Liquidity: big.NewFloat(0), // Placeholder; set based on actual logic if needed
+
+func convertTokenPricesToMap(
+    rawPrices map[string]float64, 
+    liquidityData []LiquidityData,
+) map[string]map[string]TokenPrice {
+    tokenPrices := make(map[string]map[string]TokenPrice)
+
+    for _, entry := range liquidityData {
+        if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
+            log.Printf("Skipping liquidity entry due to invalid DstAmount: %+v", entry)
+            continue
+        }
+
+        // Parse price for BaseToken
+        srcPrice, srcExists := rawPrices[entry.BaseToken]
+        if !srcExists || srcPrice <= 0 {
+            log.Printf("Skipping BaseToken %s due to missing or invalid price", entry.BaseToken)
+            continue
+        }
+
+        // Parse price for TargetToken
+        dstPrice, dstExists := rawPrices[entry.TargetToken]
+        if !dstExists || dstPrice <= 0 {
+            log.Printf("Skipping TargetToken %s due to missing or invalid price", entry.TargetToken)
+            continue
+        }
+
+        // Convert DstAmount (liquidity) from *big.Int to *big.Float
+        liquidity := new(big.Float).SetInt(entry.DstAmount)
+
+        // Initialize token pair map if not already present
+        if tokenPrices[entry.BaseToken] == nil {
+            tokenPrices[entry.BaseToken] = make(map[string]TokenPrice)
+        }
+
+        // Add token price and liquidity information
+        tokenPrices[entry.BaseToken][entry.TargetToken] = TokenPrice{
+            Price:     new(big.Float).SetFloat64(dstPrice), // Use the target token price
+            Liquidity: liquidity,
         }
     }
+
+    log.Printf("Converted %d token pairs to token price map.", len(liquidityData))
     return tokenPrices
 }
+
 
 
 // Converts [][]map[string]interface{} back to []LiquidityData
@@ -2578,14 +2614,20 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
         adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
         // Validate and filter liquidity based on the adjusted profit threshold
-        tokenPrices := convertTokenPrices(payload["tokenPrices"].(map[string]interface{}))
+        rawTokenPrices := payload["tokenPrices"].(map[string]float64)
+        tokenPrices := convertTokenPricesToMap(rawTokenPrices)
         filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
 
-        // Build the graph with the filtered liquidity data, token prices, and gas price
-        graph, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
+        // Build the graph with the filtered liquidity data
+        graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
+        }
+
+        // Log generated routes for monitoring
+        for _, route := range profitableRoutes {
+            log.Printf("Profitable Route: %v, Profit: %s", route.Path, route.Profit.String())
         }
 
         // Send the updated graph through the channel
