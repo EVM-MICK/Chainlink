@@ -1582,17 +1582,19 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
+    // Validate and set start amount
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
     }
 
+    // Validate and set profit threshold
     profitThreshold := new(big.Int)
     if _, ok := profitThreshold.SetString(marketData.ProfitThreshold, 10); !ok || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
     }
 
-    // Extract stable token addresses
+    // Extract stable token addresses from liquidity data
     stableTokenAddresses := extractStableTokens(marketData.Liquidity)
 
     // Calculate average liquidity
@@ -1605,12 +1607,15 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Extract gas price from liquidity data
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
 
-    // Convert gasPrice to *big.Int
+    // Convert gas price to *big.Int for computation
     gasPriceInt := new(big.Int)
     gasPrice.Int(gasPriceInt)
 
-    // Convert token prices to the expected format
+    // Convert token prices to the required format
     tokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
+    if len(tokenPrices) == 0 {
+        return nil, fmt.Errorf("no valid token prices found for liquidity data")
+    }
 
     // Build and process the graph
     graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, tokenPrices, gasPrice)
@@ -1619,11 +1624,16 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
 
+    // Filter profitable routes based on the start token and profit threshold
+    filteredRoutes := filterRoutes(profitableRoutes, marketData.StartToken, profitThreshold)
+
+    // Concurrently compute final routes using stable token combinations
     var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
 
     for _, endToken := range stableTokenAddresses {
+        // Skip routes where the start and end token are the same
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
         }
@@ -1632,15 +1642,17 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
+            // Compute the optimal route for the given start and end token
             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
             if err != nil || len(path) <= 1 {
+                log.Printf("Failed to compute optimal route for token %s: %v", endToken, err)
                 return
             }
 
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Calculate profit, factoring in fees
+            // Calculate profit, factoring in gas fees
             gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
             totalCost := new(big.Int).Add(costInt, gasFee)
             profit := new(big.Int).Sub(startAmount, totalCost)
@@ -1659,6 +1671,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
+    // Notify the Node.js script with computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1687,8 +1700,8 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
 func convertTokenPricesToMap(
     rawPrices map[string]float64,
     liquidityData []LiquidityData,
-) map[string]TokenPrice {
-    tokenPrices := make(map[string]TokenPrice)
+) map[string]map[string]TokenPrice {
+    tokenPrices := make(map[string]map[string]TokenPrice)
 
     for _, entry := range liquidityData {
         if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
@@ -1696,26 +1709,31 @@ func convertTokenPricesToMap(
             continue
         }
 
-        // Parse price for BaseToken
+        // Fetch price for BaseToken
         srcPrice, srcExists := rawPrices[entry.BaseToken]
         if !srcExists || srcPrice <= 0 {
             log.Printf("Missing price for BaseToken %s, setting default", entry.BaseToken)
-            srcPrice = 1.0 // Default price (to avoid crashes)
+            srcPrice = 1.0 // Default price; consider fetching live data if feasible
         }
 
-        // Parse price for TargetToken
+        // Fetch price for TargetToken
         dstPrice, dstExists := rawPrices[entry.TargetToken]
         if !dstExists || dstPrice <= 0 {
             log.Printf("Missing price for TargetToken %s, setting default", entry.TargetToken)
-            dstPrice = 1.0 // Default price (to avoid crashes)
+            dstPrice = 1.0 // Default price; consider fetching live data if feasible
         }
 
-        // Convert DstAmount (liquidity) from *big.Int to *big.Float
+        // Convert DstAmount to *big.Float
         liquidity := new(big.Float).SetInt(entry.DstAmount)
 
-        // Add token price and liquidity information
-        tokenPrices[entry.BaseToken] = TokenPrice{
-            Price:     new(big.Float).SetFloat64(srcPrice),
+        // Initialize token pair map
+        if tokenPrices[entry.BaseToken] == nil {
+            tokenPrices[entry.BaseToken] = make(map[string]TokenPrice)
+        }
+
+        // Add token price and liquidity data
+        tokenPrices[entry.BaseToken][entry.TargetToken] = TokenPrice{
+            Price:     new(big.Float).SetFloat64(dstPrice),
             Liquidity: liquidity,
         }
     }
@@ -1723,6 +1741,7 @@ func convertTokenPricesToMap(
     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
+
 
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
