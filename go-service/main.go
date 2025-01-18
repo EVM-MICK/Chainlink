@@ -1472,6 +1472,7 @@ func processAndValidateLiquidity(
     return validLiquidity
 }
 
+
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
     if !ok {
