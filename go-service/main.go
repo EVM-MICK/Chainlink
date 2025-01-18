@@ -1315,7 +1315,7 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 	return result.([]byte), nil
 }
 
-// REST API Handler for Route Generation
+
 func generateRoutes(marketData MarketData) ([]Route, error) {
     // Validate inputs
     if !common.IsHexAddress(marketData.StartToken) {
@@ -1410,14 +1410,13 @@ func processAndValidateLiquidity(
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
-        var validPaths [][][]PathSegment // Handle nested structure of Paths
+        var validPaths [][][]PathSegment
 
-        for _, path := range data.Paths { // Each path is [][]PathSegment
+        for _, path := range data.Paths {
             var validSegments []PathSegment
 
-            for _, segments := range path { // Each segments is []PathSegment
-                for _, segment := range segments { // Each segment is PathSegment
-                    // Validate each segment
+            for _, segments := range path {
+                for _, segment := range segments {
                     if segment.Name == "" || segment.Part <= 0 ||
                         !common.IsHexAddress(segment.FromTokenAddress) ||
                         !common.IsHexAddress(segment.ToTokenAddress) {
@@ -1425,32 +1424,29 @@ func processAndValidateLiquidity(
                         continue
                     }
 
-                    // Check token price availability
                     price, exists := tokenPrices[segment.ToTokenAddress]
                     if !exists {
                         log.Printf("Missing price for token: %s", segment.ToTokenAddress)
                         continue
                     }
 
-                    // Calculate destination amount in USD
-                    dstAmountInUSD := price.Price.Float64() * segment.Part / math.Pow(10, 18)
+                    dstAmountInUSD, _ := price.Price.Float64()
+                    dstAmountInUSD *= segment.Part / math.Pow(10, 18)
+
                     if dstAmountInUSD < minDstAmount {
                         log.Printf("Segment skipped due to insufficient USD value: %f", dstAmountInUSD)
                         continue
                     }
 
-                    // Add valid segment
                     validSegments = append(validSegments, segment)
                 }
             }
 
-            // Only append non-empty segments
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, [][]PathSegment{validSegments})
             }
         }
 
-        // Append data with valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
                 BaseToken:   data.BaseToken,
@@ -1465,7 +1461,6 @@ func processAndValidateLiquidity(
     log.Printf("Validated %d liquidity entries.", len(validLiquidity))
     return validLiquidity
 }
-
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
@@ -2568,43 +2563,36 @@ func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval
     for range ticker.C {
         log.Println("Fetching latest liquidity and market data for graph update...")
 
-        // Fetch updated liquidity
         updatedLiquidity, err := fetchUpdatedLiquidity(payload)
         if err != nil {
             log.Printf("Failed to fetch updated liquidity: %v", err)
             continue
         }
 
-        // Fetch current gas price
         gasPrice, err := fetchCurrentGasPrice(payload)
         if err != nil {
             log.Printf("Failed to fetch current gas price: %v", err)
             continue
         }
 
-        // Adjust profit threshold dynamically based on gas price and volatility
         adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
-        // Convert rawTokenPrices to the expected TokenPrice map format
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
-        tokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity) // Ensure correct conversion
+        nestedTokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity)
+        flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-        // Validate and filter liquidity using the converted tokenPrices
-        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, tokenPrices, adjustedThreshold)
+        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, flatTokenPrices, adjustedThreshold)
 
-        // Build the graph with the filtered liquidity data
-        graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, tokenPrices, gasPrice)
+        graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, flatTokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
         }
 
-        // Log generated routes for monitoring
         for _, route := range profitableRoutes {
             log.Printf("Profitable Route: %v, Profit: %s", route.Path, route.Profit.String())
         }
 
-        // Send the updated graph through the channel
         graphChan <- graph
         log.Println("Graph updated successfully.")
     }
