@@ -1408,7 +1408,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     return finalRoutes, nil
 }
 
-
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
     tokenPrices map[string]TokenPrice,
@@ -1600,108 +1599,73 @@ func convertToMapSlice(liquidityData []LiquidityData) [][]map[string]interface{}
     return liquidityMaps
 }
 
-func generateRoutes(marketData MarketData) ([]Route, error) {
-    // Validate inputs
-    if !common.IsHexAddress(marketData.StartToken) {
-        return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
+func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
+    log.Printf("Incoming request: %s %s", r.Method, r.URL.Path)
+
+    if r.Method == http.MethodGet {
+        log.Println("Ignoring health check GET request")
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("Health check acknowledged"))
+        return
     }
 
-    // Validate and set start amount
+    if r.Method != http.MethodPost {
+        log.Printf("Invalid request method: %s", r.Method)
+        http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
+        return
+    }
+
+    log.Println("Processing POST request to /process-market-data")
+
+    var marketData MarketData
+    if err := json.NewDecoder(r.Body).Decode(&marketData); err != nil {
+        log.Printf("Failed to decode request body: %v", err)
+        http.Error(w, "Invalid request body. Please send valid JSON.", http.StatusBadRequest)
+        return
+    }
+
+    if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
+        log.Println("Missing required fields in the request body")
+        http.Error(w, "Missing required fields: 'startToken', 'startAmount', or 'liquidity'", http.StatusBadRequest)
+        return
+    }
+
     startAmount := new(big.Int)
-    if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
-        return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
+    if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok {
+        log.Printf("Invalid startAmount value: %s", marketData.StartAmount)
+        http.Error(w, "Invalid 'startAmount' value. Must be a valid integer string.", http.StatusBadRequest)
+        return
     }
 
-    // Validate and set profit threshold
     profitThreshold := new(big.Int)
-    if _, ok := profitThreshold.SetString(marketData.ProfitThreshold, 10); !ok || profitThreshold.Cmp(big.NewInt(0)) <= 0 {
-        return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
+    if _, ok := profitThreshold.SetString(marketData.ProfitThreshold, 10); !ok {
+        log.Printf("Invalid profitThreshold value: %s", marketData.ProfitThreshold)
+        http.Error(w, "Invalid 'profitThreshold' value. Must be a valid integer string.", http.StatusBadRequest)
+        return
     }
 
-    // Extract stable token addresses from liquidity data
-    stableTokenAddresses := extractStableTokens(marketData.Liquidity)
-
-    // Calculate average liquidity
-    averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
+    // Call generateRoutes with MarketData directly
+    routes, err := generateRoutes(marketData)
     if err != nil {
-        return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
-    }
-    log.Printf("Average liquidity calculated: %f", averageLiquidity)
-
-    // Extract gas price from liquidity data
-    gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
-
-    // Convert gas price to *big.Int for computation
-    gasPriceInt := new(big.Int)
-    gasPrice.Int(gasPriceInt)
-
-    // Convert token prices to the required format
-    tokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
-    if len(tokenPrices) == 0 {
-        return nil, fmt.Errorf("no valid token prices found for liquidity data")
+        log.Printf("Error generating routes: %v", err)
+        http.Error(w, "Failed to generate routes. Internal server error.", http.StatusInternalServerError)
+        return
     }
 
-    // Build and process the graph
-    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, tokenPrices, gasPrice)
-    if err != nil {
-        return nil, fmt.Errorf("failed to build and process graph: %v", err)
-    }
-    log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
-
-    // Filter profitable routes based on the start token and profit threshold
-    filteredRoutes := filterRoutes(profitableRoutes, marketData.StartToken, profitThreshold)
-
-    // Concurrently compute final routes using stable token combinations
-    var finalRoutes []Route
-    var mu sync.Mutex
-    var wg sync.WaitGroup
-
-    for _, endToken := range stableTokenAddresses {
-        // Skip routes where the start and end token are the same
-        if strings.EqualFold(endToken, marketData.StartToken) {
-            continue
-        }
-
-        wg.Add(1)
-        go func(endToken string) {
-            defer wg.Done()
-
-            // Compute the optimal route for the given start and end token
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
-            if err != nil || len(path) <= 1 {
-                log.Printf("Failed to compute optimal route for token %s: %v", endToken, err)
-                return
-            }
-
-            costInt := new(big.Int)
-            cost.Int(costInt)
-
-            // Calculate profit, factoring in gas fees
-            gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
-            totalCost := new(big.Int).Add(costInt, gasFee)
-            profit := new(big.Int).Sub(startAmount, totalCost)
-
-            if profit.Cmp(profitThreshold) > 0 {
-                mu.Lock()
-                finalRoutes = append(finalRoutes, Route{
-                    Path:   path,
-                    Profit: profit,
-                })
-                mu.Unlock()
-                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-            }
-        }(endToken)
+    response := struct {
+        Routes []Route `json:"routes"`
+    }{
+        Routes: routes,
     }
 
-    wg.Wait()
-
-    // Notify the Node.js script with computed routes
-    if err := notifyNodeOfRoutes(finalRoutes); err != nil {
-        log.Printf("Failed to notify Node.js script of routes: %v", err)
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(response); err != nil {
+        log.Printf("Failed to encode response: %v", err)
+        http.Error(w, "Failed to encode response. Internal server error.", http.StatusInternalServerError)
+        return
     }
 
-    log.Printf("Generated %d profitable routes.", len(finalRoutes))
-    return finalRoutes, nil
+    log.Println("Routes generated and sent successfully.")
 }
 
 func flattenTokenPrices(nestedPrices map[string]map[string]TokenPrice) map[string]TokenPrice {
