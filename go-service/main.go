@@ -1635,8 +1635,8 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Call  with MarketData directly
-    routes, err := (marketData)
+    // Call generateRoutes with MarketData directly
+    routes, err := generateRoutes(marketData)
     if err != nil {
         log.Printf("Error generating routes: %v", err)
         http.Error(w, "Failed to generate routes. Internal server error.", http.StatusInternalServerError)
