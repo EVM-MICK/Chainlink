@@ -1401,6 +1401,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     return finalRoutes, nil
 }
 
+
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
     tokenPrices map[string]TokenPrice,
@@ -1665,14 +1666,13 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
 func flattenTokenPrices(nestedPrices map[string]map[string]TokenPrice) map[string]TokenPrice {
     flatPrices := make(map[string]TokenPrice)
-    for baseToken, targetMap := range nestedPrices {
-        for targetToken, price := range targetMap {
-            flatPrices[targetToken] = price // Or combine baseToken and targetToken if necessary
+    for _, innerMap := range nestedPrices {
+        for token, price := range innerMap {
+            flatPrices[token] = price
         }
     }
     return flatPrices
 }
-
 
 func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     totalGas := big.NewInt(0)
@@ -3578,7 +3578,7 @@ func main() {
 
     // Health endpoint
     http.HandleFunc("/health", healthHandler)
-    http.Handle("/process-market-data", logRequests(enableCORS(HTTPHandler)))
+    http.Handle("/process-market-data", logRequests(enableCORS(generateRoutesHTTPHandler)))
     http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         log.Printf("Received %s request for %s", r.Method, r.URL.Path)
         http.NotFound(w, r)
