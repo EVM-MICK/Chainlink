@@ -1332,35 +1332,28 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
     }
 
-    // Extract stable token addresses
     stableTokenAddresses := extractStableTokens(marketData.Liquidity)
-
-    // Calculate average liquidity
     averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
     if err != nil {
         return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
-    // Extract gas price from liquidity data
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
+    gasPriceInt := new(big.Int)
+    gasPrice.Int(gasPriceInt)
 
-    // Convert token prices to the expected format and flatten them
     nestedTokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
-    tokenPrices := flattenTokenPrices(nestedTokenPrices)
+    flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-    // Build and process the graph
-    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, tokenPrices, gasPrice)
+    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, flatTokenPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build and process graph: %v", err)
     }
-    log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
 
-    // Filter profitable routes
     filteredRoutes := filterRoutes(profitableRoutes, marketData.StartToken, profitThreshold)
     log.Printf("Filtered %d profitable routes.", len(filteredRoutes))
 
-    // Concurrently compute final routes using stable token combinations
     var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
@@ -1382,7 +1375,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+            gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
             totalCost := new(big.Int).Add(costInt, gasFee)
             profit := new(big.Int).Sub(startAmount, totalCost)
 
@@ -1646,8 +1639,8 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Call generateRoutes with MarketData directly
-    routes, err := generateRoutes(marketData)
+    // Call  with MarketData directly
+    routes, err := (marketData)
     if err != nil {
         log.Printf("Error generating routes: %v", err)
         http.Error(w, "Failed to generate routes. Internal server error.", http.StatusInternalServerError)
@@ -3585,7 +3578,7 @@ func main() {
 
     // Health endpoint
     http.HandleFunc("/health", healthHandler)
-    http.Handle("/process-market-data", logRequests(enableCORS(generateRoutesHTTPHandler)))
+    http.Handle("/process-market-data", logRequests(enableCORS(HTTPHandler)))
     http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         log.Printf("Received %s request for %s", r.Method, r.URL.Path)
         http.NotFound(w, r)
