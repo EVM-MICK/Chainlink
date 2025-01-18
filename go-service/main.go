@@ -862,20 +862,9 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
 // calculateTotalGasCost calculates the total gas cost for a transaction.
 func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
     if gasPrice == nil || gasPrice.Cmp(big.NewInt(0)) <= 0 {
-        log.Println("Invalid or nil gas price provided. Defaulting to 50 Gwei.")
         gasPrice = big.NewInt(50 * 1e9) // Default to 50 Gwei
     }
-
-    if gasLimit == 0 {
-        log.Println("Invalid gas limit provided. Defaulting to 800,000 units.")
-        gasLimit = DefaultGasEstimate // Default gas limit
-    }
-
-    totalGasCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
-
-    log.Printf("Calculated total gas cost: %s wei (Gas Price: %s wei, Gas Limit: %d)", totalGasCost.String(), gasPrice.String(), gasLimit)
-
-    return totalGasCost
+    return new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
 }
 
 
@@ -1695,7 +1684,6 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     return avgGas
 }
 
-
 func convertTokenPricesToMap(
     rawPrices map[string]float64,
     liquidityData []LiquidityData,
@@ -1711,15 +1699,15 @@ func convertTokenPricesToMap(
         // Parse price for BaseToken
         srcPrice, srcExists := rawPrices[entry.BaseToken]
         if !srcExists || srcPrice <= 0 {
-            log.Printf("Skipping BaseToken %s due to missing or invalid price", entry.BaseToken)
-            continue
+            log.Printf("Missing price for BaseToken %s, setting default", entry.BaseToken)
+            srcPrice = 1.0 // Default price (to avoid crashes)
         }
 
         // Parse price for TargetToken
         dstPrice, dstExists := rawPrices[entry.TargetToken]
         if !dstExists || dstPrice <= 0 {
-            log.Printf("Skipping TargetToken %s due to missing or invalid price", entry.TargetToken)
-            continue
+            log.Printf("Missing price for TargetToken %s, setting default", entry.TargetToken)
+            dstPrice = 1.0 // Default price (to avoid crashes)
         }
 
         // Convert DstAmount (liquidity) from *big.Int to *big.Float
@@ -1735,7 +1723,6 @@ func convertTokenPricesToMap(
     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
-
 
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
@@ -1914,42 +1901,16 @@ func handleClientReconnection(client *WebSocketClient) {
 }
 
 
-func filterRoutes(routes []Route, chainID int64, startToken string, startAmount *big.Int, maxHops int, profitThreshold *big.Int) ([]Route, error) {
-	var filtered []Route
-
-	for _, route := range routes {
-		// Check chain ID
-		if route.ChainID != chainID {
-			continue
-		}
-
-		// Check start token
-		if strings.ToLower(route.StartToken) != strings.ToLower(startToken) {
-			continue
-		}
-
-		// Check start amount
-		if route.StartAmount.Cmp(startAmount) < 0 {
-			continue
-		}
-
-		// Check max hops
-		if route.Hops > maxHops {
-			continue
-		}
-
-		// Check profit threshold
-		if route.Profit.Cmp(profitThreshold) < 0 {
-			continue
-		}
-
-		// Add to filtered routes
-		filtered = append(filtered, route)
-	}
-
-	return filtered, nil
+func filterRoutes(routes []Route, startToken string, profitThreshold *big.Int) []Route {
+    var filtered []Route
+    for _, route := range routes {
+        if strings.EqualFold(route.StartToken, startToken) && route.Profit.Cmp(profitThreshold) > 0 {
+            filtered = append(filtered, route)
+        }
+    }
+    log.Printf("Filtered %d routes based on profit threshold.", len(filtered))
+    return filtered
 }
-
 
 // FetchGasPrice fetches the current gas price with caching and retry logic
 func fetchGasPrice() (*big.Int, error) {
@@ -2397,45 +2358,41 @@ func filterValidAddresses(tokens []StableToken) []string {
 	return addresses
 }
 
-func buildAndProcessGraph(liquidityData []LiquidityData, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*WeightedGraph, []Route, error) {
-    // Convert LiquidityData to TokenPair with weights
-    tokenPairs := convertToTokenPairsWithWeights(liquidityData)
+func buildAndProcessGraph(
+    liquidity []LiquidityData,
+    tokenPrices map[string]TokenPrice,
+    gasPrice *big.Float,
+) (*WeightedGraph, []Route, error) {
+    graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
+    var routes []Route
 
-    // Call BuildGraph to construct the graph
-    graph, err := BuildGraph(tokenPairs)
-    if err != nil {
-        log.Printf("Error building graph: %v", err)
-        return nil, nil, err
-    }
+    for _, entry := range liquidity {
+        if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
+            log.Printf("Invalid DstAmount in liquidity entry: %+v", entry)
+            continue
+        }
 
-    // Evaluate each route in the graph for profitability
-    profitableRoutes := []Route{}
-    for srcToken, dstMap := range graph.AdjacencyList {
-        for dstToken := range dstMap {
-            route := []string{srcToken, dstToken}
-            profit, err := evaluateRouteProfit(route, tokenPrices, gasPrice)
-            if err != nil {
-                log.Printf("Error evaluating route: %v", err)
-                continue
-            }
+        srcPrice, srcExists := tokenPrices[entry.BaseToken]
+        dstPrice, dstExists := tokenPrices[entry.TargetToken]
 
-            if profit != nil {
-                profitableRoutes = append(profitableRoutes, Route{
-                    Path:   route,
-                    Profit: profit,
-                })
-                log.Printf("Profitable route found: %v with profit: %s", route, profit.String())
-            }
+        if !srcExists || !dstExists {
+            log.Printf("Skipping edge due to missing price data: %s -> %s", entry.BaseToken, entry.TargetToken)
+            continue
+        }
+
+        weight := new(big.Float).Quo(dstPrice.Price, srcPrice.Price)
+        if graph.AdjacencyList[entry.BaseToken] == nil {
+            graph.AdjacencyList[entry.BaseToken] = make(map[string]EdgeWeight)
+        }
+
+        graph.AdjacencyList[entry.BaseToken][entry.TargetToken] = EdgeWeight{
+            Weight:    weight,
+            Liquidity: new(big.Float).SetInt(entry.DstAmount),
         }
     }
 
-    if len(profitableRoutes) == 0 {
-        log.Println("No profitable routes found.")
-    } else {
-        log.Printf("Generated %d profitable routes.", len(profitableRoutes))
-    }
-
-    return graph, profitableRoutes, nil
+    log.Printf("Graph built with %d edges.", len(graph.AdjacencyList))
+    return graph, routes, nil
 }
 
 // Updated convertToTokenPairsWithWeights function
