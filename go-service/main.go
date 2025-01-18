@@ -1416,14 +1416,14 @@ func processAndValidateLiquidity(
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
-        var validPaths [][][]PathSegment
+        var validPaths [][][]PathSegment // Handle nested structure of Paths
 
-        for _, path := range data.Paths {
+        for _, path := range data.Paths { // Each path is [][]PathSegment
             var validSegments []PathSegment
 
-            for _, segments := range path {
-                for _, segment := range segments {
-                    // Validate fields of each PathSegment
+            for _, segments := range path { // Each segments is []PathSegment
+                for _, segment := range segments { // Each segment is PathSegment
+                    // Validate each segment
                     if segment.Name == "" || segment.Part <= 0 ||
                         !common.IsHexAddress(segment.FromTokenAddress) ||
                         !common.IsHexAddress(segment.ToTokenAddress) {
@@ -1431,30 +1431,32 @@ func processAndValidateLiquidity(
                         continue
                     }
 
-                    // Check token price availability for the target token
-                    targetTokenPrice, priceOk := tokenPrices[segment.ToTokenAddress]
-                    if !priceOk {
-                        log.Printf("Skipping path segment, missing price for token: %s", segment.ToTokenAddress)
+                    // Check token price availability
+                    price, exists := tokenPrices[segment.ToTokenAddress]
+                    if !exists {
+                        log.Printf("Missing price for token: %s", segment.ToTokenAddress)
                         continue
                     }
 
                     // Calculate destination amount in USD
-                    dstAmountInUSD := new(big.Float).Mul(targetTokenPrice.Price, new(big.Float).SetFloat64(segment.Part))
-                    if dstAmountInUSD.Cmp(big.NewFloat(minDstAmount)) < 0 {
-                        log.Printf("Path segment filtered due to insufficient profitability: TargetToken=%s, DstAmount=%.2f USD",
-                            segment.ToTokenAddress, dstAmountInUSD)
+                    dstAmountInUSD := price.Price.Float64() * segment.Part / math.Pow(10, 18)
+                    if dstAmountInUSD < minDstAmount {
+                        log.Printf("Segment skipped due to insufficient USD value: %f", dstAmountInUSD)
                         continue
                     }
 
+                    // Add valid segment
                     validSegments = append(validSegments, segment)
                 }
             }
 
+            // Only append non-empty segments
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, [][]PathSegment{validSegments})
             }
         }
 
+        // Append data with valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
                 BaseToken:   data.BaseToken,
@@ -1469,7 +1471,6 @@ func processAndValidateLiquidity(
     log.Printf("Validated %d liquidity entries.", len(validLiquidity))
     return validLiquidity
 }
-
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
@@ -2381,36 +2382,44 @@ func buildAndProcessGraph(
     tokenPrices map[string]TokenPrice,
     gasPrice *big.Float,
 ) (*WeightedGraph, []Route, error) {
-    graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
-    var routes []Route
+    // Convert LiquidityData to TokenPair with weights
+    tokenPairs := convertToTokenPairsWithWeights(liquidity)
 
-    for _, entry := range liquidity {
-        if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
-            log.Printf("Invalid DstAmount in liquidity entry: %+v", entry)
-            continue
-        }
+    // Build the graph
+    graph, err := BuildGraph(tokenPairs)
+    if err != nil {
+        log.Printf("Error building graph: %v", err)
+        return nil, nil, err
+    }
 
-        srcPrice, srcExists := tokenPrices[entry.BaseToken]
-        dstPrice, dstExists := tokenPrices[entry.TargetToken]
+    // Evaluate routes for profitability
+    profitableRoutes := []Route{}
+    for srcToken, dstMap := range graph.AdjacencyList {
+        for dstToken := range dstMap {
+            route := []string{srcToken, dstToken}
+            profit, err := evaluateRouteProfit(route, tokenPrices, gasPrice)
+            if err != nil {
+                log.Printf("Error evaluating route: %v", err)
+                continue
+            }
 
-        if !srcExists || !dstExists {
-            log.Printf("Skipping edge due to missing price data: %s -> %s", entry.BaseToken, entry.TargetToken)
-            continue
-        }
-
-        weight := new(big.Float).Quo(dstPrice.Price, srcPrice.Price)
-        if graph.AdjacencyList[entry.BaseToken] == nil {
-            graph.AdjacencyList[entry.BaseToken] = make(map[string]EdgeWeight)
-        }
-
-        graph.AdjacencyList[entry.BaseToken][entry.TargetToken] = EdgeWeight{
-            Weight:    weight,
-            Liquidity: new(big.Float).SetInt(entry.DstAmount),
+            if profit != nil {
+                profitableRoutes = append(profitableRoutes, Route{
+                    Path:   route,
+                    Profit: profit,
+                })
+                log.Printf("Profitable route found: %v with profit: %s", route, profit.String())
+            }
         }
     }
 
-    log.Printf("Graph built with %d edges.", len(graph.AdjacencyList))
-    return graph, routes, nil
+    if len(profitableRoutes) == 0 {
+        log.Println("No profitable routes found.")
+    } else {
+        log.Printf("Generated %d profitable routes.", len(profitableRoutes))
+    }
+
+    return graph, profitableRoutes, nil
 }
 
 // Updated convertToTokenPairsWithWeights function
