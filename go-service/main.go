@@ -1492,8 +1492,8 @@ func processAndValidateLiquidity(
         // Only add liquidity data with valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
-                SrcToken:   baseToken,
-                DstToken: targetToken,
+                BaseToken:   baseToken,
+                TargetToken: targetToken,
                 DstAmount:   data.DstAmount,
                 Gas:         data.Gas,
                 Paths:       validPaths,
@@ -1544,8 +1544,8 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
         }
 
         liquidityData = append(liquidityData, LiquidityData{
-            SrcToken:   liquidityItem["baseToken"].(string),
-            DstToken: liquidityItem["targetToken"].(string),
+            BaseToken:   liquidityItem["baseToken"].(string),
+            TargetToken: liquidityItem["targetToken"].(string),
             DstAmount:   dstAmount,
             Gas:         gas,
             Paths:       paths,
@@ -1792,8 +1792,8 @@ func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
 
         // Append the constructed LiquidityData
         liquidityData = append(liquidityData, LiquidityData{
-            SrcToken:   pair.SrcToken,
-            DstToken: pair.DstToken,
+            BaseToken:   pair.SrcToken,
+            TargetToken: pair.DstToken,
             DstAmount:   new(big.Int), // Default value, adjust as needed
             Gas:         21000,           // Default gas, adjust based on real data
             Paths:       paths,           // Set paths with proper structure
@@ -2415,10 +2415,13 @@ func buildAndProcessGraph(
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
+        // Calculate weight using a known function (e.g., calculateWeightFromLiquidity)
+        weight := calculateWeightFromLiquidity(entry.DstAmount, float64(entry.Gas))
+
         tokenPairs = append(tokenPairs, TokenPair{
-            SrcToken:   baseToken,
+            SrcToken: baseToken,
             DstToken: targetToken,
-            Weight: calculateWeightFromLiquidity(entry.DstAmount, gasPrice),
+            Weight:   weight,
         })
     }
 
