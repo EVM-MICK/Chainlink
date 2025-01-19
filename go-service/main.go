@@ -884,15 +884,19 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
     if len(route) < 2 {
+        log.Println("Invalid route: must contain at least two tokens.")
         return nil, fmt.Errorf("invalid route, must contain at least two tokens")
     }
 
-    // Capital is the initial amount for the route evaluation
+    // Initialize starting capital for route evaluation
     amountIn := new(big.Int).Set(CAPITAL)
     totalGasCost := new(big.Int)
 
+    // Convert gasPrice to *big.Int
     gasPriceInt := new(big.Int)
     gasPrice.Int(gasPriceInt)
+
+    log.Printf("Evaluating route: %v", route)
 
     for i := 0; i < len(route)-1; i++ {
         // Normalize token addresses
@@ -902,16 +906,20 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         // Fetch token price data for normalized addresses
         fromData, ok := tokenPrices[fromToken]
         if !ok {
+            log.Printf("Missing price data for token: %s. Skipping route.", fromToken)
             return nil, fmt.Errorf("missing price data for token: %s", fromToken)
         }
+
         toData, ok := tokenPrices[toToken]
         if !ok {
+            log.Printf("Missing price data for token: %s. Skipping route.", toToken)
             return nil, fmt.Errorf("missing price data for token: %s", toToken)
         }
 
         // Adjust amount for slippage and compute trade amount
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
+            log.Printf("Slippage adjustment failed for token %s -> %s: %v", fromToken, toToken, err)
             return nil, fmt.Errorf("slippage adjustment failed: %v", err)
         }
 
@@ -932,18 +940,22 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 
         // Ensure the trade amount remains positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
+            log.Printf("Trade resulted in zero or negative amount at hop %s -> %s. Skipping route.", fromToken, toToken)
             return nil, fmt.Errorf("trade resulted in zero or negative amount")
         }
     }
 
     // Calculate net profit
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
+    log.Printf("Net profit for route %v: %s (after gas costs)", route, netProfit.String())
 
     // Check if net profit meets the minimum threshold
     if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
+        log.Printf("Route %v did not meet the minimum profit threshold. Skipping route.", route)
         return nil, nil
     }
 
+    log.Printf("Route %v is profitable with net profit: %s", route, netProfit.String())
     return netProfit, nil
 }
 
