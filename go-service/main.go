@@ -2412,11 +2412,13 @@ func buildAndProcessGraph(
     // Normalize token addresses and convert LiquidityData to TokenPair with weights
     tokenPairs := []TokenPair{}
     for _, entry := range liquidity {
+
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
-
+        // Convert DstAmount (*big.Int) to float64
+        dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
         // Calculate weight using a known function (e.g., calculateWeightFromLiquidity)
-        weight := calculateWeightFromLiquidity(entry.DstAmount, float64(entry.Gas))
+        weight := calculateWeightFromLiquidity(dstAmountFloat, float64(entry.Gas))
 
         tokenPairs = append(tokenPairs, TokenPair{
             SrcToken: baseToken,
