@@ -904,27 +904,27 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         toToken := strings.ToLower(route[i+1])
 
         // Fetch token price data for normalized addresses
-        fromData, ok := tokenPrices[fromToken]
-        if !ok {
-            log.Printf("Missing price data for token: %s. Skipping route.", fromToken)
-            return nil, fmt.Errorf("missing price data for token: %s", fromToken)
+        fromData, fromExists := tokenPrices[fromToken]
+        toData, toExists := tokenPrices[toToken]
+        if !fromExists || !toExists {
+            log.Printf("Missing price data for tokens: %s or %s. Skipping route.", fromToken, toToken)
+            return nil, fmt.Errorf("missing price data for tokens: %s or %s", fromToken, toToken)
         }
 
-        toData, ok := tokenPrices[toToken]
-        if !ok {
-            log.Printf("Missing price data for token: %s. Skipping route.", toToken)
-            return nil, fmt.Errorf("missing price data for token: %s", toToken)
-        }
+        // Log fetched prices for debugging
+        log.Printf("Prices: %s -> %s | From Price: %s | To Price: %s", 
+            fromToken, toToken, fromData.Price.String(), toData.Price.String())
 
-        // Adjust amount for slippage and compute trade amount
+        // Adjust amount for slippage
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
-            log.Printf("Slippage adjustment failed for token %s -> %s: %v", fromToken, toToken, err)
+            log.Printf("Slippage adjustment failed for hop %s -> %s: %v", fromToken, toToken, err)
             return nil, fmt.Errorf("slippage adjustment failed: %v", err)
         }
 
         adjustedAmount := new(big.Int)
         adjustedAmountFloat.Int(adjustedAmount)
+        log.Printf("Adjusted amount after slippage: %s", adjustedAmount.String())
 
         // Calculate trade amount based on price ratio
         priceRatio := new(big.Float).Quo(toData.Price, fromData.Price)
@@ -933,10 +933,12 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         // Convert trade amount to integer
         amountIn = new(big.Int)
         tradeAmount.Int(amountIn)
+        log.Printf("Trade amount after price ratio adjustment: %s", amountIn.String())
 
         // Calculate gas cost for the hop
         hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
+        log.Printf("Hop gas cost: %s | Total gas cost so far: %s", hopGasCost.String(), totalGasCost.String())
 
         // Ensure the trade amount remains positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
