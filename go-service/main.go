@@ -1708,7 +1708,7 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
 
     for _, entry := range liquidityData {
         // Ensure BaseToken price exists
-        _, baseExists := rawPrices[entry.BaseToken]
+        basePrice, baseExists := rawPrices[entry.BaseToken]
         if !baseExists {
             log.Printf("Skipping BaseToken %s due to missing price", entry.BaseToken)
             continue
@@ -1720,6 +1720,9 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
             log.Printf("Skipping TargetToken %s due to missing price", entry.TargetToken)
             continue
         }
+
+        // Log BaseToken price
+        log.Printf("BaseToken: %s, BasePrice: %f", entry.BaseToken, basePrice)
 
         // Initialize map for BaseToken if not present
         if _, exists := tokenPrices[entry.BaseToken]; !exists {
@@ -1736,6 +1739,7 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
+
 
 
 // Converts [][]map[string]interface{} back to []LiquidityData
