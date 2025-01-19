@@ -1708,7 +1708,7 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
 
     for _, entry := range liquidityData {
         // Ensure BaseToken price exists
-        basePrice, baseExists := rawPrices[entry.BaseToken]
+        _, baseExists := rawPrices[entry.BaseToken]
         if !baseExists {
             log.Printf("Skipping BaseToken %s due to missing price", entry.BaseToken)
             continue
