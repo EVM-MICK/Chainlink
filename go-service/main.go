@@ -1418,7 +1418,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     return finalRoutes, nil
 }
 
-
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
     tokenPrices map[string]TokenPrice,
@@ -1429,45 +1428,65 @@ func processAndValidateLiquidity(
     for _, data := range liquidity {
         var validPaths [][][]PathSegment
 
+        // Normalize BaseToken and TargetToken addresses
+        baseToken := strings.ToLower(data.BaseToken)
+        targetToken := strings.ToLower(data.TargetToken)
+
         for _, path := range data.Paths {
             var validSegments []PathSegment
 
             for _, segments := range path {
                 for _, segment := range segments {
+                    // Normalize token addresses in the path segment
+                    fromToken := strings.ToLower(segment.FromTokenAddress)
+                    toToken := strings.ToLower(segment.ToTokenAddress)
+
+                    // Validate path segment
                     if segment.Name == "" || segment.Part <= 0 ||
-                        !common.IsHexAddress(segment.FromTokenAddress) ||
-                        !common.IsHexAddress(segment.ToTokenAddress) {
+                        !common.IsHexAddress(fromToken) ||
+                        !common.IsHexAddress(toToken) {
                         log.Printf("Invalid path segment skipped: %+v", segment)
                         continue
                     }
 
-                    price, exists := tokenPrices[segment.ToTokenAddress]
+                    // Check if the price exists for the target token
+                    price, exists := tokenPrices[toToken]
                     if !exists {
-                        log.Printf("Missing price for token: %s", segment.ToTokenAddress)
+                        log.Printf("Missing price for token: %s", toToken)
                         continue
                     }
 
-                    dstAmountInUSD, _ := price.Price.Float64()
+                    // Calculate destination amount in USD
+                    dstAmountInUSD, _ := price.Price.Float64() // Convert big.Float to float64
                     dstAmountInUSD *= segment.Part / math.Pow(10, 18)
 
+                    // Check if the destination amount meets the minimum threshold
                     if dstAmountInUSD < minDstAmount {
                         log.Printf("Segment skipped due to insufficient USD value: %f", dstAmountInUSD)
                         continue
                     }
 
-                    validSegments = append(validSegments, segment)
+                    // Append valid segment
+                    validSegments = append(validSegments, PathSegment{
+                        Name:            segment.Name,
+                        Part:            segment.Part,
+                        FromTokenAddress: fromToken,
+                        ToTokenAddress:   toToken,
+                    })
                 }
             }
 
+            // Only add paths with valid segments
             if len(validSegments) > 0 {
                 validPaths = append(validPaths, [][]PathSegment{validSegments})
             }
         }
 
+        // Only add liquidity data with valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
-                BaseToken:   data.BaseToken,
-                TargetToken: data.TargetToken,
+                BaseToken:   baseToken,
+                TargetToken: targetToken,
                 DstAmount:   data.DstAmount,
                 Gas:         data.Gas,
                 Paths:       validPaths,
@@ -1478,6 +1497,7 @@ func processAndValidateLiquidity(
     log.Printf("Validated %d liquidity entries.", len(validLiquidity))
     return validLiquidity
 }
+
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
@@ -1707,30 +1727,31 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
     tokenPrices := make(map[string]map[string]TokenPrice)
 
     for _, entry := range liquidityData {
+        // Normalize BaseToken and TargetToken addresses to lowercase
+        baseToken := strings.ToLower(entry.BaseToken)
+        targetToken := strings.ToLower(entry.TargetToken)
+
         // Ensure BaseToken price exists
-        basePrice, baseExists := rawPrices[entry.BaseToken]
+        basePrice, baseExists := rawPrices[baseToken]
         if !baseExists {
-            log.Printf("Skipping BaseToken %s due to missing price", entry.BaseToken)
+            log.Printf("Skipping BaseToken %s due to missing price", baseToken)
             continue
         }
 
         // Ensure TargetToken price exists
-        targetPrice, targetExists := rawPrices[entry.TargetToken]
+        targetPrice, targetExists := rawPrices[targetToken]
         if !targetExists {
-            log.Printf("Skipping TargetToken %s due to missing price", entry.TargetToken)
+            log.Printf("Skipping TargetToken %s due to missing price", targetToken)
             continue
         }
 
-        // Log BaseToken price
-        log.Printf("BaseToken: %s, BasePrice: %f", entry.BaseToken, basePrice)
-
         // Initialize map for BaseToken if not present
-        if _, exists := tokenPrices[entry.BaseToken]; !exists {
-            tokenPrices[entry.BaseToken] = make(map[string]TokenPrice)
+        if _, exists := tokenPrices[baseToken]; !exists {
+            tokenPrices[baseToken] = make(map[string]TokenPrice)
         }
 
         // Map BaseToken -> TargetToken
-        tokenPrices[entry.BaseToken][entry.TargetToken] = TokenPrice{
+        tokenPrices[baseToken][targetToken] = TokenPrice{
             Price:     new(big.Float).SetFloat64(targetPrice),
             Liquidity: new(big.Float).SetInt(entry.DstAmount),
         }
@@ -1739,8 +1760,6 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
-
-
 
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
@@ -2381,10 +2400,20 @@ func buildAndProcessGraph(
     tokenPrices map[string]TokenPrice,
     gasPrice *big.Float,
 ) (*WeightedGraph, []Route, error) {
-    // Convert LiquidityData to TokenPair with weights
-    tokenPairs := convertToTokenPairsWithWeights(liquidity)
+    // Normalize token addresses and convert LiquidityData to TokenPair with weights
+    tokenPairs := []TokenPair{}
+    for _, entry := range liquidity {
+        baseToken := strings.ToLower(entry.BaseToken)
+        targetToken := strings.ToLower(entry.TargetToken)
 
-    // Build the graph
+        tokenPairs = append(tokenPairs, TokenPair{
+            BaseToken:   baseToken,
+            TargetToken: targetToken,
+            Weight:      calculateWeight(entry.DstAmount),
+        })
+    }
+
+    // Build the graph from the token pairs
     graph, err := BuildGraph(tokenPairs)
     if err != nil {
         log.Printf("Error building graph: %v", err)
@@ -2394,8 +2423,11 @@ func buildAndProcessGraph(
     // Evaluate routes for profitability
     profitableRoutes := []Route{}
     for srcToken, dstMap := range graph.AdjacencyList {
+        normalizedSrcToken := strings.ToLower(srcToken) // Normalize source token
         for dstToken := range dstMap {
-            route := []string{srcToken, dstToken}
+            normalizedDstToken := strings.ToLower(dstToken) // Normalize destination token
+
+            route := []string{normalizedSrcToken, normalizedDstToken}
             profit, err := evaluateRouteProfit(route, tokenPrices, gasPrice)
             if err != nil {
                 log.Printf("Error evaluating route: %v", err)
@@ -2633,13 +2665,16 @@ func validateTokenPrices(tokenPrices map[string]map[string]TokenPrice, liquidity
     validLiquidity := []LiquidityData{}
 
     for _, entry := range liquidityData {
-        if _, baseExists := tokenPrices[entry.BaseToken]; !baseExists {
-            log.Printf("Skipping entry: BaseToken %s has no valid price.", entry.BaseToken)
+        baseToken := strings.ToLower(entry.BaseToken)
+        targetToken := strings.ToLower(entry.TargetToken)
+
+        if _, baseExists := tokenPrices[baseToken]; !baseExists {
+            log.Printf("Skipping entry: BaseToken %s has no valid price.", baseToken)
             continue
         }
 
-        if _, targetExists := tokenPrices[entry.BaseToken][entry.TargetToken]; !targetExists {
-            log.Printf("Skipping entry: TargetToken %s has no valid price.", entry.TargetToken)
+        if _, targetExists := tokenPrices[baseToken][targetToken]; !targetExists {
+            log.Printf("Skipping entry: TargetToken %s has no valid price.", targetToken)
             continue
         }
 
@@ -2649,6 +2684,7 @@ func validateTokenPrices(tokenPrices map[string]map[string]TokenPrice, liquidity
     log.Printf("Validated %d out of %d liquidity entries.", len(validLiquidity), len(liquidityData))
     return validLiquidity
 }
+
 
 // Helper to convert token prices
 func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float64 {
