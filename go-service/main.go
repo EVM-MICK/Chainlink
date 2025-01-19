@@ -73,7 +73,7 @@ var (
 	uniswapABI    abi.ABI
 	sushiSwapABI  abi.ABI
 )
-var marketDataQueue = make(chan MarketData, 100) // Buffered channel to queue update
+var marketDataQueue = make(chan MarketData, 500) // Buffered channel to queue update
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
