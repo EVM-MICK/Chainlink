@@ -1332,28 +1332,43 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
     }
 
+    // Extract stable token addresses
     stableTokenAddresses := extractStableTokens(marketData.Liquidity)
+
+    // Calculate average liquidity
     averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
     if err != nil {
         return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
+    // Extract gas price from liquidity data
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
     gasPriceInt := new(big.Int)
     gasPrice.Int(gasPriceInt)
 
+    // Convert token prices to the expected format
     nestedTokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
     flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-    graph, profitableRoutes, err := buildAndProcessGraph(marketData.Liquidity, flatTokenPrices, gasPrice)
+    // Validate token prices
+    validatedLiquidity := validateTokenPrices(nestedTokenPrices, marketData.Liquidity)
+    if len(validatedLiquidity) == 0 {
+        return nil, fmt.Errorf("no valid liquidity entries after token price validation")
+    }
+
+    // Build and process the graph
+    graph, profitableRoutes, err := buildAndProcessGraph(validatedLiquidity, flatTokenPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build and process graph: %v", err)
     }
+    log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
 
+    // Filter profitable routes
     filteredRoutes := filterRoutes(profitableRoutes, marketData.StartToken, profitThreshold)
     log.Printf("Filtered %d profitable routes.", len(filteredRoutes))
 
+    // Concurrently compute final routes using stable token combinations
     var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
@@ -1375,6 +1390,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
+            // Calculate profit, factoring in gas fees
             gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
             totalCost := new(big.Int).Add(costInt, gasFee)
             profit := new(big.Int).Sub(startAmount, totalCost)
@@ -1393,6 +1409,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
+    // Notify Node.js script with computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1686,44 +1703,33 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     return avgGas
 }
 
-func convertTokenPricesToMap(
-    rawPrices map[string]float64,
-    liquidityData []LiquidityData,
-) map[string]map[string]TokenPrice {
+func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []LiquidityData) map[string]map[string]TokenPrice {
     tokenPrices := make(map[string]map[string]TokenPrice)
 
     for _, entry := range liquidityData {
-        if entry.DstAmount == nil || entry.DstAmount.Cmp(big.NewInt(0)) <= 0 {
-            log.Printf("Skipping liquidity entry due to invalid DstAmount: %+v", entry)
+        // Ensure BaseToken price exists
+        basePrice, baseExists := rawPrices[entry.BaseToken]
+        if !baseExists {
+            log.Printf("Skipping BaseToken %s due to missing price", entry.BaseToken)
             continue
         }
 
-        // Fetch price for BaseToken
-        srcPrice, srcExists := rawPrices[entry.BaseToken]
-        if !srcExists || srcPrice <= 0 {
-            log.Printf("Missing price for BaseToken %s, setting default", entry.BaseToken)
-            srcPrice = 1.0 // Default price; consider fetching live data if feasible
+        // Ensure TargetToken price exists
+        targetPrice, targetExists := rawPrices[entry.TargetToken]
+        if !targetExists {
+            log.Printf("Skipping TargetToken %s due to missing price", entry.TargetToken)
+            continue
         }
 
-        // Fetch price for TargetToken
-        dstPrice, dstExists := rawPrices[entry.TargetToken]
-        if !dstExists || dstPrice <= 0 {
-            log.Printf("Missing price for TargetToken %s, setting default", entry.TargetToken)
-            dstPrice = 1.0 // Default price; consider fetching live data if feasible
-        }
-
-        // Convert DstAmount to *big.Float
-        liquidity := new(big.Float).SetInt(entry.DstAmount)
-
-        // Initialize token pair map
-        if tokenPrices[entry.BaseToken] == nil {
+        // Initialize map for BaseToken if not present
+        if _, exists := tokenPrices[entry.BaseToken]; !exists {
             tokenPrices[entry.BaseToken] = make(map[string]TokenPrice)
         }
 
-        // Add token price and liquidity data
+        // Map BaseToken -> TargetToken
         tokenPrices[entry.BaseToken][entry.TargetToken] = TokenPrice{
-            Price:     new(big.Float).SetFloat64(dstPrice),
-            Liquidity: liquidity,
+            Price:     new(big.Float).SetFloat64(targetPrice),
+            Liquidity: new(big.Float).SetInt(entry.DstAmount),
         }
     }
 
@@ -2556,46 +2562,88 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
 }
 
 // Updated MonitorMarketAndRebuildGraph function
-func MonitorMarketAndRebuildGraph(payload map[string]interface{}, updateInterval time.Duration, graphChan chan *WeightedGraph, baseThreshold float64, volatilityFactor float64) {
+func MonitorMarketAndRebuildGraph(
+    payload map[string]interface{}, 
+    updateInterval time.Duration, 
+    graphChan chan *WeightedGraph, 
+    baseThreshold float64, 
+    volatilityFactor float64,
+) {
     ticker := time.NewTicker(updateInterval)
     defer ticker.Stop()
 
     for range ticker.C {
         log.Println("Fetching latest liquidity and market data for graph update...")
 
+        // Fetch updated liquidity
         updatedLiquidity, err := fetchUpdatedLiquidity(payload)
         if err != nil {
             log.Printf("Failed to fetch updated liquidity: %v", err)
             continue
         }
 
+        // Fetch current gas price
         gasPrice, err := fetchCurrentGasPrice(payload)
         if err != nil {
             log.Printf("Failed to fetch current gas price: %v", err)
             continue
         }
 
+        // Adjust profit threshold dynamically
         adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
+        // Convert rawTokenPrices to a nested TokenPrice map
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
         nestedTokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity)
         flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-        filteredLiquidity := processAndValidateLiquidity(updatedLiquidity, flatTokenPrices, adjustedThreshold)
+        // Validate token prices
+        validatedLiquidity := validateTokenPrices(nestedTokenPrices, updatedLiquidity)
+        if len(validatedLiquidity) == 0 {
+            log.Println("No valid liquidity entries after token price validation. Skipping this cycle.")
+            continue
+        }
 
+        // Validate and filter liquidity using validated token prices
+        filteredLiquidity := processAndValidateLiquidity(validatedLiquidity, flatTokenPrices, adjustedThreshold)
+
+        // Build and process the graph
         graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, flatTokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
         }
 
+        // Log profitable routes
         for _, route := range profitableRoutes {
             log.Printf("Profitable Route: %v, Profit: %s", route.Path, route.Profit.String())
         }
 
+        // Send updated graph through the channel
         graphChan <- graph
         log.Println("Graph updated successfully.")
     }
+}
+
+func validateTokenPrices(tokenPrices map[string]map[string]TokenPrice, liquidityData []LiquidityData) []LiquidityData {
+    validLiquidity := []LiquidityData{}
+
+    for _, entry := range liquidityData {
+        if _, baseExists := tokenPrices[entry.BaseToken]; !baseExists {
+            log.Printf("Skipping entry: BaseToken %s has no valid price.", entry.BaseToken)
+            continue
+        }
+
+        if _, targetExists := tokenPrices[entry.BaseToken][entry.TargetToken]; !targetExists {
+            log.Printf("Skipping entry: TargetToken %s has no valid price.", entry.TargetToken)
+            continue
+        }
+
+        validLiquidity = append(validLiquidity, entry)
+    }
+
+    log.Printf("Validated %d out of %d liquidity entries.", len(validLiquidity), len(liquidityData))
+    return validLiquidity
 }
 
 // Helper to convert token prices
