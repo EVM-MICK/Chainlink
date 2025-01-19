@@ -73,7 +73,7 @@ var (
 	uniswapABI    abi.ABI
 	sushiSwapABI  abi.ABI
 )
-
+var marketDataQueue = make(chan MarketData, 100) // Buffered channel to queue update
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
@@ -290,10 +290,10 @@ type Payload struct {
     ProfitThreshold float64
     Liquidity       []LiquidityData
 }
+
 type BigInt struct {
     big.Int
 }
-
 
 type LiquidityData struct {
     BaseToken  string
@@ -322,10 +322,7 @@ type PathSegment struct {
 
 var apiRateLimits = make(map[string]*RateLimitTracker)
 
-// type TokenPair struct {
-// 	SrcToken string `json:"srcToken"`
-// 	DstToken string `json:"dstToken"`
-// }
+
 
 type TokenPair struct {
     SrcToken string `json:"srcToken"`
@@ -890,6 +887,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         return nil, fmt.Errorf("invalid route, must contain at least two tokens")
     }
 
+    // Capital is the initial amount for the route evaluation
     amountIn := new(big.Int).Set(CAPITAL)
     totalGasCost := new(big.Int)
 
@@ -897,9 +895,11 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     gasPrice.Int(gasPriceInt)
 
     for i := 0; i < len(route)-1; i++ {
-        fromToken := route[i]
-        toToken := route[i+1]
+        // Normalize token addresses
+        fromToken := strings.ToLower(route[i])
+        toToken := strings.ToLower(route[i+1])
 
+        // Fetch token price data for normalized addresses
         fromData, ok := tokenPrices[fromToken]
         if !ok {
             return nil, fmt.Errorf("missing price data for token: %s", fromToken)
@@ -918,21 +918,28 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         adjustedAmount := new(big.Int)
         adjustedAmountFloat.Int(adjustedAmount)
 
+        // Calculate trade amount based on price ratio
         priceRatio := new(big.Float).Quo(toData.Price, fromData.Price)
         tradeAmount := new(big.Float).Mul(new(big.Float).SetInt(adjustedAmount), priceRatio)
 
+        // Convert trade amount to integer
         amountIn = new(big.Int)
         tradeAmount.Int(amountIn)
 
+        // Calculate gas cost for the hop
         hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
 
+        // Ensure the trade amount remains positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
             return nil, fmt.Errorf("trade resulted in zero or negative amount")
         }
     }
 
+    // Calculate net profit
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
+
+    // Check if net profit meets the minimum threshold
     if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
         return nil, nil
     }
@@ -1485,8 +1492,8 @@ func processAndValidateLiquidity(
         // Only add liquidity data with valid paths
         if len(validPaths) > 0 {
             validLiquidity = append(validLiquidity, LiquidityData{
-                BaseToken:   baseToken,
-                TargetToken: targetToken,
+                SrcToken:   baseToken,
+                DstToken: targetToken,
                 DstAmount:   data.DstAmount,
                 Gas:         data.Gas,
                 Paths:       validPaths,
@@ -1537,8 +1544,8 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
         }
 
         liquidityData = append(liquidityData, LiquidityData{
-            BaseToken:   liquidityItem["baseToken"].(string),
-            TargetToken: liquidityItem["targetToken"].(string),
+            SrcToken:   liquidityItem["baseToken"].(string),
+            DstToken: liquidityItem["targetToken"].(string),
             DstAmount:   dstAmount,
             Gas:         gas,
             Paths:       paths,
@@ -1651,6 +1658,9 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "Invalid request body. Please send valid JSON.", http.StatusBadRequest)
         return
     }
+    marketDataQueue <- marketData
+    log.Println("Market data queued for processing.")
+    w.WriteHeader(http.StatusAccepted)
 
     if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
         log.Println("Missing required fields in the request body")
@@ -1732,8 +1742,7 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
         targetToken := strings.ToLower(entry.TargetToken)
 
         // Ensure BaseToken price exists
-        basePrice, baseExists := rawPrices[baseToken]
-        if !baseExists {
+        if _, baseExists := rawPrices[baseToken]; !baseExists {
             log.Printf("Skipping BaseToken %s due to missing price", baseToken)
             continue
         }
@@ -1783,8 +1792,8 @@ func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
 
         // Append the constructed LiquidityData
         liquidityData = append(liquidityData, LiquidityData{
-            BaseToken:   pair.SrcToken,
-            TargetToken: pair.DstToken,
+            SrcToken:   pair.SrcToken,
+            DstToken: pair.DstToken,
             DstAmount:   new(big.Int), // Default value, adjust as needed
             Gas:         21000,           // Default gas, adjust based on real data
             Paths:       paths,           // Set paths with proper structure
@@ -2407,9 +2416,9 @@ func buildAndProcessGraph(
         targetToken := strings.ToLower(entry.TargetToken)
 
         tokenPairs = append(tokenPairs, TokenPair{
-            BaseToken:   baseToken,
-            TargetToken: targetToken,
-            Weight:      calculateWeight(entry.DstAmount),
+            SrcToken:   baseToken,
+            DstToken: targetToken,
+            Weight: calculateWeightFromLiquidity(entry.DstAmount, gasPrice),
         })
     }
 
@@ -2470,10 +2479,14 @@ func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
         // Calculate weight using dstAmount and gas
         weight := calculateWeightFromLiquidity(dstAmount, gas)
 
-        // Append token pair with calculated weight
+        // Normalize addresses before appending to token pairs
+        srcToken := strings.ToLower(entry.BaseToken)
+        dstToken := strings.ToLower(entry.TargetToken)
+
+        // Append token pair with normalized addresses and calculated weight
         tokenPairs = append(tokenPairs, TokenPair{
-            SrcToken: entry.BaseToken,
-            DstToken: entry.TargetToken,
+            SrcToken: srcToken,
+            DstToken: dstToken,
             Weight:   weight,
         })
     }
@@ -2517,6 +2530,10 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
         go func(pair TokenPair) {
             defer wg.Done()
 
+            // Normalize token addresses to lowercase
+            srcToken := strings.ToLower(pair.SrcToken)
+            dstToken := strings.ToLower(pair.DstToken)
+
             // Convert pair.Weight to *big.Float
             weight := new(big.Float).SetFloat64(pair.Weight)
 
@@ -2532,8 +2549,8 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
                 DstToken   string
                 EdgeWeight EdgeWeight
             }{
-                SrcToken:   pair.SrcToken,
-                DstToken:   pair.DstToken,
+                SrcToken:   srcToken,
+                DstToken:   dstToken,
                 EdgeWeight: edgeWeight,
             }
         }(pair)
@@ -2557,8 +2574,17 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
         log.Println("Graph is empty. No edges were added.")
     }
 
-    log.Printf("Graph built with %d edges", len(graph.AdjacencyList))
+    log.Printf("Graph built with %d edges", countEdges(graph))
     return graph, nil
+}
+
+// countEdges counts the total number of edges in the graph.
+func countEdges(graph *WeightedGraph) int {
+    edgeCount := 0
+    for _, dstMap := range graph.AdjacencyList {
+        edgeCount += len(dstMap)
+    }
+    return edgeCount
 }
 
 func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilityFactor float64) float64 {
