@@ -2701,20 +2701,25 @@ func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*Wei
         close(edgeChan)
     }()
 
-    for edge := range edgeChan {
-        if graph.AdjacencyList[edge.SrcToken] == nil {
-            graph.AdjacencyList[edge.SrcToken] = make(map[string]EdgeWeight)
-        }
-        graph.AdjacencyList[edge.SrcToken][edge.DstToken] = edge.EdgeWeight
-
-        if graph.AdjacencyList[edge.DstToken] == nil {
-            graph.AdjacencyList[edge.DstToken] = make(map[string]EdgeWeight)
-        }
-        graph.AdjacencyList[edge.DstToken][edge.SrcToken] = edge.EdgeWeight
-
-        logEdgeDetails(edge.SrcToken, edge.DstToken, pair.Weight, edge.EdgeWeight.Liquidity)
+   for edge := range edgeChan {
+    if graph.AdjacencyList[edge.SrcToken] == nil {
+        graph.AdjacencyList[edge.SrcToken] = make(map[string]EdgeWeight)
     }
+    graph.AdjacencyList[edge.SrcToken][edge.DstToken] = edge.EdgeWeight
 
+    if graph.AdjacencyList[edge.DstToken] == nil {
+        graph.AdjacencyList[edge.DstToken] = make(map[string]EdgeWeight)
+    }
+    graph.AdjacencyList[edge.DstToken][edge.SrcToken] = edge.EdgeWeight
+
+    // Replace `pair.Weight` with `edge.EdgeWeight.Weight`
+    logEdgeDetails(
+        edge.SrcToken,
+        edge.DstToken,
+        edge.EdgeWeight.Weight.Float64(), // Convert to float64 for logging
+        edge.EdgeWeight.Liquidity,
+    )
+  }
     optimizeGraphConstruction(graph)
 
     if len(graph.AdjacencyList) == 0 {
