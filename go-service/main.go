@@ -773,10 +773,11 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useAStar bool) ([]string, *big.Float, error) {
-    startToken = strings.ToLower(startToken)
-    endToken = strings.ToLower(endToken)
+    startToken = strings.ToLower(startToken) // Normalize input
+    endToken = strings.ToLower(endToken)    // Normalize input
     log.Printf("Starting optimal route computation from %s to %s (useAStar: %t)", startToken, endToken, useAStar)
 
+    // Validate start and end tokens in the graph
     if _, exists := graph.AdjacencyList[startToken]; !exists {
         log.Printf("Start token %s not found in graph", startToken)
         return nil, nil, fmt.Errorf("start token %s not in graph", startToken)
@@ -786,33 +787,48 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
         return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
     }
 
+    // Initialize distances and previous map
     distances := make(map[string]*big.Float)
     previous := make(map[string]string)
-
     for token := range graph.AdjacencyList {
-        distances[token] = big.NewFloat(math.Inf(1))
+        distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
     }
-    distances[startToken] = big.NewFloat(0)
+    distances[startToken] = big.NewFloat(0) // Distance to the startToken is 0
 
+    // Priority queue for Dijkstra/A* algorithm
     pq := make(PriorityQueue, 0)
     heap.Init(&pq)
     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
 
-    visited := make(map[string]bool)
+    visited := make(map[string]bool) // Map to track visited nodes
 
+    // Define an advanced heuristic function for A*
     heuristic := func(token string) *big.Float {
-        return big.NewFloat(1.0)
+        if price, ok := graph.TokenPrices[token]; ok {
+            if endPrice, ok := graph.TokenPrices[endToken]; ok {
+                return new(big.Float).Abs(new(big.Float).Sub(endPrice, price))
+            }
+        }
+        return big.NewFloat(1.0) // Default fallback
     }
 
+    // Main loop for Dijkstra/A* algorithm
     for pq.Len() > 0 {
         current := heap.Pop(&pq).(*Node)
         currentToken := current.Token
+        currentPriority := current.Priority
+
+        // Skip already visited nodes
         if visited[currentToken] {
+            log.Printf("Node %s already visited. Skipping...", currentToken)
             continue
         }
         visited[currentToken] = true
+        log.Printf("Processing node %s with priority %f", currentToken, currentPriority)
 
+        // Check if the endToken is reached
         if currentToken == endToken {
+            log.Println("Destination reached. Reconstructing path...")
             path := []string{}
             for token := endToken; token != ""; token = previous[token] {
                 path = append([]string{token}, path...)
@@ -821,26 +837,49 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
             return path, distances[endToken], nil
         }
 
+        // Process all neighbors of the current token
+        if len(graph.AdjacencyList[currentToken]) == 0 {
+            log.Printf("Orphan token %s has no neighbors. Skipping...", currentToken)
+            continue
+        }
+
         for neighbor, edge := range graph.AdjacencyList[currentToken] {
-            if visited[neighbor] || edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
+            log.Printf("Evaluating neighbor %s from node %s with edge weight %s", neighbor, currentToken, edge.Weight.String())
+
+            // Skip visited neighbors or low-liquidity edges
+            if visited[neighbor] {
+                log.Printf("Neighbor %s skipped: already visited", neighbor)
+                continue
+            }
+            if edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
+                log.Printf("Neighbor %s skipped: insufficient liquidity", neighbor)
                 continue
             }
 
+            // Relax the edge
             tentativeDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
             if tentativeDistance.Cmp(distances[neighbor]) < 0 {
                 distances[neighbor] = tentativeDistance
                 previous[neighbor] = currentToken
+                log.Printf("Relaxing edge to neighbor %s. Updated distance: %s", neighbor, tentativeDistance.String())
 
+                // Calculate priority for the neighbor
                 priority := new(big.Float).Set(tentativeDistance)
                 if useAStar {
                     priority = new(big.Float).Add(tentativeDistance, heuristic(neighbor))
                 }
+
+                // Push the neighbor into the priority queue
                 priorityFloat, _ := priority.Float64()
                 heap.Push(&pq, &Node{Token: neighbor, Priority: priorityFloat})
+                log.Printf("Neighbor %s pushed to the queue with priority %f", neighbor, priorityFloat)
+            } else {
+                log.Printf("No relaxation needed for neighbor %s.", neighbor)
             }
         }
     }
 
+    // If no path was found
     log.Printf("No path found from %s to %s", startToken, endToken)
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
@@ -2442,35 +2481,50 @@ func buildAndProcessGraph(
     gasPrice *big.Float,
 ) (*WeightedGraph, error) {
     tokenPairs := []TokenPair{}
+    prioritizedPairs := []TokenPair{}
+
+    // Process liquidity entries to build token pairs
     for _, entry := range liquidity {
-        baseToken := strings.ToLower(entry.BaseToken) // Normalize to lowercase
+        baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
+        // Calculate weight based on liquidity and gas
         dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
         weight := calculateWeightFromLiquidity(dstAmountFloat, float64(entry.Gas))
 
-        // Add to token pairs
-        tokenPairs = append(tokenPairs, TokenPair{
-            SrcToken: baseToken,
-            DstToken: targetToken,
-            Weight:   weight,
-        })
+        // Create TokenPair and prioritize USDC
+        pair := TokenPair{SrcToken: baseToken, DstToken: targetToken, Weight: weight}
+        if baseToken == "0xaf88d065e77c8cc2239327c5edb3a432268e5831" { // USDC address
+            prioritizedPairs = append(prioritizedPairs, pair)
+        } else {
+            tokenPairs = append(tokenPairs, pair)
+        }
     }
 
+    // Combine prioritized pairs with others
+    tokenPairs = append(prioritizedPairs, tokenPairs...)
+
+    // Build the graph using the combined token pairs
     graph, err := BuildGraph(tokenPairs)
     if err != nil {
         log.Printf("Error building graph: %v", err)
         return nil, err
     }
 
-    // Debug log: Verify tokens in the graph
-    log.Printf("Graph constructed with %d nodes and %d edges.", len(graph.AdjacencyList), len(tokenPairs))
-    for token := range graph.AdjacencyList {
-        log.Printf("Token in graph: %s", token)
+    // Log details about the constructed graph
+    totalEdges := countEdges(graph)
+    log.Printf("Graph constructed with %d nodes and %d edges.", len(graph.AdjacencyList), totalEdges)
+    for node, neighbors := range graph.AdjacencyList {
+        neighborKeys := []string{}
+        for neighbor := range neighbors {
+            neighborKeys = append(neighborKeys, neighbor)
+        }
+        log.Printf("Node: %s | Neighbors: %v", node, neighborKeys)
     }
 
     return graph, nil
 }
+
 
 // Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
@@ -2578,14 +2632,29 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
             graph.AdjacencyList[edge.SrcToken] = make(map[string]EdgeWeight)
         }
         graph.AdjacencyList[edge.SrcToken][edge.DstToken] = edge.EdgeWeight
+
+        // Ensure target tokens are added as nodes even if they are not base tokens
+        if _, exists := graph.AdjacencyList[edge.DstToken]; !exists {
+            graph.AdjacencyList[edge.DstToken] = make(map[string]EdgeWeight)
+        }
     }
 
     if len(graph.AdjacencyList) == 0 {
         log.Println("Graph is empty. No edges were added.")
     }
 
-    log.Printf("Graph built with %d edges", countEdges(graph))
+    totalEdges := countEdges(graph)
+    log.Printf("Graph built with %d edges", totalEdges)
     return graph, nil
+}
+
+// countEdges counts the total number of edges in the graph.
+func countEdges(graph *WeightedGraph) int {
+    edgeCount := 0
+    for _, dstMap := range graph.AdjacencyList {
+        edgeCount += len(dstMap)
+    }
+    return edgeCount
 }
 
 // countEdges counts the total number of edges in the graph.
