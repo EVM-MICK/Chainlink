@@ -1479,16 +1479,51 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
     prioritizedLiquidity := []LiquidityData{}
+    usdcPairs := make(map[string]LiquidityData) // Map TargetToken -> LiquidityData for USDC pairs
 
+    // Extract USDC-based pairs
     for _, entry := range liquidity {
         if strings.EqualFold(entry.BaseToken, usdcAddress) {
             prioritizedLiquidity = append(prioritizedLiquidity, entry)
+            usdcPairs[strings.ToLower(entry.TargetToken)] = entry
         }
     }
 
     log.Printf("Prioritized liquidity with USDC as BaseToken: %d entries", len(prioritizedLiquidity))
+
+    // Process non-USDC pairs and estimate liquidity using USDC
+    for _, entry := range liquidity {
+        if !strings.EqualFold(entry.BaseToken, usdcAddress) {
+            baseToken := strings.ToLower(entry.BaseToken)
+
+            if usdcLiquidity, exists := usdcPairs[baseToken]; exists {
+                // Combine USDC -> BaseToken and BaseToken -> TargetToken for estimation
+                estimatedLiquidity := combineLiquidity(usdcLiquidity, entry)
+
+                log.Printf("Estimated liquidity for USDC -> %s -> %s: %s", entry.BaseToken, entry.TargetToken, estimatedLiquidity.DstAmount.String())
+
+                prioritizedLiquidity = append(prioritizedLiquidity, estimatedLiquidity)
+            } else {
+                log.Printf("No USDC pair found for BaseToken %s. Skipping estimation for %s -> %s.", entry.BaseToken, entry.BaseToken, entry.TargetToken)
+            }
+        }
+    }
+
     return prioritizedLiquidity
 }
+
+func combineLiquidity(usdcLiquidity, nonUSDCEntry LiquidityData) LiquidityData {
+    combinedDstAmount := new(big.Int).Mul(usdcLiquidity.DstAmount, nonUSDCEntry.DstAmount)
+    combinedDstAmount.Div(combinedDstAmount, big.NewInt(1e18)) // Adjust for token decimals
+
+    return LiquidityData{
+        BaseToken:  usdcLiquidity.BaseToken, // Start with USDC
+        TargetToken: nonUSDCEntry.TargetToken,
+        DstAmount: combinedDstAmount,
+        Gas:       usdcLiquidity.Gas + nonUSDCEntry.Gas, // Combine gas costs
+    }
+}
+
 
 
 func processAndValidateLiquidity(
