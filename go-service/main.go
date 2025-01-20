@@ -2479,7 +2479,7 @@ func filterValidAddresses(tokens []StableToken) []string {
 
 func buildAndProcessGraph(
     liquidity []LiquidityData,
-    tokenPrices map[string]TokenPrice,
+    tokenPrices map[string]*big.Float, // Adjusted to match BuildGraph argument
     gasPrice *big.Float,
 ) (*WeightedGraph, error) {
     tokenPairs := []TokenPair{}
@@ -2506,8 +2506,8 @@ func buildAndProcessGraph(
     // Combine prioritized pairs with others
     tokenPairs = append(prioritizedPairs, tokenPairs...)
 
-    // Build the graph using the combined token pairs
-    graph, err := BuildGraph(tokenPairs)
+    // Build the graph using the combined token pairs and token prices
+    graph, err := BuildGraph(tokenPairs, tokenPrices) // Pass tokenPrices as the second argument
     if err != nil {
         log.Printf("Error building graph: %v", err)
         return nil, err
@@ -2526,6 +2526,7 @@ func buildAndProcessGraph(
 
     return graph, nil
 }
+
 
 
 // Updated convertToTokenPairsWithWeights function
