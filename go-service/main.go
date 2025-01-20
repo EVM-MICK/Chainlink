@@ -2479,16 +2479,25 @@ func filterValidAddresses(tokens []StableToken) []string {
 
 func buildAndProcessGraph(
     liquidity []LiquidityData,
-    tokenPrices map[string]*big.Float, // Adjusted to match BuildGraph argument
+    tokenPrices map[string]TokenPrice,
     gasPrice *big.Float,
 ) (*WeightedGraph, error) {
     tokenPairs := []TokenPair{}
     prioritizedPairs := []TokenPair{}
+    flatTokenPrices := make(map[string]*big.Float) // Map for flattened token prices
 
-    // Process liquidity entries to build token pairs
+    // Process liquidity entries to build token pairs and flatten token prices
     for _, entry := range liquidity {
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
+
+        // Convert tokenPrices to *big.Float for use in graph
+        if tokenPrice, ok := tokenPrices[baseToken]; ok {
+            flatTokenPrices[baseToken] = tokenPrice.Price
+        }
+        if tokenPrice, ok := tokenPrices[targetToken]; ok {
+            flatTokenPrices[targetToken] = tokenPrice.Price
+        }
 
         // Calculate weight based on liquidity and gas
         dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
@@ -2506,8 +2515,8 @@ func buildAndProcessGraph(
     // Combine prioritized pairs with others
     tokenPairs = append(prioritizedPairs, tokenPairs...)
 
-    // Build the graph using the combined token pairs and token prices
-    graph, err := BuildGraph(tokenPairs, tokenPrices) // Pass tokenPrices as the second argument
+    // Build the graph using the combined token pairs and flattened token prices
+    graph, err := BuildGraph(tokenPairs, flatTokenPrices)
     if err != nil {
         log.Printf("Error building graph: %v", err)
         return nil, err
@@ -2526,8 +2535,6 @@ func buildAndProcessGraph(
 
     return graph, nil
 }
-
-
 
 // Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
