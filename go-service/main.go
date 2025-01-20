@@ -883,12 +883,14 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
+     startTime := time.Now() // Start tracking execution time
+    defer log.Printf("Execution time for evaluating route %v: %s", route, time.Since(startTime)) // Log latency
     if len(route) < 2 {
         log.Println("Invalid route: must contain at least two tokens.")
         return nil, fmt.Errorf("invalid route, must contain at least two tokens")
     }
 
-    // Initialize starting capital for route evaluation
+    // Initialize starting capital
     amountIn := new(big.Int).Set(CAPITAL)
     totalGasCost := new(big.Int)
 
@@ -904,27 +906,27 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         toToken := strings.ToLower(route[i+1])
 
         // Fetch token price data for normalized addresses
-        fromData, fromExists := tokenPrices[fromToken]
-        toData, toExists := tokenPrices[toToken]
-        if !fromExists || !toExists {
-            log.Printf("Missing price data for tokens: %s or %s. Skipping route.", fromToken, toToken)
-            return nil, fmt.Errorf("missing price data for tokens: %s or %s", fromToken, toToken)
+        fromData, ok := tokenPrices[fromToken]
+        if !ok {
+            log.Printf("Missing price data for token: %s. Skipping route.", fromToken)
+            return nil, fmt.Errorf("missing price data for token: %s", fromToken)
         }
 
-        // Log fetched prices for debugging
-        log.Printf("Prices: %s -> %s | From Price: %s | To Price: %s", 
-            fromToken, toToken, fromData.Price.String(), toData.Price.String())
+        toData, ok := tokenPrices[toToken]
+        if !ok {
+            log.Printf("Missing price data for token: %s. Skipping route.", toToken)
+            return nil, fmt.Errorf("missing price data for token: %s", toToken)
+        }
 
-        // Adjust amount for slippage
+        // Adjust amount for slippage and compute trade amount
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
-            log.Printf("Slippage adjustment failed for hop %s -> %s: %v", fromToken, toToken, err)
+            log.Printf("Slippage adjustment failed for token %s -> %s: %v", fromToken, toToken, err)
             return nil, fmt.Errorf("slippage adjustment failed: %v", err)
         }
 
         adjustedAmount := new(big.Int)
         adjustedAmountFloat.Int(adjustedAmount)
-        log.Printf("Adjusted amount after slippage: %s", adjustedAmount.String())
 
         // Calculate trade amount based on price ratio
         priceRatio := new(big.Float).Quo(toData.Price, fromData.Price)
@@ -933,12 +935,11 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         // Convert trade amount to integer
         amountIn = new(big.Int)
         tradeAmount.Int(amountIn)
-        log.Printf("Trade amount after price ratio adjustment: %s", amountIn.String())
 
         // Calculate gas cost for the hop
         hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
-        log.Printf("Hop gas cost: %s | Total gas cost so far: %s", hopGasCost.String(), totalGasCost.String())
+        log.Printf("Hop gas cost for %s -> %s: %s", fromToken, toToken, hopGasCost.String())
 
         // Ensure the trade amount remains positive
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
@@ -949,7 +950,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 
     // Calculate net profit
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
-    log.Printf("Net profit for route %v: %s (after gas costs)", route, netProfit.String())
+    log.Printf("Route %v | Net Profit: %s | Profit Threshold: %s", route, netProfit.String(), MINIMUM_PROFIT_THRESHOLD.String())
 
     // Check if net profit meets the minimum threshold
     if netProfit.Cmp(MINIMUM_PROFIT_THRESHOLD) < 0 {
@@ -960,6 +961,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     log.Printf("Route %v is profitable with net profit: %s", route, netProfit.String())
     return netProfit, nil
 }
+
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
@@ -1444,6 +1446,7 @@ func processAndValidateLiquidity(
     tokenPrices map[string]TokenPrice,
     minDstAmount float64,
 ) []LiquidityData {
+    startTime := time.Now() // Start tracking execution time
     var validLiquidity []LiquidityData
 
     for _, data := range liquidity {
@@ -1515,10 +1518,15 @@ func processAndValidateLiquidity(
         }
     }
 
+    // Log dropped liquidity entries
+    droppedEntries := len(liquidity) - len(validLiquidity)
+    if droppedEntries > 0 {
+        log.Printf("Dropped %d liquidity entries due to missing token prices or invalid segments.", droppedEntries)
+    }
+
     log.Printf("Validated %d liquidity entries.", len(validLiquidity))
     return validLiquidity
 }
-
 
 func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, error) {
     rawLiquidity, ok := payload["liquidity"].([]interface{})
@@ -2424,13 +2432,15 @@ func buildAndProcessGraph(
     gasPrice *big.Float,
 ) (*WeightedGraph, []Route, error) {
     // Normalize token addresses and convert LiquidityData to TokenPair with weights
+    startTime := time.Now() // Start tracking execution time
     tokenPairs := []TokenPair{}
     for _, entry := range liquidity {
-
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
+
         // Convert DstAmount (*big.Int) to float64
         dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
+
         // Calculate weight using a known function (e.g., calculateWeightFromLiquidity)
         weight := calculateWeightFromLiquidity(dstAmountFloat, float64(entry.Gas))
 
@@ -2447,6 +2457,10 @@ func buildAndProcessGraph(
         log.Printf("Error building graph: %v", err)
         return nil, nil, err
     }
+
+    // Initialize trade tracking metrics
+    var tradeCount int
+    cumulativeProfit := new(big.Int)
 
     // Evaluate routes for profitability
     profitableRoutes := []Route{}
@@ -2467,7 +2481,12 @@ func buildAndProcessGraph(
                     Path:   route,
                     Profit: profit,
                 })
+                // Update trade metrics
+                tradeCount++
+                cumulativeProfit.Add(cumulativeProfit, profit)
+
                 log.Printf("Profitable route found: %v with profit: %s", route, profit.String())
+                log.Printf("Trade count: %d | Cumulative profit: %s", tradeCount, cumulativeProfit.String())
             }
         }
     }
@@ -2477,6 +2496,9 @@ func buildAndProcessGraph(
     } else {
         log.Printf("Generated %d profitable routes.", len(profitableRoutes))
     }
+
+    // Log final metrics for the session
+    log.Printf("Final trade count: %d | Total cumulative profit: %s", tradeCount, cumulativeProfit.String())
 
     return graph, profitableRoutes, nil
 }
