@@ -1361,12 +1361,12 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
-    // Validate inputs
+    // Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
-    // Parse start amount
+    // Parse the start amount
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
@@ -1395,7 +1395,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("no valid liquidity entries after token price validation")
     }
 
-    // Filter liquidity to prioritize USDC-based pairs
+    // Prioritize USDC-based liquidity
     prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
     if len(prioritizedLiquidity) == 0 {
         log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
@@ -1427,6 +1427,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
+            // Compute the optimal route
             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
             if err != nil || len(path) <= 1 {
                 log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
@@ -1465,7 +1466,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Notify Node.js script with computed routes
+    // Notify the Node.js script with computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1475,6 +1476,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
+
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
