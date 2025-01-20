@@ -1396,11 +1396,11 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
 
     // Filter liquidity to prioritize USDC-based pairs
-    // prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
-    // if len(prioritizedLiquidity) == 0 {
-    //     log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
-    //     prioritizedLiquidity = validatedLiquidity // Fall back to all validated liquidity
-    // }
+    prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
+    if len(prioritizedLiquidity) == 0 {
+        log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
+        prioritizedLiquidity = validatedLiquidity // Fall back to all validated liquidity
+    }
 
     // Build and process the graph
     graph, err := buildAndProcessGraph(prioritizedLiquidity, flatTokenPrices, gasPrice)
@@ -2589,7 +2589,6 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
 }
 
 func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*WeightedGraph, error) {
-    // Initialize the graph structure with token prices
     graph := &WeightedGraph{
         AdjacencyList: make(map[string]map[string]EdgeWeight),
         TokenPrices:   tokenPrices, // Assign token prices
@@ -2608,17 +2607,13 @@ func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*Wei
         go func(pair TokenPair) {
             defer wg.Done()
 
-            // Normalize token addresses to lowercase
             srcToken := strings.ToLower(pair.SrcToken)
             dstToken := strings.ToLower(pair.DstToken)
-
-            // Convert pair.Weight to *big.Float
             weight := new(big.Float).SetFloat64(pair.Weight)
 
-            // Initialize edgeWeight with proper *big.Float types
             edgeWeight := EdgeWeight{
                 Weight:    weight,
-                Liquidity: big.NewFloat(0), // Default liquidity set to 0
+                Liquidity: big.NewFloat(1), // Replace with actual liquidity if available
             }
 
             // Send edge data to the channel
@@ -2640,17 +2635,22 @@ func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*Wei
         close(edgeChan)
     }()
 
-    // Collect edges from the channel and add them to the graph
+    // Collect edges and add them to the graph
     for edge := range edgeChan {
         if graph.AdjacencyList[edge.SrcToken] == nil {
             graph.AdjacencyList[edge.SrcToken] = make(map[string]EdgeWeight)
         }
         graph.AdjacencyList[edge.SrcToken][edge.DstToken] = edge.EdgeWeight
 
-        // Ensure target tokens are added as nodes even if they are not base tokens
-        if _, exists := graph.AdjacencyList[edge.DstToken]; !exists {
+        // Add reverse edge for bidirectional trading
+        if graph.AdjacencyList[edge.DstToken] == nil {
             graph.AdjacencyList[edge.DstToken] = make(map[string]EdgeWeight)
         }
+        graph.AdjacencyList[edge.DstToken][edge.SrcToken] = edge.EdgeWeight
+
+        // Log edge creation
+        log.Printf("Edge added: %s -> %s | Weight: %s | Liquidity: %s",
+            edge.SrcToken, edge.DstToken, edge.EdgeWeight.Weight.String(), edge.EdgeWeight.Liquidity.String())
     }
 
     if len(graph.AdjacencyList) == 0 {
@@ -2658,20 +2658,12 @@ func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*Wei
         return nil, fmt.Errorf("no edges added to the graph")
     }
 
-    // Debug log to verify tokens and edges
     totalEdges := countEdges(graph)
-    log.Printf("Graph built with %d edges", totalEdges)
-    log.Printf("Graph constructed with %d nodes.", len(graph.AdjacencyList))
-    for token, neighbors := range graph.AdjacencyList {
-        neighborTokens := []string{}
-        for neighbor := range neighbors {
-            neighborTokens = append(neighborTokens, neighbor)
-        }
-        log.Printf("Node: %s | Neighbors: %v", token, neighborTokens)
-    }
+    log.Printf("Graph constructed with %d nodes and %d edges.", len(graph.AdjacencyList), totalEdges)
 
     return graph, nil
 }
+
 
 
 // countEdges counts the total number of edges in the graph.
