@@ -773,9 +773,10 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useAStar bool) ([]string, *big.Float, error) {
+    startToken = strings.ToLower(startToken)
+    endToken = strings.ToLower(endToken)
     log.Printf("Starting optimal route computation from %s to %s (useAStar: %t)", startToken, endToken, useAStar)
 
-    // Check if start and end tokens exist in the graph
     if _, exists := graph.AdjacencyList[startToken]; !exists {
         log.Printf("Start token %s not found in graph", startToken)
         return nil, nil, fmt.Errorf("start token %s not in graph", startToken)
@@ -785,52 +786,33 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
         return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
     }
 
-    // Initialize distances and previous map
     distances := make(map[string]*big.Float)
     previous := make(map[string]string)
 
-    log.Println("Initializing distances and priority queue...")
     for token := range graph.AdjacencyList {
-        distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
+        distances[token] = big.NewFloat(math.Inf(1))
     }
-    distances[startToken] = big.NewFloat(0) // Distance to the startToken is 0
+    distances[startToken] = big.NewFloat(0)
 
-    // Priority queue for the algorithm
     pq := make(PriorityQueue, 0)
     heap.Init(&pq)
     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
 
-    log.Println("Priority queue initialized with the start token.")
-
-    // Map to track visited nodes
     visited := make(map[string]bool)
 
-    // Define heuristic function for A* (can be replaced with domain-specific logic)
     heuristic := func(token string) *big.Float {
-        if token == endToken {
-            return big.NewFloat(0) // No distance if it's the end token
-        }
-        // Example heuristic: constant cost (can be replaced with real estimates)
         return big.NewFloat(1.0)
     }
 
-    // Main loop for Dijkstra/A* algorithm
     for pq.Len() > 0 {
         current := heap.Pop(&pq).(*Node)
         currentToken := current.Token
-        currentPriority := current.Priority
-
         if visited[currentToken] {
-            log.Printf("Node %s already visited. Skipping...", currentToken)
             continue
         }
         visited[currentToken] = true
 
-        log.Printf("Processing node %s with priority %f", currentToken, currentPriority)
-
-        // If the endToken is reached, reconstruct and return the path
         if currentToken == endToken {
-            log.Println("Destination reached. Reconstructing path...")
             path := []string{}
             for token := endToken; token != ""; token = previous[token] {
                 path = append([]string{token}, path...)
@@ -839,44 +821,26 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
             return path, distances[endToken], nil
         }
 
-        // Process all neighbors of the current token
         for neighbor, edge := range graph.AdjacencyList[currentToken] {
-            log.Printf("Evaluating neighbor %s from node %s with edge weight %s", neighbor, currentToken, edge.Weight.String())
-
-            // Skip visited neighbors or low-liquidity edges
-            if visited[neighbor] {
-                log.Printf("Neighbor %s already visited. Skipping...", neighbor)
-                continue
-            }
-            if edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
-                log.Printf("Neighbor %s has insufficient liquidity. Skipping...", neighbor)
+            if visited[neighbor] || edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
                 continue
             }
 
-            // Relax the edge
             tentativeDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
             if tentativeDistance.Cmp(distances[neighbor]) < 0 {
-                log.Printf("Relaxing edge to neighbor %s. Updated distance: %s", neighbor, tentativeDistance.String())
                 distances[neighbor] = tentativeDistance
                 previous[neighbor] = currentToken
 
-                // Calculate priority for the neighbor
                 priority := new(big.Float).Set(tentativeDistance)
                 if useAStar {
                     priority = new(big.Float).Add(tentativeDistance, heuristic(neighbor))
                 }
-
-                // Push the neighbor into the priority queue
                 priorityFloat, _ := priority.Float64()
                 heap.Push(&pq, &Node{Token: neighbor, Priority: priorityFloat})
-                log.Printf("Neighbor %s pushed to the queue with priority %f", neighbor, priorityFloat)
-            } else {
-                log.Printf("No relaxation needed for neighbor %s.", neighbor)
             }
         }
     }
 
-    // If no path was found
     log.Printf("No path found from %s to %s", startToken, endToken)
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
@@ -1361,45 +1325,58 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
+    // Parse start amount
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
     }
 
+    // Extract stable token addresses
     stableTokenAddresses := extractStableTokens(marketData.Liquidity)
 
+    // Calculate average liquidity
     averageLiquidity, err := calculateAverageLiquidityFromData(marketData.Liquidity, marketData.StartToken)
     if err != nil {
         return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
     }
     log.Printf("Average liquidity calculated: %f", averageLiquidity)
 
+    // Extract gas price
     gasPrice := extractGasPriceFromLiquidity(marketData.Liquidity)
     gasPriceInt := new(big.Int)
     gasPrice.Int(gasPriceInt)
 
+    // Convert token prices and validate liquidity
     nestedTokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
     flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
-
     validatedLiquidity := validateTokenPrices(nestedTokenPrices, marketData.Liquidity)
     if len(validatedLiquidity) == 0 {
         return nil, fmt.Errorf("no valid liquidity entries after token price validation")
     }
 
-    // Build the graph
-    graph, err := buildAndProcessGraph(validatedLiquidity, flatTokenPrices, gasPrice)
+    // Filter liquidity to prioritize USDC-based pairs
+    prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
+    if len(prioritizedLiquidity) == 0 {
+        log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
+        prioritizedLiquidity = validatedLiquidity // Fall back to all validated liquidity
+    }
+
+    // Build and process the graph
+    graph, err := buildAndProcessGraph(prioritizedLiquidity, flatTokenPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
+    // Initialize trade tracking
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
 
+    // Iterate over stable token addresses
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1411,12 +1388,13 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
             if err != nil || len(path) <= 1 {
+                log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
                 return
             }
 
+            // Calculate total cost and profit
             costInt := new(big.Int)
             cost.Int(costInt)
-
             gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
             totalCost := new(big.Int).Add(costInt, gasFee)
 
@@ -1426,6 +1404,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             log.Printf("Route: %s -> %s | Dynamic Threshold: %s | Net Profit: %s",
                 marketData.StartToken, endToken, dynamicThreshold.String(), profit.String())
 
+            // Check profitability
             if profit.Cmp(dynamicThreshold) > 0 {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1445,6 +1424,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
+    // Notify Node.js script with computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1453,6 +1433,20 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         len(finalRoutes), tradeCount, cumulativeProfit.String())
 
     return finalRoutes, nil
+}
+
+func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
+    usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
+    prioritizedLiquidity := []LiquidityData{}
+
+    for _, entry := range liquidity {
+        if strings.EqualFold(entry.BaseToken, usdcAddress) {
+            prioritizedLiquidity = append(prioritizedLiquidity, entry)
+        }
+    }
+
+    log.Printf("Prioritized liquidity with USDC as BaseToken: %d entries", len(prioritizedLiquidity))
+    return prioritizedLiquidity
 }
 
 
@@ -2449,12 +2443,13 @@ func buildAndProcessGraph(
 ) (*WeightedGraph, error) {
     tokenPairs := []TokenPair{}
     for _, entry := range liquidity {
-        baseToken := strings.ToLower(entry.BaseToken)
+        baseToken := strings.ToLower(entry.BaseToken) // Normalize to lowercase
         targetToken := strings.ToLower(entry.TargetToken)
 
         dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
         weight := calculateWeightFromLiquidity(dstAmountFloat, float64(entry.Gas))
 
+        // Add to token pairs
         tokenPairs = append(tokenPairs, TokenPair{
             SrcToken: baseToken,
             DstToken: targetToken,
@@ -2468,7 +2463,12 @@ func buildAndProcessGraph(
         return nil, err
     }
 
-    log.Printf("Graph built with %d edges.", len(graph.AdjacencyList))
+    // Debug log: Verify tokens in the graph
+    log.Printf("Graph constructed with %d nodes and %d edges.", len(graph.AdjacencyList), len(tokenPairs))
+    for token := range graph.AdjacencyList {
+        log.Printf("Token in graph: %s", token)
+    }
+
     return graph, nil
 }
 
