@@ -936,7 +936,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
     }
 
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
-    dynamicThreshold := calculateDynamicThreshold(totalGasCost)
+    dynamicThreshold := calculateDynamicProfitThreshold(totalGasCost)
     log.Printf("Route: %v | From Price: %s | To Price: %s | Profit Threshold: %s | Net Profit: %s",
         route, tokenPrices[route[0]].Price.String(), tokenPrices[route[len(route)-1]].Price.String(),
         dynamicThreshold.String(), netProfit.String())
@@ -997,18 +997,16 @@ func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, e
 }
 
 // Dynamically calculate the profit threshold
-func calculateDynamicProfitThreshold(gasPrice *big.Float) (*big.Int, error) {
-	gasCost := new(big.Float).Mul(gasPrice, big.NewFloat(DefaultGasEstimate))
-	flashLoanFee := new(big.Float).Mul(new(big.Float).SetInt(CAPITAL), FLASHLOAN_FEE_RATE)
-	totalCost := new(big.Float).Add(gasCost, flashLoanFee)
+func calculateDynamicProfitThreshold(totalGasCost *big.Int) *big.Int {
+    // Dynamic calculation: gas cost * 3 + base profit of $200
+    gasBuffer := new(big.Int).Mul(totalGasCost, big.NewInt(3)) // Gas cost * 3
+    baseProfit := big.NewInt(200)                             // Base profit in USD
+    dynamicThreshold := new(big.Int).Add(gasBuffer, baseProfit)
 
-	profitThreshold := new(big.Float).Add(totalCost, new(big.Float).SetInt(MINIMUM_PROFIT_THRESHOLD))
-	result := new(big.Int)
-	profitThreshold.Int(result) // Convert *big.Float to *big.Int
-
-	log.Printf("Dynamic profit threshold: %s", result.String())
-	return result, nil
+    log.Printf("Calculated dynamic profit threshold: %s", dynamicThreshold.String())
+    return dynamicThreshold
 }
+
 
 // Set a value in the cache
 func setToCache(key string, value interface{}) {
@@ -1400,7 +1398,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalCost := new(big.Int).Add(costInt, gasFee)
 
-        dynamicThreshold := calculateDynamicThreshold(gasFee)
+        dynamicThreshold := calculateDynamicProfitThreshold(gasFee)
         profit := new(big.Int).Sub(startAmount, totalCost)
 
         log.Printf("Route: %s -> %s | Dynamic Threshold: %s | Net Profit: %s",
