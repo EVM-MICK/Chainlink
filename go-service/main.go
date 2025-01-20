@@ -73,7 +73,7 @@ var (
 	uniswapABI    abi.ABI
 	sushiSwapABI  abi.ABI
 )
-var marketDataQueue = make(chan MarketData, 100) // Buffered channel to queue update
+var marketDataQueue = make(chan MarketData, 500) // Buffered channel to queue update
 var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
@@ -883,19 +883,15 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 
 // EvaluateRouteProfit evaluates the profitability of a given route
 func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
-    startTime := time.Now()
-    defer log.Printf("Execution time for evaluating route %v: %s", route, time.Since(startTime))
-
     if len(route) < 2 {
         log.Println("Invalid route: must contain at least two tokens.")
         return nil, fmt.Errorf("invalid route, must contain at least two tokens")
     }
 
-    // Initialize starting capital
     amountIn := new(big.Int).Set(CAPITAL)
     totalGasCost := new(big.Int)
-
-    gasPriceInt := convertBigFloatToInt(gasPrice)
+    gasPriceInt := new(big.Int)
+    gasPrice.Int(gasPriceInt)
 
     log.Printf("Evaluating route: %v", route)
 
@@ -908,6 +904,7 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
             log.Printf("Missing price data for token: %s. Skipping route.", fromToken)
             return nil, fmt.Errorf("missing price data for token: %s", fromToken)
         }
+
         toData, ok := tokenPrices[toToken]
         if !ok {
             log.Printf("Missing price data for token: %s. Skipping route.", toToken)
@@ -916,8 +913,8 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 
         adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
         if err != nil {
-            log.Printf("Slippage adjustment failed for token %s -> %s: %v", fromToken, toToken, err)
-            return nil, fmt.Errorf("slippage adjustment failed: %v", err)
+            log.Printf("Slippage adjustment failed for %s -> %s: %v", fromToken, toToken, err)
+            return nil, err
         }
 
         adjustedAmount := new(big.Int)
@@ -931,7 +928,6 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
 
         hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
         totalGasCost.Add(totalGasCost, hopGasCost)
-        log.Printf("Hop gas cost for %s -> %s: %s", fromToken, toToken, hopGasCost.String())
 
         if amountIn.Cmp(big.NewInt(0)) <= 0 {
             log.Printf("Trade resulted in zero or negative amount at hop %s -> %s. Skipping route.", fromToken, toToken)
@@ -939,20 +935,18 @@ func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasP
         }
     }
 
-    // Calculate dynamic threshold
-    gasBuffer := new(big.Int).Mul(totalGasCost, big.NewInt(3)) // Gas cost * 3
-    dynamicThreshold := new(big.Int).Add(gasBuffer, big.NewInt(200)) // Base profit of $200
-    log.Printf("Dynamic profit threshold for route %v: %s", route, dynamicThreshold.String())
-
     netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
-    log.Printf("Route %v | Net Profit: %s | Profit Threshold: %s", route, netProfit.String(), dynamicThreshold.String())
+    dynamicThreshold := calculateDynamicThreshold(totalGasCost)
+    log.Printf("Route: %v | From Price: %s | To Price: %s | Profit Threshold: %s | Net Profit: %s",
+        route, tokenPrices[route[0]].Price.String(), tokenPrices[route[len(route)-1]].Price.String(),
+        dynamicThreshold.String(), netProfit.String())
 
     if netProfit.Cmp(dynamicThreshold) < 0 {
-        log.Printf("Route %v did not meet the profit threshold. Skipping route.", route)
+        log.Printf("Route %v skipped: Net profit %s below threshold %s", route, netProfit.String(), dynamicThreshold.String())
         return nil, nil
     }
 
-    log.Printf("Route %v is profitable with net profit: %s", route, netProfit.String())
+    log.Printf("Route %v is profitable: Net profit %s", route, netProfit.String())
     return netProfit, nil
 }
 
@@ -1339,6 +1333,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
+    // Parse start amount
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
@@ -1363,7 +1358,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     nestedTokenPrices := convertTokenPricesToMap(marketData.TokenPrices, marketData.Liquidity)
     flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-    // Validate token prices
+    // Validate token prices and filter liquidity
     validatedLiquidity := validateTokenPrices(nestedTokenPrices, marketData.Liquidity)
     if len(validatedLiquidity) == 0 {
         return nil, fmt.Errorf("no valid liquidity entries after token price validation")
@@ -1376,7 +1371,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Graph successfully built with %d profitable routes.", len(profitableRoutes))
 
-    // Track execution metrics
+    // Initialize trade tracking
     var tradeCount int
     cumulativeProfit := new(big.Int)
 
@@ -1385,51 +1380,48 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var mu sync.Mutex
     var wg sync.WaitGroup
 
-    for _, endToken := range stableTokenAddresses {
-        if strings.EqualFold(endToken, marketData.StartToken) {
-            continue
-        }
-
-        wg.Add(1)
-        go func(endToken string) {
-            defer wg.Done()
-
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
-            if err != nil || len(path) <= 1 {
-                return
-            }
-
-            costInt := new(big.Int)
-            cost.Int(costInt)
-
-            // Calculate gas fee and total cost
-            gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
-            totalCost := new(big.Int).Add(costInt, gasFee)
-
-            // Dynamically adjust profit threshold
-            gasBuffer := new(big.Int).Mul(gasFee, big.NewInt(3)) // Gas cost * 3
-            dynamicThreshold := new(big.Int).Add(gasBuffer, big.NewInt(200)) // Base profit of $200
-            log.Printf("Dynamic profit threshold for route %s -> %s: %s", marketData.StartToken, endToken, dynamicThreshold.String())
-
-            // Calculate profit
-            profit := new(big.Int).Sub(startAmount, totalCost)
-            if profit.Cmp(dynamicThreshold) > 0 {
-                mu.Lock()
-                finalRoutes = append(finalRoutes, Route{
-                    Path:   path,
-                    Profit: profit,
-                })
-                tradeCount++
-                cumulativeProfit.Add(cumulativeProfit, profit)
-                mu.Unlock()
-                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-            } else {
-                log.Printf("Route %s -> %s did not meet the profit threshold. Profit: %s, Threshold: %s",
-                    marketData.StartToken, endToken, profit.String(), dynamicThreshold.String())
-            }
-        }(endToken)
+   for _, endToken := range stableTokenAddresses {
+    if strings.EqualFold(endToken, marketData.StartToken) {
+        continue
     }
 
+    wg.Add(1)
+    go func(endToken string) {
+        defer wg.Done()
+
+        path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
+        if err != nil || len(path) <= 1 {
+            return
+        }
+
+        costInt := new(big.Int)
+        cost.Int(costInt)
+
+        gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
+        totalCost := new(big.Int).Add(costInt, gasFee)
+
+        dynamicThreshold := calculateDynamicThreshold(gasFee)
+        profit := new(big.Int).Sub(startAmount, totalCost)
+
+        log.Printf("Route: %s -> %s | Dynamic Threshold: %s | Net Profit: %s",
+            marketData.StartToken, endToken, dynamicThreshold.String(), profit.String())
+
+        if profit.Cmp(dynamicThreshold) > 0 {
+            mu.Lock()
+            finalRoutes = append(finalRoutes, Route{
+                Path:   path,
+                Profit: profit,
+            })
+            tradeCount++
+            cumulativeProfit.Add(cumulativeProfit, profit)
+            mu.Unlock()
+            log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
+        } else {
+            log.Printf("Route %s -> %s skipped: Net profit %s below threshold %s",
+                marketData.StartToken, endToken, profit.String(), dynamicThreshold.String())
+        }
+    }(endToken)
+  }
     wg.Wait()
 
     // Notify Node.js script with computed routes
@@ -2459,24 +2451,24 @@ func buildAndProcessGraph(
     cumulativeProfit := new(big.Int)
 
     for srcToken, dstMap := range graph.AdjacencyList {
-        for dstToken := range dstMap {
-            route := []string{strings.ToLower(srcToken), strings.ToLower(dstToken)}
-            profit, err := evaluateRouteProfit(route, tokenPrices, gasPrice)
-            if err != nil {
-                log.Printf("Error evaluating route: %v", err)
-                continue
-            }
-
-            if profit != nil {
-                profitableRoutes = append(profitableRoutes, Route{
-                    Path:   route,
-                    Profit: profit,
-                })
-                tradeCount++
-                cumulativeProfit.Add(cumulativeProfit, profit)
-                log.Printf("Profitable route found: %v with profit: %s", route, profit.String())
-            }
+    for dstToken := range dstMap {
+        route := []string{srcToken, dstToken}
+        profit, err := evaluateRouteProfit(route, tokenPrices, gasPrice)
+        if err != nil {
+            log.Printf("Error evaluating route: %v", err)
+            continue
         }
+
+        if profit != nil {
+            profitableRoutes = append(profitableRoutes, Route{
+                Path:   route,
+                Profit: profit,
+            })
+            log.Printf("Profitable route found: %v with profit: %s", route, profit.String())
+        } else {
+            log.Printf("Route %v skipped due to failing profit checks.", route)
+        }
+    }
     }
 
     log.Printf("Generated %d profitable routes. Total trades: %d | Cumulative profit: %s",
