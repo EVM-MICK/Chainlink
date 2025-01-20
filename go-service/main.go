@@ -773,11 +773,15 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useAStar bool) ([]string, *big.Float, error) {
+    log.Printf("Starting optimal route computation from %s to %s (useAStar: %t)", startToken, endToken, useAStar)
+
     // Check if start and end tokens exist in the graph
     if _, exists := graph.AdjacencyList[startToken]; !exists {
+        log.Printf("Start token %s not found in graph", startToken)
         return nil, nil, fmt.Errorf("start token %s not in graph", startToken)
     }
     if _, exists := graph.AdjacencyList[endToken]; !exists {
+        log.Printf("End token %s not found in graph", endToken)
         return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
     }
 
@@ -785,6 +789,7 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
     distances := make(map[string]*big.Float)
     previous := make(map[string]string)
 
+    log.Println("Initializing distances and priority queue...")
     for token := range graph.AdjacencyList {
         distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
     }
@@ -794,6 +799,8 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
     pq := make(PriorityQueue, 0)
     heap.Init(&pq)
     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
+
+    log.Println("Priority queue initialized with the start token.")
 
     // Map to track visited nodes
     visited := make(map[string]bool)
@@ -811,31 +818,45 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
     for pq.Len() > 0 {
         current := heap.Pop(&pq).(*Node)
         currentToken := current.Token
+        currentPriority := current.Priority
 
         if visited[currentToken] {
+            log.Printf("Node %s already visited. Skipping...", currentToken)
             continue
         }
         visited[currentToken] = true
 
+        log.Printf("Processing node %s with priority %f", currentToken, currentPriority)
+
         // If the endToken is reached, reconstruct and return the path
         if currentToken == endToken {
+            log.Println("Destination reached. Reconstructing path...")
             path := []string{}
             for token := endToken; token != ""; token = previous[token] {
                 path = append([]string{token}, path...)
             }
+            log.Printf("Path found: %v | Total distance: %s", path, distances[endToken].String())
             return path, distances[endToken], nil
         }
 
         // Process all neighbors of the current token
         for neighbor, edge := range graph.AdjacencyList[currentToken] {
+            log.Printf("Evaluating neighbor %s from node %s with edge weight %s", neighbor, currentToken, edge.Weight.String())
+
             // Skip visited neighbors or low-liquidity edges
-            if visited[neighbor] || edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
+            if visited[neighbor] {
+                log.Printf("Neighbor %s already visited. Skipping...", neighbor)
+                continue
+            }
+            if edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
+                log.Printf("Neighbor %s has insufficient liquidity. Skipping...", neighbor)
                 continue
             }
 
             // Relax the edge
             tentativeDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
             if tentativeDistance.Cmp(distances[neighbor]) < 0 {
+                log.Printf("Relaxing edge to neighbor %s. Updated distance: %s", neighbor, tentativeDistance.String())
                 distances[neighbor] = tentativeDistance
                 previous[neighbor] = currentToken
 
@@ -848,11 +869,15 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
                 // Push the neighbor into the priority queue
                 priorityFloat, _ := priority.Float64()
                 heap.Push(&pq, &Node{Token: neighbor, Priority: priorityFloat})
+                log.Printf("Neighbor %s pushed to the queue with priority %f", neighbor, priorityFloat)
+            } else {
+                log.Printf("No relaxation needed for neighbor %s.", neighbor)
             }
         }
     }
 
     // If no path was found
+    log.Printf("No path found from %s to %s", startToken, endToken)
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
 
@@ -2610,10 +2635,10 @@ func getEnvAsFloat(key string, defaultValue float64) float64 {
 
 // Updated MonitorMarketAndRebuildGraph function
 func MonitorMarketAndRebuildGraph(
-    payload map[string]interface{}, 
-    updateInterval time.Duration, 
-    graphChan chan *WeightedGraph, 
-    baseThreshold float64, 
+    payload map[string]interface{},
+    updateInterval time.Duration,
+    graphChan chan *WeightedGraph,
+    baseThreshold float64,
     volatilityFactor float64,
 ) {
     ticker := time.NewTicker(updateInterval)
@@ -2655,20 +2680,17 @@ func MonitorMarketAndRebuildGraph(
         filteredLiquidity := processAndValidateLiquidity(validatedLiquidity, flatTokenPrices, adjustedThreshold)
 
         // Build and process the graph
-        graph, profitableRoutes, err := buildAndProcessGraph(filteredLiquidity, flatTokenPrices, gasPrice)
+        graph, err := buildAndProcessGraph(filteredLiquidity, flatTokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
         }
 
-        // Log profitable routes
-        for _, route := range profitableRoutes {
-            log.Printf("Profitable Route: %v, Profit: %s", route.Path, route.Profit.String())
-        }
+        // Log the graph update success
+        log.Println("Graph updated successfully.")
 
         // Send updated graph through the channel
         graphChan <- graph
-        log.Println("Graph updated successfully.")
     }
 }
 
