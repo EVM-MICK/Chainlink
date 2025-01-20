@@ -1396,11 +1396,11 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
 
     // Filter liquidity to prioritize USDC-based pairs
-    prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
-    if len(prioritizedLiquidity) == 0 {
-        log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
-        prioritizedLiquidity = validatedLiquidity // Fall back to all validated liquidity
-    }
+    // prioritizedLiquidity := prioritizeUSDCLiquidity(validatedLiquidity)
+    // if len(prioritizedLiquidity) == 0 {
+    //     log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
+    //     prioritizedLiquidity = validatedLiquidity // Fall back to all validated liquidity
+    // }
 
     // Build and process the graph
     graph, err := buildAndProcessGraph(prioritizedLiquidity, flatTokenPrices, gasPrice)
