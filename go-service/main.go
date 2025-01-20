@@ -121,7 +121,8 @@ type PermitDetails struct {
 }
 
 type WeightedGraph struct {
-	AdjacencyList map[string]map[string]EdgeWeight // Nested maps for graph edges
+    AdjacencyList map[string]map[string]EdgeWeight // Nested maps for graph edges
+    TokenPrices   map[string]*big.Float           // Token prices mapped by token address
 }
 
 type MarketData struct {
@@ -809,7 +810,7 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
                 return new(big.Float).Abs(new(big.Float).Sub(endPrice, price))
             }
         }
-        return big.NewFloat(1.0) // Default fallback
+        return big.NewFloat(1.0) // Default fallback heuristic
     }
 
     // Main loop for Dijkstra/A* algorithm
@@ -883,6 +884,7 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useA
     log.Printf("No path found from %s to %s", startToken, endToken)
     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 }
+
 
 // calculateTotalGasCost calculates the total gas cost for a transaction.
 func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
@@ -1425,7 +1427,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, false)
+            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
             if err != nil || len(path) <= 1 {
                 log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
                 return
@@ -2578,9 +2580,13 @@ func convertToTokenPairs(liquidityData []LiquidityData) []TokenPair {
     return tokenPairs
 }
 
-func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
-    // Initialize the graph structure
-    graph := &WeightedGraph{AdjacencyList: make(map[string]map[string]EdgeWeight)}
+func BuildGraph(tokenPairs []TokenPair, tokenPrices map[string]*big.Float) (*WeightedGraph, error) {
+    // Initialize the graph structure with token prices
+    graph := &WeightedGraph{
+        AdjacencyList: make(map[string]map[string]EdgeWeight),
+        TokenPrices:   tokenPrices, // Assign token prices
+    }
+
     var wg sync.WaitGroup
     edgeChan := make(chan struct {
         SrcToken   string
@@ -2604,7 +2610,7 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
             // Initialize edgeWeight with proper *big.Float types
             edgeWeight := EdgeWeight{
                 Weight:    weight,
-                Liquidity: big.NewFloat(0), // Default liquidity as 0
+                Liquidity: big.NewFloat(0), // Default liquidity set to 0
             }
 
             // Send edge data to the channel
@@ -2641,21 +2647,24 @@ func BuildGraph(tokenPairs []TokenPair) (*WeightedGraph, error) {
 
     if len(graph.AdjacencyList) == 0 {
         log.Println("Graph is empty. No edges were added.")
+        return nil, fmt.Errorf("no edges added to the graph")
     }
 
+    // Debug log to verify tokens and edges
     totalEdges := countEdges(graph)
     log.Printf("Graph built with %d edges", totalEdges)
+    log.Printf("Graph constructed with %d nodes.", len(graph.AdjacencyList))
+    for token, neighbors := range graph.AdjacencyList {
+        neighborTokens := []string{}
+        for neighbor := range neighbors {
+            neighborTokens = append(neighborTokens, neighbor)
+        }
+        log.Printf("Node: %s | Neighbors: %v", token, neighborTokens)
+    }
+
     return graph, nil
 }
 
-// countEdges counts the total number of edges in the graph.
-func countEdges(graph *WeightedGraph) int {
-    edgeCount := 0
-    for _, dstMap := range graph.AdjacencyList {
-        edgeCount += len(dstMap)
-    }
-    return edgeCount
-}
 
 // countEdges counts the total number of edges in the graph.
 func countEdges(graph *WeightedGraph) int {
@@ -2665,6 +2674,7 @@ func countEdges(graph *WeightedGraph) int {
     }
     return edgeCount
 }
+
 
 func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilityFactor float64) float64 {
     gasPriceFloat, _ := gasPrice.Float64() // Convert *big.Float to float64
