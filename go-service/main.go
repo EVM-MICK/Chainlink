@@ -1049,14 +1049,11 @@ func logEdgeDetails(src, dst string, weight float64, liquidity *big.Float) {
 
 // Dynamically calculate the profit threshold
 func calculateDynamicProfitThreshold(totalGasCost *big.Int) *big.Int {
-    // Calculate dynamic profit threshold: (Gas cost * 3) + Base profit ($200 equivalent)
-    gasMultiplier := big.NewInt(3)                             // Multiplier for gas cost
-    baseProfit := big.NewInt(200)                              // Base profit in USD
-    gasBuffer := new(big.Int).Mul(totalGasCost, gasMultiplier) // Gas cost * 3
+    gasBuffer := new(big.Int).Mul(totalGasCost, big.NewInt(2)) // Gas cost * 2
+    baseProfit := big.NewInt(100)                              // Base profit in USD
+    dynamicThreshold := new(big.Int).Add(gasBuffer, baseProfit)
 
-    dynamicThreshold := new(big.Int).Add(gasBuffer, baseProfit) // Total threshold
     log.Printf("Calculated dynamic profit threshold: %s (Gas Cost: %s)", dynamicThreshold.String(), totalGasCost.String())
-
     return dynamicThreshold
 }
 
@@ -1070,9 +1067,9 @@ func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
                 entry.BaseToken, entry.TargetToken, entry.DstAmount.String())
         }
     }
-    log.Printf("Validated %d out of %d liquidity entries.", len(validEntries), len(liquidity))
     return validEntries
 }
+
 
 // Set a value in the cache
 func setToCache(key string, value interface{}) {
@@ -2753,40 +2750,40 @@ func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilit
 }
 
 func calculateWeightFromLiquidity(dstAmount, gas float64) float64 {
-    // Retrieve configurable factors from the environment
-    weightFactor := getEnvAsFloat("WEIGHT_FACTOR", 1.0)      // Default: 1.0
-    liquidityFactor := getEnvAsFloat("LIQUIDITY_FACTOR", 1.0) // Default: 1.0
-
-    // Validate inputs to prevent errors
-    if dstAmount <= 0 {
-        log.Printf("Invalid dstAmount: %f. dstAmount must be greater than zero.", dstAmount)
-        return math.MaxFloat64 // Return the maximum possible weight for invalid entries
+    if dstAmount <= 0 || gas <= 0 {
+        log.Printf("Invalid parameters for weight calculation: dstAmount=%f, gas=%f", dstAmount, gas)
+        return math.MaxFloat64 // Assign maximum weight for invalid entries
     }
 
-    if gas <= 0 {
-        log.Printf("Invalid gas: %f. Gas must be greater than zero.", gas)
-        return math.MaxFloat64 // Return the maximum possible weight for invalid entries
-    }
+    // Weight calculation logic
+    weightFactor := getEnvAsFloat("WEIGHT_FACTOR", 1.0)
+    liquidityFactor := getEnvAsFloat("LIQUIDITY_FACTOR", 1.0)
+    logDstAmount := math.Log(dstAmount + 1) // Avoid log(0)
+    logGas := math.Log(gas + 1)
 
-    // Use logarithms for a dampened effect
-    logDstAmount := math.Log(dstAmount) // Dampens large dstAmount values
-    logGas := math.Log(gas + 1)         // Prevents log(0)
-
-    // Apply weight and liquidity factors
     dampenedDstAmount := logDstAmount * weightFactor
     dampenedGas := logGas * liquidityFactor
 
-    // Calculate the final weight
     weight := dampenedDstAmount - dampenedGas
 
-    // Log the calculation for debugging
-    log.Printf(
-        "Weight calculated: dstAmount=%f, gas=%f, weightFactor=%f, liquidityFactor=%f, weight=%f",
-        dstAmount, gas, weightFactor, liquidityFactor, weight,
-    )
+    // Cap extreme weight values
+    const maxWeight = 1e6 // Define a maximum cap for weight based on business logic
+    if weight > maxWeight {
+        log.Printf("Weight capped: Original=%f, Capped=%f", weight, maxWeight)
+        weight = maxWeight
+    }
+
+    if weight < -maxWeight {
+        log.Printf("Weight capped: Original=%f, Capped=%f", weight, -maxWeight)
+        weight = -maxWeight
+    }
+
+    log.Printf("Weight calculated: dstAmount=%f, gas=%f, weightFactor=%f, liquidityFactor=%f, weight=%f",
+        dstAmount, gas, weightFactor, liquidityFactor, weight)
 
     return weight
 }
+
 
 // Helper function to fetch environment variables as floats
 func getEnvAsFloat(key string, defaultValue float64) float64 {
