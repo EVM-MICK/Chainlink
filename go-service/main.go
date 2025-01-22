@@ -1424,35 +1424,23 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             defer wg.Done()
 
             // Compute the optimal route
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
-            if err != nil || len(path) <= 1 {
-                log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
-                return
-            }
+           path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
+if err != nil || len(path) <= 1 {
+    log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
+    continue
+}
 
-            // Convert flatTokenPrices to map[string]*big.Float
-            tokenPrices := make(map[string]*big.Float)
-            for token, price := range flatTokenPrices {
-                tokenPrices[token] = price.Price
-            }
-
-            // Convert cost (*big.Float) to *big.Int
-            costInt := new(big.Int)
-            cost.Int(costInt)
-
-            // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceInt, costInt, minProfitThreshold)
-            if profitable {
-                mu.Lock()
-                finalRoutes = append(finalRoutes, Route{
-                    Path:   path,
-                    Profit: profit,
-                })
-                tradeCount++
-                cumulativeProfit.Add(cumulativeProfit, profit)
-                mu.Unlock()
-                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-            } else {
+profitable, profit := evaluateRouteProfit(startAmount, path, flatTokenPrices, gasPriceInt, cost, minProfitThreshold)
+if profitable {
+    finalRoutes = append(finalRoutes, Route{
+        Path:   path,
+        Profit: profit,
+    })
+    tradeCount++
+    cumulativeProfit.Add(cumulativeProfit, profit)
+    log.Printf("Profitable route: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
+}
+ else {
                 log.Printf("Route %s -> %s skipped: Net profit %s below thresholds", marketData.StartToken, endToken, profit.String())
             }
         }(endToken)
@@ -2560,11 +2548,22 @@ if !exists || dstPrice.Price == nil {
     weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
 
         // Skip invalid or extreme weights
-        if weight == math.MaxFloat64 {
-            log.Printf("Skipping invalid weight calculation: BaseToken=%s, TargetToken=%s, DstAmount=%f, Gas=%f",
-                baseToken, targetToken, dstAmountUSDValue, float64(entry.Gas))
-            continue
-        }
+        // if weight == math.MaxFloat64 {
+        //     log.Printf("Skipping invalid weight calculation: BaseToken=%s, TargetToken=%s, DstAmount=%f, Gas=%f",
+        //         baseToken, targetToken, dstAmountUSDValue, float64(entry.Gas))
+        //     continue
+        // }
+           if dstAmountUSDValue > 0 && weight != math.MaxFloat64 {
+    if graph.AdjacencyList[baseToken] == nil {
+        graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
+    }
+    graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
+        Weight:    big.NewFloat(weight),
+        Liquidity: new(big.Float).Set(dstAmountUSD), // Use USD value for liquidity
+    }
+} else {
+    log.Printf("Skipping invalid graph entry: %s -> %s", baseToken, targetToken)
+}
 
         // Cap weights to prevent extreme values
         const maxWeight = 1e6
