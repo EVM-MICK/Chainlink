@@ -2498,6 +2498,13 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
 }
 
+func convertToUSD(dstAmount *big.Int, tokenPrice *big.Float) *big.Float {
+    dstAmountFloat := new(big.Float).SetInt(dstAmount)
+    usdValue := new(big.Float).Mul(dstAmountFloat, tokenPrice)
+    return usdValue
+}
+
+
 func filterValidAddresses(tokens []StableToken) []string {
 	var addresses []string
 	for _, token := range tokens {
@@ -2532,10 +2539,17 @@ func buildAndProcessGraph(
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
-
+       
         // Calculate the weight for the edge
-        dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
-        weight := calculateWeightFromLiquidity(dstAmountFloat, float64(entry.Gas))
+        //dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
+        // Convert DstAmount to USD
+    dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice)
+    dstAmountUSDValue, ok := dstAmountUSD.Float64()
+    if !ok || dstAmountUSDValue <= 0 {
+        log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f", src, dst, dstAmountUSDValue)
+        continue
+    }
+        weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
 
         // Skip invalid or extreme weights
         if weight == math.MaxFloat64 {
@@ -2582,6 +2596,8 @@ func buildAndProcessGraph(
 
     return graph, nil
 }
+
+
 
 // Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
