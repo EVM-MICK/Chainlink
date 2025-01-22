@@ -920,14 +920,25 @@ func evaluateRouteProfit(
     cost *big.Int,
     minProfitThreshold *big.Int,
 ) (bool, *big.Int) {
-    // Calculate the total gas fee
+    // Calculate the total gas fee in native token
     gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+
+    // Fetch the price of the gas token in USD
+    gasToken := path[0] // Assume the first token in the path is the gas token
+    gasPriceUSD, ok := tokenPrices[gasToken]
+    if !ok {
+        log.Printf("Missing USD price for gas token: %s. Skipping route.", gasToken)
+        return false, nil
+    }
+
+    // Define token decimals (typically 18 for ETH or similar tokens)
+    tokenDecimals := 18 // Update as needed if decimals are dynamic
+
+    // Calculate the dynamic threshold for profitability
+    dynamicThreshold := calculateDynamicProfitThreshold(gasFee, gasPriceUSD, tokenDecimals)
 
     // Add gas fee to the swap cost
     totalCost := new(big.Int).Add(cost, gasFee)
-
-    // Calculate the dynamic threshold for profitability
-    dynamicThreshold := calculateDynamicProfitThreshold(gasFee)
 
     // Calculate the profit
     profit := new(big.Int).Sub(startAmount, totalCost)
@@ -944,7 +955,6 @@ func evaluateRouteProfit(
     log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profit.String(), minProfitThreshold.String())
     return false, profit
 }
-
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
