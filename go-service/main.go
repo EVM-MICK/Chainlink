@@ -2555,23 +2555,14 @@ func buildAndProcessGraph(
             weight = -maxWeight
         }
 
-       // Add src and dst to the graph
-        if graph.AdjacencyList[src] == nil {
-            graph.AdjacencyList[src] = make(map[string]EdgeWeight)
+        // Add the edge to the adjacency list
+        if graph.AdjacencyList[baseToken] == nil {
+            graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
         }
-        graph.AdjacencyList[src][dst] = EdgeWeight{
+        graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
             Weight:    big.NewFloat(weight),
             Liquidity: new(big.Float).SetInt(entry.DstAmount),
         }
-
-        // Add the edge to the adjacency list
-        // if graph.AdjacencyList[baseToken] == nil {
-        //     graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
-        // }
-        // graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
-        //     Weight:    big.NewFloat(weight),
-        //     Liquidity: new(big.Float).SetInt(entry.DstAmount),
-        // }
     }
 
     // Optimize the graph by removing redundant edges or self-loops
