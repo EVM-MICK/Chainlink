@@ -2533,57 +2533,40 @@ func buildAndProcessGraph(
     for _, entry := range liquidity {
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
-       // Skip invalid dstAmount or gas
+
+        // Skip invalid dstAmount or gas
         if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas == 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
-    dstPrice, exists := tokenPrices[targetToken]
-if !exists || dstPrice.Price == nil {
-    log.Printf("Skipping entry due to missing or invalid token price: %s -> %s",  baseToken, targetToken)
-    continue
-}
 
-       // Ensure token prices are available
-    dstPriceValue := dstPrice.Price // Extract the price as *big.Float
-    // Convert DstAmount to USD
-    dstAmountUSD := convertToUSD(entry.DstAmount, dstPriceValue)
-    dstAmountUSDValue, accuracy := dstAmountUSD.Float64()
-    if accuracy != big.Exact || dstAmountUSDValue <= 0 {
-        log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f",  baseToken, targetToken, dstAmountUSDValue)
-        continue
-    }
-       
+        // Ensure token prices are available
+        dstPrice, exists := tokenPrices[targetToken]
+        if !exists || dstPrice.Price == nil {
+            log.Printf("Skipping entry due to missing or invalid token price: %s -> %s",
+                baseToken, targetToken)
+            continue
+        }
+
+        // Convert DstAmount to USD
+        dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice.Price)
+        dstAmountUSDValue, accuracy := dstAmountUSD.Float64()
+        if accuracy != big.Exact || dstAmountUSDValue <= 0 {
+            log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f",
+                baseToken, targetToken, dstAmountUSDValue)
+            continue
+        }
+
         // Calculate the weight for the edge
-        //dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
-    weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
-
-        // Skip invalid or extreme weights
-        // if weight == math.MaxFloat64 {
-        //     log.Printf("Skipping invalid weight calculation: BaseToken=%s, TargetToken=%s, DstAmount=%f, Gas=%f",
-        //         baseToken, targetToken, dstAmountUSDValue, float64(entry.Gas))
-        //     continue
-        // }
-           if dstAmountUSDValue > 0 && weight != math.MaxFloat64 {
-    if graph.AdjacencyList[baseToken] == nil {
-        graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
-    }
-    graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
-        Weight:    big.NewFloat(weight),
-        Liquidity: new(big.Float).Set(dstAmountUSD), // Use USD value for liquidity
-    }
-} else {
-    log.Printf("Skipping invalid graph entry: %s -> %s", baseToken, targetToken)
-}
+        weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
 
         // Cap weights to prevent extreme values
         const maxWeight = 1e6
         if weight > maxWeight {
             log.Printf("Capping weight: Original=%f, Capped=%f", weight, maxWeight)
             weight = maxWeight
-        }
-        if weight < -maxWeight {
+        } else if weight < -maxWeight {
             log.Printf("Capping weight: Original=%f, Capped=%f", weight, -maxWeight)
             weight = -maxWeight
         }
@@ -2594,8 +2577,10 @@ if !exists || dstPrice.Price == nil {
         }
         graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
             Weight:    big.NewFloat(weight),
-            Liquidity: new(big.Float).SetInt(entry.DstAmount),
+            Liquidity: new(big.Float).Set(dstAmountUSD), // Use USD value for liquidity
         }
+
+        log.Printf("Added edge: %s -> %s, Weight=%f, USD Value=%f", baseToken, targetToken, weight, dstAmountUSDValue)
     }
 
     // Optimize the graph by removing redundant edges or self-loops
