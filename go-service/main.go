@@ -2539,13 +2539,14 @@ func buildAndProcessGraph(
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
+    dstPrice, exists := tokenPrices[targetToken]
+if !exists || dstPrice.Price == nil {
+    log.Printf("Skipping entry due to missing or invalid token price: %s -> %s",  baseToken, targetToken)
+    continue
+}
+
        // Ensure token prices are available
     dstPriceValue := dstPrice.Price // Extract the price as *big.Float
-    if dstPriceValue == nil {
-        log.Printf("Skipping entry due to missing token price: %s -> %s", baseToken, targetToken,)
-        continue
-    }
-
     // Convert DstAmount to USD
     dstAmountUSD := convertToUSD(entry.DstAmount, dstPriceValue)
     dstAmountUSDValue, accuracy := dstAmountUSD.Float64()
