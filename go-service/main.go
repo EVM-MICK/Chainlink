@@ -2526,6 +2526,12 @@ func buildAndProcessGraph(
     for _, entry := range liquidity {
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
+       // Skip invalid dstAmount or gas
+        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas == 0 {
+            log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
+                src, dst, entry.DstAmount.String(), entry.Gas)
+            continue
+        }
 
         // Calculate the weight for the edge
         dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
@@ -2549,14 +2555,23 @@ func buildAndProcessGraph(
             weight = -maxWeight
         }
 
-        // Add the edge to the adjacency list
-        if graph.AdjacencyList[baseToken] == nil {
-            graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
+       // Add src and dst to the graph
+        if graph.AdjacencyList[src] == nil {
+            graph.AdjacencyList[src] = make(map[string]EdgeWeight)
         }
-        graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
+        graph.AdjacencyList[src][dst] = EdgeWeight{
             Weight:    big.NewFloat(weight),
             Liquidity: new(big.Float).SetInt(entry.DstAmount),
         }
+
+        // Add the edge to the adjacency list
+        // if graph.AdjacencyList[baseToken] == nil {
+        //     graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
+        // }
+        // graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
+        //     Weight:    big.NewFloat(weight),
+        //     Liquidity: new(big.Float).SetInt(entry.DstAmount),
+        // }
     }
 
     // Optimize the graph by removing redundant edges or self-loops
