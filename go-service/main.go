@@ -2529,7 +2529,7 @@ func buildAndProcessGraph(
        // Skip invalid dstAmount or gas
         if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas == 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
-                src, dst, entry.DstAmount.String(), entry.Gas)
+                baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
 
