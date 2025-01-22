@@ -2539,6 +2539,12 @@ func buildAndProcessGraph(
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
+        // Ensure token prices are available
+    dstPrice, priceAvailable := tokenPrices[targetToken]
+    if !priceAvailable {
+        log.Printf("Skipping entry due to missing token price: %s -> %s", baseToken, targetToken)
+        continue
+    }
        
         // Calculate the weight for the edge
         //dstAmountFloat, _ := new(big.Float).SetInt(entry.DstAmount).Float64()
@@ -2546,7 +2552,7 @@ func buildAndProcessGraph(
     dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice)
     dstAmountUSDValue, ok := dstAmountUSD.Float64()
     if !ok || dstAmountUSDValue <= 0 {
-        log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f", src, dst, dstAmountUSDValue)
+        log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f", baseToken, targetToken, dstAmountUSDValue)
         continue
     }
         weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
@@ -2554,7 +2560,7 @@ func buildAndProcessGraph(
         // Skip invalid or extreme weights
         if weight == math.MaxFloat64 {
             log.Printf("Skipping invalid weight calculation: BaseToken=%s, TargetToken=%s, DstAmount=%f, Gas=%f",
-                baseToken, targetToken, dstAmountFloat, float64(entry.Gas))
+                baseToken, targetToken, dstAmountUSDValue, float64(entry.Gas))
             continue
         }
 
