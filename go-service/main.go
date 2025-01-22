@@ -1403,40 +1403,50 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $500
 
-    // Evaluate routes for each stable token
-    for _, endToken := range stableTokenAddresses {
-        if strings.EqualFold(endToken, marketData.StartToken) {
-            continue
+   for _, endToken := range stableTokenAddresses {
+    if strings.EqualFold(endToken, marketData.StartToken) {
+        continue
+    }
+
+    wg.Add(1)
+    go func(endToken string) {
+        defer wg.Done()
+
+        // Compute the optimal route
+        path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
+        if err != nil || len(path) <= 1 {
+            log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
+            return
         }
 
-        wg.Add(1)
-        go func(endToken string) {
-            defer wg.Done()
+        // Convert flatTokenPrices to map[string]*big.Float
+        tokenPrices := make(map[string]*big.Float)
+        for token, price := range flatTokenPrices {
+            tokenPrices[token] = price.Price
+        }
 
-            // Compute the optimal route
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
-            if err != nil || len(path) <= 1 {
-                log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
-                return
-            }
+        // Convert cost (*big.Float) to *big.Int
+        costInt := new(big.Int)
+        cost.Int(costInt)
 
-            // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, flatTokenPrices, gasPriceInt, cost, minProfitThreshold)
-            if profitable {
-                mu.Lock()
-                finalRoutes = append(finalRoutes, Route{
-                    Path:   path,
-                    Profit: profit,
-                })
-                tradeCount++
-                cumulativeProfit.Add(cumulativeProfit, profit)
-                mu.Unlock()
-                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-            } else {
-                log.Printf("Route %s -> %s skipped: Net profit %s below thresholds", marketData.StartToken, endToken, profit.String())
-            }
-        }(endToken)
-    }
+        // Evaluate route profitability
+        profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceInt, costInt, minProfitThreshold)
+        if profitable {
+            mu.Lock()
+            finalRoutes = append(finalRoutes, Route{
+                Path:   path,
+                Profit: profit,
+            })
+            tradeCount++
+            cumulativeProfit.Add(cumulativeProfit, profit)
+            mu.Unlock()
+            log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
+        } else {
+            log.Printf("Route %s -> %s skipped: Net profit %s below thresholds", marketData.StartToken, endToken, profit.String())
+        }
+    }(endToken)
+}
+
 
     wg.Wait()
 
