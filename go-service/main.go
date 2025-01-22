@@ -2498,12 +2498,13 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
 }
 
-func convertToUSD(dstAmount *big.Int, tokenPrice *big.Float) *big.Float {
+func convertToUSD(dstAmount *big.Int, price *big.Float) *big.Float {
     dstAmountFloat := new(big.Float).SetInt(dstAmount)
-    usdValue := new(big.Float).Mul(dstAmountFloat, tokenPrice)
+    usdValue := new(big.Float).Mul(dstAmountFloat, price)
+    log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, USDValue=%s",
+        dstAmount.String(), price.String(), usdValue.String())
     return usdValue
 }
-
 
 func filterValidAddresses(tokens []StableToken) []string {
 	var addresses []string
@@ -2520,6 +2521,7 @@ func buildAndProcessGraph(
     tokenPrices map[string]TokenPrice,
     gasPrice *big.Float,
 ) (*WeightedGraph, error) {
+    // Step 1: Initialize WeightedGraph
     graph := &WeightedGraph{
         AdjacencyList: make(map[string]map[string]EdgeWeight),
         TokenPrices:   make(map[string]*big.Float),
@@ -2530,12 +2532,14 @@ func buildAndProcessGraph(
         graph.TokenPrices[strings.ToLower(token)] = priceData.Price
     }
 
+    // Step 2: Prepare TokenPairs from LiquidityData
+    var tokenPairs []TokenPair
     for _, entry := range liquidity {
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
-        // Skip invalid dstAmount or gas
-        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas == 0 {
+        // Relaxed validation for invalid dstAmount or gas
+        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas <= 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
@@ -2558,10 +2562,10 @@ func buildAndProcessGraph(
             continue
         }
 
-        // Calculate the weight for the edge
+        // Calculate weight for the edge
         weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
 
-        // Cap weights to prevent extreme values
+        // Apply weight caps to avoid extreme values
         const maxWeight = 1e6
         if weight > maxWeight {
             log.Printf("Capping weight: Original=%f, Capped=%f", weight, maxWeight)
@@ -2571,26 +2575,25 @@ func buildAndProcessGraph(
             weight = -maxWeight
         }
 
-        // Add the edge to the adjacency list
-        if graph.AdjacencyList[baseToken] == nil {
-            graph.AdjacencyList[baseToken] = make(map[string]EdgeWeight)
-        }
-        graph.AdjacencyList[baseToken][targetToken] = EdgeWeight{
-            Weight:    big.NewFloat(weight),
-            Liquidity: new(big.Float).Set(dstAmountUSD), // Use USD value for liquidity
-        }
-
-        log.Printf("Added edge: %s -> %s, Weight=%f, USD Value=%f", baseToken, targetToken, weight, dstAmountUSDValue)
+        // Add to tokenPairs for later graph construction
+        tokenPairs = append(tokenPairs, TokenPair{
+            SrcToken: baseToken,
+            DstToken: targetToken,
+            Weight:   weight,
+        })
     }
 
-    // Optimize the graph by removing redundant edges or self-loops
-    optimizeGraphConstruction(graph)
+    // Step 3: Use BuildGraph to construct the graph
+    constructedGraph, err := BuildGraph(tokenPairs, graph.TokenPrices)
+    if err != nil {
+        return nil, fmt.Errorf("failed to build graph: %v", err)
+    }
 
-    // Log graph details
-    totalEdges := countEdges(graph)
-    log.Printf("Graph constructed with %d nodes and %d edges.", len(graph.AdjacencyList), totalEdges)
+    // Step 4: Log graph details for debugging
+    totalEdges := countEdges(constructedGraph)
+    log.Printf("Graph constructed with %d nodes and %d edges.", len(constructedGraph.AdjacencyList), totalEdges)
 
-    for node, neighbors := range graph.AdjacencyList {
+    for node, neighbors := range constructedGraph.AdjacencyList {
         neighborKeys := []string{}
         for neighbor := range neighbors {
             neighborKeys = append(neighborKeys, neighbor)
@@ -2598,9 +2601,8 @@ func buildAndProcessGraph(
         log.Printf("Node: %s | Neighbors: %v", node, neighborKeys)
     }
 
-    return graph, nil
+    return constructedGraph, nil
 }
-
 
 
 // Updated convertToTokenPairsWithWeights function
