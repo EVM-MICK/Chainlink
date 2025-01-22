@@ -1009,14 +1009,34 @@ func logEdgeDetails(src, dst string, weight float64, liquidity *big.Float) {
 }
 
 // Dynamically calculate the profit threshold
-func calculateDynamicProfitThreshold(totalGasCost *big.Int) *big.Int {
-    gasBuffer := new(big.Int).Mul(totalGasCost, big.NewInt(2)) // Gas cost * 2
-    baseProfit := big.NewInt(100)                              // Base profit in USD
-    dynamicThreshold := new(big.Int).Add(gasBuffer, baseProfit)
+func calculateDynamicProfitThreshold(totalGasCost *big.Int, gasPriceUSD *big.Float, tokenDecimals int) *big.Int {
+    // Step 1: Convert gas cost to USD
+    // Gas Cost in native token * gasPriceUSD / 10^decimals
+    gasCostInUSD := new(big.Float).Mul(new(big.Float).SetInt(totalGasCost), gasPriceUSD)
+    tokenDecimalFactor := new(big.Float).SetFloat64(math.Pow10(tokenDecimals))
+    gasCostInUSD.Quo(gasCostInUSD, tokenDecimalFactor) // Convert to USD using decimals
 
-    log.Printf("Calculated dynamic profit threshold: %s (Gas Cost: %s)", dynamicThreshold.String(), totalGasCost.String())
-    return dynamicThreshold
+    // Step 2: Convert Base Profit ($100) to the same scale as USD values
+    baseProfitUSD := big.NewFloat(100) // Base profit in USD
+    baseProfitScaled := new(big.Float).Mul(baseProfitUSD, tokenDecimalFactor) // Scale to token decimals
+
+    // Step 3: Calculate Dynamic Threshold
+    gasBuffer := new(big.Float).Mul(gasCostInUSD, big.NewFloat(2)) // Gas cost * 2 for buffer
+    dynamicThreshold := new(big.Float).Add(gasBuffer, baseProfitScaled)
+
+    // Convert back to *big.Int for consistency with the system
+    dynamicThresholdInt := new(big.Int)
+    dynamicThreshold.Int(dynamicThresholdInt)
+
+    // Logging for debugging
+    log.Printf(
+        "Calculated dynamic profit threshold: %s (Gas Cost in USD: %s, Base Profit in USD: %s)",
+        dynamicThresholdInt.String(), gasCostInUSD.Text('f', 8), baseProfitUSD.Text('f', 8),
+    )
+
+    return dynamicThresholdInt
 }
+
 
 func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
     validEntries := []LiquidityData{}
