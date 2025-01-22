@@ -912,77 +912,27 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 }
 
 // EvaluateRouteProfit evaluates the profitability of a given route
-func evaluateRouteProfit(route []string, tokenPrices map[string]TokenPrice, gasPrice *big.Float) (*big.Int, error) {
- startTime := time.Now()
- defer log.Printf("Execution time for block: %s", time.Since(startTime))
+func evaluateRouteProfit(startAmount *big.Int, path []string, tokenPrices map[string]*big.Float, gasPrice *big.Int, cost *big.Int, minProfitThreshold *big.Int) (bool, *big.Int) {
+    // Calculate the total gas fee
+    gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
 
-    if len(route) < 2 {
-        log.Println("Invalid route: must contain at least two tokens.")
-        return nil, fmt.Errorf("invalid route, must contain at least two tokens")
+    // Add gas fee to the swap cost
+    totalCost := new(big.Int).Add(cost, gasFee)
+
+    // Calculate the dynamic threshold for profitability
+    dynamicThreshold := calculateDynamicProfitThreshold(gasFee)
+
+    // Calculate the profit
+    profit := new(big.Int).Sub(startAmount, totalCost)
+
+    log.Printf("Evaluating route profit: StartAmount=%s, Path=%v, TotalCost=%s, GasFee=%s, Profit=%s, DynamicThreshold=%s",
+        startAmount.String(), path, totalCost.String(), gasFee.String(), profit.String(), dynamicThreshold.String())
+
+    // Check if profit exceeds dynamic threshold and minimum profit threshold
+    if profit.Cmp(dynamicThreshold) > 0 && profit.Cmp(minProfitThreshold) > 0 {
+        return true, profit
     }
-
-    amountIn := new(big.Int).Set(CAPITAL)
-    totalGasCost := new(big.Int)
-    gasPriceInt := new(big.Int)
-    gasPrice.Int(gasPriceInt)
-
-    log.Printf("Evaluating route: %v", route)
-
-    for i := 0; i < len(route)-1; i++ {
-        fromToken := strings.ToLower(route[i])
-        toToken := strings.ToLower(route[i+1])
-
-        fromData, ok := tokenPrices[fromToken]
-        if !ok {
-            log.Printf("Missing price data for token: %s. Skipping route.", fromToken)
-            return nil, fmt.Errorf("missing price data for token: %s", fromToken)
-        }
-
-        toData, ok := tokenPrices[toToken]
-        if !ok {
-            log.Printf("Missing price data for token: %s. Skipping route.", toToken)
-            return nil, fmt.Errorf("missing price data for token: %s", toToken)
-        }
-
-        adjustedAmountFloat, err := adjustForSlippage(new(big.Float).SetInt(amountIn), fromData.Liquidity)
-        if err != nil {
-            log.Printf("Slippage adjustment failed for %s -> %s: %v", fromToken, toToken, err)
-            return nil, err
-        }
-
-        adjustedAmount := new(big.Int)
-        adjustedAmountFloat.Int(adjustedAmount)
-
-        priceRatio := new(big.Float).Quo(toData.Price, fromData.Price)
-        tradeAmount := new(big.Float).Mul(new(big.Float).SetInt(adjustedAmount), priceRatio)
-
-        amountIn = new(big.Int)
-        tradeAmount.Int(amountIn)
-
-        hopGasCost := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
-        totalGasCost.Add(totalGasCost, hopGasCost)
-
-        if amountIn.Cmp(big.NewInt(0)) <= 0 {
-            log.Printf("Trade resulted in zero or negative amount at hop %s -> %s. Skipping route.", fromToken, toToken)
-            return nil, fmt.Errorf("trade resulted in zero or negative amount")
-        }
-    }
-
-    netProfit := new(big.Int).Sub(new(big.Int).Sub(amountIn, CAPITAL), totalGasCost)
-    dynamicThreshold := calculateDynamicProfitThreshold(totalGasCost)
-    log.Printf("Route: %v | From Price: %s | To Price: %s | Profit Threshold: %s | Net Profit: %s",
-        route, tokenPrices[route[0]].Price.String(), tokenPrices[route[len(route)-1]].Price.String(),
-        dynamicThreshold.String(), netProfit.String())
-
-    if netProfit.Cmp(dynamicThreshold) < 0 {
-        log.Printf("Route %v skipped: Net profit %s below threshold %s", route, netProfit.String(), dynamicThreshold.String())
-        log.Printf("Dynamic profit threshold for route %v: %s", route, dynamicThreshold.String())
-
-        return nil, nil
-    }
-
-    log.Printf("Route %v is profitable: Net profit %s", route, netProfit.String())
-    return netProfit, nil
+    return false, profit
 }
 
 
@@ -1060,16 +1010,15 @@ func calculateDynamicProfitThreshold(totalGasCost *big.Int) *big.Int {
 func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
     validEntries := []LiquidityData{}
     for _, entry := range liquidity {
-        if entry.DstAmount.Cmp(big.NewInt(0)) > 0 {
+        if entry.DstAmount.Cmp(big.NewInt(0)) > 0 && entry.Gas > 0 {
             validEntries = append(validEntries, entry)
         } else {
-            log.Printf("Skipping invalid liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
-                entry.BaseToken, entry.TargetToken, entry.DstAmount.String())
+            log.Printf("Skipping invalid liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
+                entry.BaseToken, entry.TargetToken, entry.DstAmount.String(), entry.Gas)
         }
     }
     return validEntries
 }
-
 
 // Set a value in the cache
 func setToCache(key string, value interface{}) {
@@ -1451,6 +1400,9 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var mu sync.Mutex
     var wg sync.WaitGroup
 
+    // Define minimum profit threshold
+    minProfitThreshold := big.NewInt(200) // Example threshold: $500
+
     // Evaluate routes for each stable token
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
@@ -1468,21 +1420,9 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
                 return
             }
 
-            // Calculate total cost and profit
-            costInt := new(big.Int)
-            cost.Int(costInt)
-            gasFee := calculateTotalGasCost(gasPriceInt, DefaultGasEstimate)
-            totalCost := new(big.Int).Add(costInt, gasFee)
-
-            // Use dynamic threshold for profit comparison
-            dynamicThreshold := calculateDynamicProfitThreshold(gasFee)
-            profit := new(big.Int).Sub(startAmount, totalCost)
-
-            log.Printf("Route: %s -> %s | Dynamic Threshold: %s | Net Profit: %s",
-                marketData.StartToken, endToken, dynamicThreshold.String(), profit.String())
-
-            // Check profitability
-            if profit.Cmp(dynamicThreshold) > 0 {
+            // Evaluate route profitability
+            profitable, profit := evaluateRouteProfit(startAmount, path, flatTokenPrices, gasPriceInt, cost, minProfitThreshold)
+            if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
                     Path:   path,
@@ -1493,8 +1433,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
                 mu.Unlock()
                 log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
             } else {
-                log.Printf("Route %s -> %s skipped: Net profit %s below threshold %s",
-                    marketData.StartToken, endToken, profit.String(), dynamicThreshold.String())
+                log.Printf("Route %s -> %s skipped: Net profit %s below thresholds", marketData.StartToken, endToken, profit.String())
             }
         }(endToken)
     }
@@ -2750,34 +2689,38 @@ func adjustProfitThreshold(baseThreshold float64, gasPrice *big.Float, volatilit
 }
 
 func calculateWeightFromLiquidity(dstAmount, gas float64) float64 {
+    // Validate input parameters
     if dstAmount <= 0 || gas <= 0 {
         log.Printf("Invalid parameters for weight calculation: dstAmount=%f, gas=%f", dstAmount, gas)
-        return math.MaxFloat64 // Assign maximum weight for invalid entries
+        return math.MaxFloat64 // Return a high weight for invalid inputs
     }
 
-    // Weight calculation logic
+    // Fetch factors from environment variables or use defaults
     weightFactor := getEnvAsFloat("WEIGHT_FACTOR", 1.0)
     liquidityFactor := getEnvAsFloat("LIQUIDITY_FACTOR", 1.0)
+
+    // Apply logarithmic transformation to prevent extreme ratios
     logDstAmount := math.Log(dstAmount + 1) // Avoid log(0)
     logGas := math.Log(gas + 1)
 
+    // Apply weight factors and calculate dampened values
     dampenedDstAmount := logDstAmount * weightFactor
     dampenedGas := logGas * liquidityFactor
 
+    // Compute the final weight
     weight := dampenedDstAmount - dampenedGas
 
     // Cap extreme weight values
-    const maxWeight = 1e6 // Define a maximum cap for weight based on business logic
+    const maxWeight = 1e6 // Define maximum weight based on business requirements
     if weight > maxWeight {
         log.Printf("Weight capped: Original=%f, Capped=%f", weight, maxWeight)
         weight = maxWeight
-    }
-
-    if weight < -maxWeight {
+    } else if weight < -maxWeight {
         log.Printf("Weight capped: Original=%f, Capped=%f", weight, -maxWeight)
         weight = -maxWeight
     }
 
+    // Log the calculated weight
     log.Printf("Weight calculated: dstAmount=%f, gas=%f, weightFactor=%f, liquidityFactor=%f, weight=%f",
         dstAmount, gas, weightFactor, liquidityFactor, weight)
 
