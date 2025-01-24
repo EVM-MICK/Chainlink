@@ -911,13 +911,30 @@ func convertBigFloatToInt(input interface{}) *big.Int {
     return gasPriceInt
 }
 
-func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
+// func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
+//     normalized := make(map[string]*big.Float)
+//     for token, price := range tokenPrices {
+//         normalized[strings.ToLower(token)] = price
+//     }
+//     return normalized
+// }
+
+func normalizeTokenPrices(tokenPrices map[string]float64) map[string]*big.Float {
     normalized := make(map[string]*big.Float)
     for token, price := range tokenPrices {
-        normalized[strings.ToLower(token)] = price
+        normalized[strings.ToLower(token)] = big.NewFloat(price)
     }
     return normalized
 }
+
+func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]TokenPrice {
+    tokenPriceMap := make(map[string]TokenPrice)
+    for token, price := range prices {
+        tokenPriceMap[token] = TokenPrice{Price: price}
+    }
+    return tokenPriceMap
+}
+
 
 func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
     normalizedPrices := normalizeTokenPrices(tokenPrices)
@@ -1465,16 +1482,16 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     log.Println("Normalizing token prices and decimals...")
     normalizedPrices := normalizeTokenPrices(marketData.TokenPrices)
 
-    // Example: Define or fetch token decimals as needed (default to 18 for Ethereum-based tokens)
+    // Step 4: Define or fetch token decimals as needed
     tokenDecimals := map[string]int{
         "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,
         "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,
         "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18,
-        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 18,
+        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18,
         "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,
     }
 
-    // Step 4: Process and normalize liquidity data
+    // Step 5: Process and normalize liquidity data
     normalizedLiquidity := processMarketData(marketData, normalizedPrices, tokenDecimals)
     if len(normalizedLiquidity) == 0 {
         log.Println("No valid liquidity entries after normalization.")
@@ -1483,16 +1500,19 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
-    // Step 5: Build and process the graph
+    // Step 6: Build and process the graph
     gasPrice := extractGasPriceFromLiquidity(normalizedLiquidity)
-    graph, err := buildAndProcessGraph(normalizedLiquidity, normalizedPrices, gasPrice)
+    gasPriceInt := new(big.Int) // Convert gasPrice (*big.Float) to *big.Int
+    gasPrice.Int(gasPriceInt)
+
+    graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPriceInt)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 6: Initialize trade tracking variables
+    // Step 7: Initialize trade tracking variables
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
@@ -1502,10 +1522,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $200
 
-    // Step 7: Extract stable token addresses
+    // Step 8: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(normalizedLiquidity)
 
-    // Step 8: Evaluate routes for each stable token
+    // Step 9: Evaluate routes for each stable token
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1530,7 +1550,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             cost.Int(costInt)
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPrice, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1549,7 +1569,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Step 9: Notify Node.js of computed routes
+    // Step 10: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1559,7 +1579,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
-
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
