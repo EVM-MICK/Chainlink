@@ -919,10 +919,10 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 //     return normalized
 // }
 
-func normalizeTokenPrices(tokenPrices map[string]float64) map[string]*big.Float {
+func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
     normalized := make(map[string]*big.Float)
     for token, price := range tokenPrices {
-        normalized[strings.ToLower(token)] = big.NewFloat(price)
+        normalized[strings.ToLower(token)] = price
     }
     return normalized
 }
@@ -1465,7 +1465,6 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 	}
 	return result.([]byte), nil
 }
-
 func generateRoutes(marketData MarketData) ([]Route, error) {
     // Step 1: Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
@@ -1480,7 +1479,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     // Step 3: Normalize token prices
     log.Println("Normalizing token prices and decimals...")
-    normalizedPrices := normalizeTokenPrices(marketData.TokenPrices)
+    normalizedPrices := normalizeTokenPrices(marketData.TokenPrices) // `marketData.TokenPrices` is `map[string]*big.Float`
 
     // Step 4: Define or fetch token decimals as needed
     tokenDecimals := map[string]int{
@@ -1502,10 +1501,9 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     // Step 6: Build and process the graph
     gasPrice := extractGasPriceFromLiquidity(normalizedLiquidity)
-    gasPriceInt := new(big.Int) // Convert gasPrice (*big.Float) to *big.Int
-    gasPrice.Int(gasPriceInt)
+    gasPriceBigInt := new(big.Int).Set(gasPrice) // Convert `*big.Float` to `*big.Int`
 
-    graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPriceInt)
+    graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
@@ -1546,11 +1544,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             tokenPrices := normalizedPrices
 
             // Convert cost (*big.Float) to *big.Int
-            costInt := new(big.Int)
-            cost.Int(costInt)
+            costInt := new(big.Int).Set(cost) // Use `Set` to avoid overwriting
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceBigInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1579,6 +1576,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
+
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
