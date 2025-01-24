@@ -952,19 +952,19 @@ func evaluateRouteProfit(
     // Log detailed evaluation for debugging
     log.Printf(
         "Evaluating route profit: StartAmountUSD=%s, Path=%v, TotalCostUSD=%s, GasFeeUSD=%s, ProfitUSD=%s, DynamicThreshold=%s",
-        startAmountUSD.Text('f', 8), path, totalCostUSD.Text('f', 8), gasFeeUSD.Text('f', 8), profitUSD.Text('f', 8), dynamicThreshold.String(),
+        startAmountUSD.Text('f', 8), path, totalCostUSD.Text('f', 8), gasFeeUSD.Text('f', 8), profitUSD.Text('f', 8), dynamicThreshold.Text('f', 8),
     )
 
     // Step 9: Compare profit with thresholds
-    profitInt := new(big.Int)
-    profitUSD.Int(profitInt) // Convert profit to *big.Int for compatibility
-    if profitUSD.Cmp(dynamicThreshold) > 0 && profitInt.Cmp(minProfitThreshold) > 0 {
+    if profitUSD.Cmp(dynamicThreshold) > 0 && profitUSD.Cmp(new(big.Float).SetInt(minProfitThreshold)) > 0 {
+        profitInt := new(big.Int)
+        profitUSD.Int(profitInt) // Convert profit to *big.Int for compatibility
         log.Printf("Profitable route found: %v | Profit: %s", path, profitUSD.Text('f', 8))
         return true, profitInt
     }
 
-    log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profitUSD.Text('f', 8), dynamicThreshold.String())
-    return false, profitInt
+    log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profitUSD.Text('f', 8), dynamicThreshold.Text('f', 8))
+    return false, nil
 }
 
 // Adjust for slippage
@@ -2557,13 +2557,16 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
 }
 
-func convertToUSD(dstAmount *big.Int, price *big.Float) *big.Float {
+func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
     dstAmountFloat := new(big.Float).SetInt(dstAmount)
-    usdValue := new(big.Float).Mul(dstAmountFloat, price)
-    log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, USDValue=%s",
-        dstAmount.String(), price.String(), usdValue.String())
+    decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
+    normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
+    usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
+    log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
+        dstAmount.String(), price.String(), decimals, usdValue.String())
     return usdValue
 }
+
 
 func filterValidAddresses(tokens []StableToken) []string {
 	var addresses []string
