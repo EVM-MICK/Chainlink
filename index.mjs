@@ -659,6 +659,12 @@ async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
   return baseTokenAmount; // Returns the amount as a string
 }
 
+function normalizeTokenPrices(tokenPrices) {
+    return Object.fromEntries(
+        Object.entries(tokenPrices).map(([token, price]) => [token.toLowerCase(), price])
+    );
+}
+
 async function gatherMarketData() {
   try {
     console.log("Starting to gather market data...");
@@ -717,6 +723,7 @@ async function gatherMarketData() {
      const formattedTokenPrices = Object.fromEntries(
         Object.entries(tokenPrices).map(([token, price]) => [token, parseFloat(price)])
     );
+   const normalizedPrices = normalizeTokenPrices(formattedTokenPrices);
     // Step 4: Construct the payload
     const marketData = {
       chainId: CHAIN_ID,
@@ -724,7 +731,7 @@ async function gatherMarketData() {
       startAmount: startAmount.toString(), // Use the calculated start amount
       maxHops: 3,
       profitThreshold: "500000000", // String for *big.Int compatibility
-      tokenPrices: formattedTokenPrices, // Ensure prices are floats
+      tokenPrices: normalizedPrices, // Ensure prices are floats
       liquidity: liquidityData,
     };
 
