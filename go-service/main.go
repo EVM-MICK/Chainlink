@@ -928,17 +928,19 @@ func processMarketData(data MarketData, tokenPrices map[string]*big.Float, token
         }
 
         dstAmountUSD := convertToUSD(entry.DstAmount, priceUSD, decimals)
+        dstAmountUSDInt := new(big.Int)
+        dstAmountUSD.Int(dstAmountUSDInt) // Convert *big.Float to *big.Int
+
         normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
             BaseToken:  entry.BaseToken,
             TargetToken: entry.TargetToken,
-            DstAmount:  dstAmountUSD, // Store in USD
+            DstAmount:  dstAmountUSDInt, // Store as *big.Int
             Gas:        entry.Gas,
         })
     }
 
     return normalizedLiquidity
 }
-
 
 func evaluateRouteProfit(
     startAmount *big.Int,
@@ -2620,8 +2622,6 @@ func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float
     return usdValue
 }
 
-
-
 func filterValidAddresses(tokens []StableToken) []string {
 	var addresses []string
 	for _, token := range tokens {
@@ -2637,7 +2637,6 @@ func buildAndProcessGraph(
     tokenPrices map[string]TokenPrice,
     gasPrice *big.Float,
 ) (*WeightedGraph, error) {
-    // Step 1: Initialize WeightedGraph
     graph := &WeightedGraph{
         AdjacencyList: make(map[string]map[string]EdgeWeight),
         TokenPrices:   make(map[string]*big.Float),
@@ -2648,20 +2647,17 @@ func buildAndProcessGraph(
         graph.TokenPrices[strings.ToLower(token)] = priceData.Price
     }
 
-    // Step 2: Prepare TokenPairs from LiquidityData
     var tokenPairs []TokenPair
     for _, entry := range liquidity {
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
-        // Relaxed validation for invalid dstAmount or gas
         if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas <= 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
         }
 
-        // Ensure token prices are available
         dstPrice, exists := tokenPrices[targetToken]
         if !exists || dstPrice.Price == nil {
             log.Printf("Skipping entry due to missing or invalid token price: %s -> %s",
@@ -2669,8 +2665,8 @@ func buildAndProcessGraph(
             continue
         }
 
-        // Convert DstAmount to USD
-        dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice.Price)
+        decimals := 18 // Default decimals for tokens, update if dynamic
+        dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice.Price, decimals)
         dstAmountUSDValue, accuracy := dstAmountUSD.Float64()
         if accuracy != big.Exact || dstAmountUSDValue <= 0 {
             log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f",
@@ -2678,10 +2674,7 @@ func buildAndProcessGraph(
             continue
         }
 
-        // Calculate weight for the edge
         weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
-
-        // Apply weight caps to avoid extreme values
         const maxWeight = 1e6
         if weight > maxWeight {
             log.Printf("Capping weight: Original=%f, Capped=%f", weight, maxWeight)
@@ -2691,7 +2684,6 @@ func buildAndProcessGraph(
             weight = -maxWeight
         }
 
-        // Add to tokenPairs for later graph construction
         tokenPairs = append(tokenPairs, TokenPair{
             SrcToken: baseToken,
             DstToken: targetToken,
@@ -2699,13 +2691,11 @@ func buildAndProcessGraph(
         })
     }
 
-    // Step 3: Use BuildGraph to construct the graph
     constructedGraph, err := BuildGraph(tokenPairs, graph.TokenPrices)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
-    // Step 4: Log graph details for debugging
     totalEdges := countEdges(constructedGraph)
     log.Printf("Graph constructed with %d nodes and %d edges.", len(constructedGraph.AdjacencyList), totalEdges)
 
@@ -2719,7 +2709,6 @@ func buildAndProcessGraph(
 
     return constructedGraph, nil
 }
-
 
 // Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
