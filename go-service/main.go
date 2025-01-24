@@ -911,44 +911,53 @@ func convertBigFloatToInt(input interface{}) *big.Int {
     return gasPriceInt
 }
 
+func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
+    normalized := make(map[string]*big.Float)
+    for token, price := range tokenPrices {
+        normalized[strings.ToLower(token)] = price
+    }
+    return normalized
+}
+
 func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
+    normalizedPrices := normalizeTokenPrices(tokenPrices)
+
     normalizedLiquidity := []LiquidityData{}
+    log.Printf("Processing market data. Total liquidity entries: %d", len(data.Liquidity))
 
-    log.Println("Processing market data...")
-
+    skippedCount := 0
     for _, entry := range data.Liquidity {
         targetToken := strings.ToLower(entry.TargetToken)
-        priceUSD, exists := tokenPrices[targetToken]
+        priceUSD, exists := normalizedPrices[targetToken]
         if !exists {
             log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
+            skippedCount++
             continue
         }
 
         decimals, exists := tokenDecimals[targetToken]
         if !exists {
-            log.Printf("Skipping entry: Missing decimals for token %s", targetToken)
-            continue
+            log.Printf("Missing decimals for token %s. Defaulting to 18 decimals.", targetToken)
+            decimals = 18
         }
 
         dstAmountUSD := convertToUSD(entry.DstAmount, priceUSD, decimals)
         dstAmountUSDInt := new(big.Int)
-        dstAmountUSD.Int(dstAmountUSDInt) // Convert to *big.Int
+        dstAmountUSD.Int(dstAmountUSDInt)
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
-            BaseToken:  entry.BaseToken,
+            BaseToken:  strings.ToLower(entry.BaseToken),
             TargetToken: targetToken,
             DstAmount:  dstAmountUSDInt,
             Gas:        entry.Gas,
         })
     }
 
-    if len(normalizedLiquidity) == 0 {
-        log.Println("No valid liquidity entries after normalization")
-    }
+    log.Printf("Processed market data: Skipped %d entries, Normalized %d entries.",
+        skippedCount, len(normalizedLiquidity))
 
     return normalizedLiquidity
 }
-
 
 func evaluateRouteProfit(
     startAmount *big.Int,
@@ -1441,62 +1450,49 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 }
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
-    // Validate the start token
+    // Step 1: Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
-    // Parse the start amount
+    // Step 2: Parse the start amount
     startAmount := new(big.Int)
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
     }
 
-    // Validate and filter liquidity entries
-    validatedLiquidity := validateLiquidityEntries(marketData.Liquidity)
-    if len(validatedLiquidity) == 0 {
-        return nil, fmt.Errorf("no valid liquidity entries available")
+    // Step 3: Normalize token prices
+    log.Println("Normalizing token prices and decimals...")
+    normalizedPrices := normalizeTokenPrices(marketData.TokenPrices)
+
+    // Example: Define or fetch token decimals as needed (default to 18 for Ethereum-based tokens)
+    tokenDecimals := map[string]int{
+        "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,
+        "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,
+        "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18,
+        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", 18,
+        "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,
     }
 
-    // Extract stable token addresses from the validated liquidity
-    stableTokenAddresses := extractStableTokens(validatedLiquidity)
-
-    // Calculate average liquidity
-    averageLiquidity, err := calculateAverageLiquidityFromData(validatedLiquidity, marketData.StartToken)
-    if err != nil {
-        return nil, fmt.Errorf("failed to calculate average liquidity: %v", err)
-    }
-    log.Printf("Average liquidity calculated: %f", averageLiquidity)
-
-    // Extract gas price
-    gasPrice := extractGasPriceFromLiquidity(validatedLiquidity)
-    gasPriceInt := new(big.Int)
-    gasPrice.Int(gasPriceInt)
-
-    // Convert token prices and validate against liquidity
-    nestedTokenPrices := convertTokenPricesToMap(marketData.TokenPrices, validatedLiquidity)
-    flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
-    validatedTokenLiquidity := validateTokenPrices(nestedTokenPrices, validatedLiquidity)
-    if len(validatedTokenLiquidity) == 0 {
-        return nil, fmt.Errorf("no valid liquidity entries after token price validation")
+    // Step 4: Process and normalize liquidity data
+    normalizedLiquidity := processMarketData(marketData, normalizedPrices, tokenDecimals)
+    if len(normalizedLiquidity) == 0 {
+        log.Println("No valid liquidity entries after normalization.")
+        return nil, fmt.Errorf("no valid liquidity data found")
     }
 
-    // Prioritize USDC-based liquidity
-    prioritizedLiquidity := prioritizeUSDCLiquidity(validatedTokenLiquidity)
-    if len(prioritizedLiquidity) == 0 {
-        log.Println("No liquidity entries with USDC as BaseToken. Expanding to non-USDC pairs.")
-        prioritizedLiquidity = validatedTokenLiquidity // Fall back to all validated liquidity
-    }
+    log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
-    // Build and process the graph
-    graph, err := buildAndProcessGraph(prioritizedLiquidity, flatTokenPrices, gasPrice)
+    // Step 5: Build and process the graph
+    gasPrice := extractGasPriceFromLiquidity(normalizedLiquidity)
+    graph, err := buildAndProcessGraph(normalizedLiquidity, normalizedPrices, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Initialize trade tracking variables
+    // Step 6: Initialize trade tracking variables
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
@@ -1506,7 +1502,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $200
 
-    // Evaluate routes for each stable token
+    // Step 7: Extract stable token addresses
+    stableTokenAddresses := extractStableTokens(normalizedLiquidity)
+
+    // Step 8: Evaluate routes for each stable token
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1523,18 +1522,15 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
                 return
             }
 
-            // Convert flatTokenPrices to map[string]*big.Float
-            tokenPrices := make(map[string]*big.Float)
-            for token, price := range flatTokenPrices {
-                tokenPrices[token] = price.Price
-            }
+            // Convert `normalizedPrices` to a flat map
+            tokenPrices := normalizedPrices
 
             // Convert cost (*big.Float) to *big.Int
             costInt := new(big.Int)
             cost.Int(costInt)
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPrice, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1553,7 +1549,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Notify Node.js with computed routes
+    // Step 9: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
