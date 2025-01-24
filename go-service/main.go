@@ -911,6 +911,35 @@ func convertBigFloatToInt(input interface{}) *big.Int {
     return gasPriceInt
 }
 
+func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
+    normalizedLiquidity := []LiquidityData{}
+
+    for _, entry := range data.Liquidity {
+        priceUSD, exists := tokenPrices[entry.TargetToken]
+        if !exists {
+            log.Printf("Skipping entry: Missing USD price for token %s", entry.TargetToken)
+            continue
+        }
+
+        decimals, exists := tokenDecimals[entry.TargetToken]
+        if !exists {
+            log.Printf("Skipping entry: Missing decimals for token %s", entry.TargetToken)
+            continue
+        }
+
+        dstAmountUSD := convertToUSD(entry.DstAmount, priceUSD, decimals)
+        normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
+            BaseToken:  entry.BaseToken,
+            TargetToken: entry.TargetToken,
+            DstAmount:  dstAmountUSD, // Store in USD
+            Gas:        entry.Gas,
+        })
+    }
+
+    return normalizedLiquidity
+}
+
+
 func evaluateRouteProfit(
     startAmount *big.Int,
     path []string,
@@ -966,6 +995,7 @@ func evaluateRouteProfit(
     log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profitUSD.Text('f', 8), dynamicThreshold.Text('f', 8))
     return false, nil
 }
+
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
@@ -1030,33 +1060,46 @@ func logEdgeDetails(src, dst string, weight float64, liquidity *big.Float) {
 }
 
 // Dynamically calculate the profit threshold
-func calculateDynamicProfitThreshold(totalGasCost *big.Int, gasPriceUSD *big.Float, tokenDecimals int) *big.Int {
-    // Step 1: Convert total gas cost (native token) to USD
-    gasCostInUSD := new(big.Float).Mul(new(big.Float).SetInt(totalGasCost), gasPriceUSD)
-    tokenDecimalFactor := new(big.Float).SetFloat64(math.Pow10(tokenDecimals))
-    gasCostInUSD.Quo(gasCostInUSD, tokenDecimalFactor) // Normalize using token decimals
+// func calculateDynamicProfitThreshold(totalGasCost *big.Int, gasPriceUSD *big.Float, tokenDecimals int) *big.Int {
+//     // Step 1: Convert total gas cost (native token) to USD
+//     gasCostInUSD := new(big.Float).Mul(new(big.Float).SetInt(totalGasCost), gasPriceUSD)
+//     tokenDecimalFactor := new(big.Float).SetFloat64(math.Pow10(tokenDecimals))
+//     gasCostInUSD.Quo(gasCostInUSD, tokenDecimalFactor) // Normalize using token decimals
 
-    // Step 2: Base Profit in USD ($100)
-    baseProfitUSD := big.NewFloat(100) // Base profit in USD
+//     // Step 2: Base Profit in USD ($100)
+//     baseProfitUSD := big.NewFloat(100) // Base profit in USD
 
-    // Step 3: Calculate gas buffer as 2x gas cost in USD
-    gasBuffer := new(big.Float).Mul(gasCostInUSD, big.NewFloat(2)) // Gas cost * 2 for buffer
+//     // Step 3: Calculate gas buffer as 2x gas cost in USD
+//     gasBuffer := new(big.Float).Mul(gasCostInUSD, big.NewFloat(2)) // Gas cost * 2 for buffer
 
-    // Step 4: Add gas buffer and base profit to calculate dynamic threshold
+//     // Step 4: Add gas buffer and base profit to calculate dynamic threshold
+//     dynamicThreshold := new(big.Float).Add(gasBuffer, baseProfitUSD)
+
+//     // Step 5: Convert the dynamic threshold back to *big.Int for consistency
+//     dynamicThresholdInt := new(big.Int)
+//     dynamicThreshold.Int(dynamicThresholdInt)
+
+//     // Step 6: Log the calculated values for debugging
+//     log.Printf(
+//         "Calculated dynamic profit threshold: %s (Gas Cost in USD: %s, Base Profit in USD: %s)",
+//         dynamicThresholdInt.String(), gasCostInUSD.Text('f', 8), baseProfitUSD.Text('f', 8),
+//     )
+
+//     return dynamicThresholdInt
+// }
+
+func calculateDynamicProfitThreshold(gasCost *big.Int, gasPriceUSD *big.Float, decimals int) *big.Float {
+    gasCostInUSD := convertToUSD(gasCost, gasPriceUSD, decimals)
+
+    baseProfitUSD := big.NewFloat(100)                          // Base profit in USD
+    gasBuffer := new(big.Float).Mul(gasCostInUSD, big.NewFloat(2)) // Gas cost * 2 buffer
     dynamicThreshold := new(big.Float).Add(gasBuffer, baseProfitUSD)
 
-    // Step 5: Convert the dynamic threshold back to *big.Int for consistency
-    dynamicThresholdInt := new(big.Int)
-    dynamicThreshold.Int(dynamicThresholdInt)
-
-    // Step 6: Log the calculated values for debugging
-    log.Printf(
-        "Calculated dynamic profit threshold: %s (Gas Cost in USD: %s, Base Profit in USD: %s)",
-        dynamicThresholdInt.String(), gasCostInUSD.Text('f', 8), baseProfitUSD.Text('f', 8),
-    )
-
-    return dynamicThresholdInt
+    log.Printf("Calculated dynamic profit threshold: %s (Gas Cost in USD: %s, Base Profit: %s)",
+        dynamicThreshold.Text('f', 8), gasCostInUSD.Text('f', 8), baseProfitUSD.Text('f', 8))
+    return dynamicThreshold
 }
+
 
 func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
     validEntries := []LiquidityData{}
@@ -2557,6 +2600,16 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
 }
 
+// func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
+//     dstAmountFloat := new(big.Float).SetInt(dstAmount)
+//     decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
+//     normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
+//     usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
+//     log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
+//         dstAmount.String(), price.String(), decimals, usdValue.String())
+//     return usdValue
+// }
+
 func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
     dstAmountFloat := new(big.Float).SetInt(dstAmount)
     decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
@@ -2566,6 +2619,7 @@ func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float
         dstAmount.String(), price.String(), decimals, usdValue.String())
     return usdValue
 }
+
 
 
 func filterValidAddresses(tokens []StableToken) []string {
