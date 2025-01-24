@@ -914,33 +914,41 @@ func convertBigFloatToInt(input interface{}) *big.Int {
 func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
     normalizedLiquidity := []LiquidityData{}
 
+    log.Println("Processing market data...")
+
     for _, entry := range data.Liquidity {
-        priceUSD, exists := tokenPrices[entry.TargetToken]
+        targetToken := strings.ToLower(entry.TargetToken)
+        priceUSD, exists := tokenPrices[targetToken]
         if !exists {
-            log.Printf("Skipping entry: Missing USD price for token %s", entry.TargetToken)
+            log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
             continue
         }
 
-        decimals, exists := tokenDecimals[entry.TargetToken]
+        decimals, exists := tokenDecimals[targetToken]
         if !exists {
-            log.Printf("Skipping entry: Missing decimals for token %s", entry.TargetToken)
+            log.Printf("Skipping entry: Missing decimals for token %s", targetToken)
             continue
         }
 
         dstAmountUSD := convertToUSD(entry.DstAmount, priceUSD, decimals)
         dstAmountUSDInt := new(big.Int)
-        dstAmountUSD.Int(dstAmountUSDInt) // Convert *big.Float to *big.Int
+        dstAmountUSD.Int(dstAmountUSDInt) // Convert to *big.Int
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
             BaseToken:  entry.BaseToken,
-            TargetToken: entry.TargetToken,
-            DstAmount:  dstAmountUSDInt, // Store as *big.Int
+            TargetToken: targetToken,
+            DstAmount:  dstAmountUSDInt,
             Gas:        entry.Gas,
         })
     }
 
+    if len(normalizedLiquidity) == 0 {
+        log.Println("No valid liquidity entries after normalization")
+    }
+
     return normalizedLiquidity
 }
+
 
 func evaluateRouteProfit(
     startAmount *big.Int,
