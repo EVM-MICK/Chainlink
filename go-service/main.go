@@ -911,51 +911,6 @@ func convertBigFloatToInt(input interface{}) *big.Int {
     return gasPriceInt
 }
 
-// EvaluateRouteProfit evaluates the profitability of a given route
-// func evaluateRouteProfit(
-//     startAmount *big.Int,
-//     path []string,
-//     tokenPrices map[string]*big.Float,
-//     gasPrice *big.Int,
-//     cost *big.Int,
-//     minProfitThreshold *big.Int,
-// ) (bool, *big.Int) {
-//     // Calculate the total gas fee in native token
-//     gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
-
-//     // Fetch the price of the gas token in USD
-//     gasToken := path[0] // Assume the first token in the path is the gas token
-//     gasPriceUSD, ok := tokenPrices[gasToken]
-//     if !ok {
-//         log.Printf("Missing USD price for gas token: %s. Skipping route.", gasToken)
-//         return false, nil
-//     }
-
-//     // Define token decimals (typically 18 for ETH or similar tokens)
-//     tokenDecimals := 18 // Update as needed if decimals are dynamic
-
-//     // Calculate the dynamic threshold for profitability
-//     dynamicThreshold := calculateDynamicProfitThreshold(gasFee, gasPriceUSD, tokenDecimals)
-
-//     // Add gas fee to the swap cost
-//     totalCost := new(big.Int).Add(cost, gasFee)
-
-//     // Calculate the profit
-//     profit := new(big.Int).Sub(startAmount, totalCost)
-
-//     log.Printf("Evaluating route profit: StartAmount=%s, Path=%v, TotalCost=%s, GasFee=%s, Profit=%s, DynamicThreshold=%s",
-//         startAmount.String(), path, totalCost.String(), gasFee.String(), profit.String(), dynamicThreshold.String())
-
-//     // Check if profit exceeds dynamic threshold and minimum profit threshold
-//     if profit.Cmp(dynamicThreshold) > 0 && profit.Cmp(minProfitThreshold) > 0 {
-//         log.Printf("Profitable route found: %v | Profit: %s", path, profit.String())
-//         return true, profit
-//     }
-
-//     log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profit.String(), minProfitThreshold.String())
-//     return false, profit
-// }
-
 func evaluateRouteProfit(
     startAmount *big.Int,
     path []string,
@@ -963,43 +918,54 @@ func evaluateRouteProfit(
     gasPrice *big.Int,
     cost *big.Int,
     minProfitThreshold *big.Int,
-    tokenDecimals int,
 ) (bool, *big.Int) {
-    // Step 1: Convert gas price to USD
-    gasPriceUSD, exists := tokenPrices["gasToken"]
-    if !exists {
-        log.Println("Gas token price in USD not available.")
+    // Step 1: Calculate the total gas fee in the native token
+    gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+
+    // Step 2: Fetch the price of the gas token in USD
+    gasToken := path[0] // Assume the first token in the path is the gas token
+    gasPriceUSD, ok := tokenPrices[gasToken]
+    if !ok {
+        log.Printf("Missing USD price for gas token: %s. Skipping route.", gasToken)
         return false, nil
     }
 
-    // Step 2: Calculate total gas cost in USD
-    totalGasCost := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
+    // Step 3: Define token decimals (assumed 18 for typical tokens like ETH)
+    tokenDecimals := 18 // Update as needed if decimals are dynamic
 
-    // Step 3: Calculate the dynamic profit threshold
-    dynamicThreshold := calculateDynamicProfitThreshold(totalGasCost, gasPriceUSD, tokenDecimals)
+    // Step 4: Calculate the dynamic profit threshold in USD
+    dynamicThreshold := calculateDynamicProfitThreshold(gasFee, gasPriceUSD, tokenDecimals)
 
-    // Step 4: Calculate total cost (swap cost + gas cost)
-    totalCost := new(big.Int).Add(cost, totalGasCost)
+    // Step 5: Convert the swap cost and gas fee to USD for unified calculations
+    costUSD := convertToUSD(cost, gasPriceUSD, tokenDecimals)
+    gasFeeUSD := convertToUSD(gasFee, gasPriceUSD, tokenDecimals)
 
-    // Step 5: Calculate net profit
-    profit := new(big.Int).Sub(startAmount, totalCost)
+    // Step 6: Calculate the total cost in USD
+    totalCostUSD := new(big.Float).Add(costUSD, gasFeeUSD)
 
-    // Log detailed evaluation
+    // Step 7: Convert startAmount to USD
+    startAmountUSD := convertToUSD(startAmount, gasPriceUSD, tokenDecimals)
+
+    // Step 8: Calculate the profit in USD
+    profitUSD := new(big.Float).Sub(startAmountUSD, totalCostUSD)
+
+    // Log detailed evaluation for debugging
     log.Printf(
-        "Evaluating route profit: StartAmount=%s, Path=%v, TotalCost=%s, GasCost=%s, Profit=%s, DynamicThreshold=%s",
-        startAmount.String(), path, totalCost.String(), totalGasCost.String(), profit.String(), dynamicThreshold.String(),
+        "Evaluating route profit: StartAmountUSD=%s, Path=%v, TotalCostUSD=%s, GasFeeUSD=%s, ProfitUSD=%s, DynamicThreshold=%s",
+        startAmountUSD.Text('f', 8), path, totalCostUSD.Text('f', 8), gasFeeUSD.Text('f', 8), profitUSD.Text('f', 8), dynamicThreshold.String(),
     )
 
-    // Step 6: Compare profit with thresholds
-    if profit.Cmp(dynamicThreshold) > 0 && profit.Cmp(minProfitThreshold) > 0 {
-        log.Printf("Profitable route found: %v | Profit: %s", path, profit.String())
-        return true, profit
+    // Step 9: Compare profit with thresholds
+    profitInt := new(big.Int)
+    profitUSD.Int(profitInt) // Convert profit to *big.Int for compatibility
+    if profitUSD.Cmp(dynamicThreshold) > 0 && profitInt.Cmp(minProfitThreshold) > 0 {
+        log.Printf("Profitable route found: %v | Profit: %s", path, profitUSD.Text('f', 8))
+        return true, profitInt
     }
 
-    log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profit.String(), dynamicThreshold.String())
-    return false, profit
+    log.Printf("Route skipped: %v | Profit: %s below threshold %s", path, profitUSD.Text('f', 8), dynamicThreshold.String())
+    return false, profitInt
 }
-
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
