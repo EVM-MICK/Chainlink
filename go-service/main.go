@@ -133,6 +133,7 @@ type MarketData struct {
         ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
         TokenPrices     map[string]float64        `json:"tokenPrices"`
         Liquidity       []LiquidityData           `json:"liquidity"`
+        GasPrice        *big.Float                  `json:"gasPrice"` // Ensure GasPrice is added
     }
 
 type EdgeWeight struct {
@@ -1601,7 +1602,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     // Step 3: Normalize token prices
     log.Println("Normalizing token prices and decimals...")
-    normalizedPrices := normalizeTokenPrices(convertFloat64MapToBigFloat(marketData.TokenPrices)) // Fix 1 applied here
+    normalizedPrices := normalizeTokenPrices(convertFloat64MapToBigFloat(marketData.TokenPrices))
 
     // Step 4: Define or fetch token decimals as needed
     tokenDecimals := map[string]int{
@@ -1621,18 +1622,21 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
-    // Step 6: Build and process the graph
-    gasPriceInt := new(big.Int)
-    marketData.GasPrice.Int(gasPriceInt) // Fix 2 applied here
+    // Step 6: Extract gas price
+    gasPrice := marketData.GasPrice // Ensure GasPrice is added to MarketData as a *big.Float
+    if gasPrice == nil {
+        return nil, fmt.Errorf("gas price is missing in market data")
+    }
 
-    graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPriceInt)
+    // Step 7: Build and process the graph
+    graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 7: Initialize trade tracking variables
+    // Step 8: Initialize trade tracking variables
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
@@ -1642,10 +1646,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $200
 
-    // Step 8: Extract stable token addresses
+    // Step 9: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(normalizedLiquidity)
 
-    // Step 9: Evaluate routes for each stable token
+    // Step 10: Evaluate routes for each stable token
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1664,10 +1668,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
             // Convert `cost` to `*big.Int`
             costInt := new(big.Int)
-            cost.Int(costInt) // Fix 3 applied here
+            cost.Int(costInt)
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, normalizedPrices, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, normalizedPrices, gasPrice, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1686,7 +1690,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Step 10: Notify Node.js of computed routes
+    // Step 11: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
