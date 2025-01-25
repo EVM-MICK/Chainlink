@@ -944,13 +944,18 @@ func processMarketData(data MarketData, tokenPrices map[string]*big.Float, token
     log.Printf("Processing market data. Total liquidity entries: %d", len(data.Liquidity))
 
     skippedCount := 0
+    validCount := 0
+
     for _, entry := range data.Liquidity {
         targetToken := strings.ToLower(entry.TargetToken)
-        priceUSD, exists := normalizedPrices[targetToken]
-        if !exists {
-            log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
-            skippedCount++
-            continue
+
+        // Skip if USD price is missing and it's not USDC or the start token
+        if _, isStartToken := tokenPrices[strings.ToLower(data.StartToken)]; !isStartToken && targetToken != "usdc" {
+            if _, exists := normalizedPrices[targetToken]; !exists {
+                log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
+                skippedCount++
+                continue
+            }
         }
 
         decimals, exists := tokenDecimals[targetToken]
@@ -959,7 +964,7 @@ func processMarketData(data MarketData, tokenPrices map[string]*big.Float, token
             decimals = 18
         }
 
-        dstAmountUSD := convertToUSD(entry.DstAmount, priceUSD, decimals)
+        dstAmountUSD := convertToUSD(entry.DstAmount, normalizedPrices[targetToken], decimals)
         dstAmountUSDInt := new(big.Int)
         dstAmountUSD.Int(dstAmountUSDInt)
 
@@ -969,6 +974,13 @@ func processMarketData(data MarketData, tokenPrices map[string]*big.Float, token
             DstAmount:  dstAmountUSDInt,
             Gas:        entry.Gas,
         })
+
+        validCount++
+
+        // Stop processing if we have at least 7 valid liquidity pairs
+        if validCount >= 7 {
+            break
+        }
     }
 
     log.Printf("Processed market data: Skipped %d entries, Normalized %d entries.",
