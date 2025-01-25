@@ -1622,11 +1622,13 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
-    // Step 6: Extract gas price
+    // Step 6: Extract and convert gas price
     gasPrice := marketData.GasPrice // Ensure GasPrice is added to MarketData as a *big.Float
     if gasPrice == nil {
         return nil, fmt.Errorf("gas price is missing in market data")
     }
+    gasPriceInt := new(big.Int)
+    gasPrice.Int(gasPriceInt) // Convert *big.Float to *big.Int
 
     // Step 7: Build and process the graph
     graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPrice)
@@ -1671,7 +1673,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             cost.Int(costInt)
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, normalizedPrices, gasPrice, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, normalizedPrices, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1700,7 +1702,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
-
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
