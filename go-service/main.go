@@ -1627,20 +1627,20 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     // Step 5: Process and normalize liquidity data
     normalizedLiquidity := processMarketData(marketData, normalizedPrices, tokenDecimals)
-    if len(normalizedLiquidity) == 0 {
-        log.Println("No valid liquidity entries after normalization.")
-        return nil, fmt.Errorf("no valid liquidity data found")
+    if len(normalizedLiquidity) < 7 { // Ensure at least 7 valid pairs
+        log.Println("Insufficient valid liquidity entries after normalization.")
+        return nil, fmt.Errorf("insufficient valid liquidity data")
     }
 
     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
     // Step 6: Extract and convert gas price
-    gasPrice := marketData.GasPrice // Ensure GasPrice is added to MarketData as a *big.Float
+    gasPrice := marketData.GasPrice
     if gasPrice == nil {
         return nil, fmt.Errorf("gas price is missing in market data")
     }
     gasPriceInt := new(big.Int)
-    gasPrice.Int(gasPriceInt) // Convert *big.Float to *big.Int
+    gasPrice.Int(gasPriceInt)
 
     // Step 7: Build and process the graph
     graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPrice)
@@ -1663,7 +1663,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Step 9: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(normalizedLiquidity)
 
-    // Step 10: Evaluate routes for each stable token
+    // Step 10: Evaluate routes with hops limited to 3
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1673,8 +1673,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         go func(endToken string) {
             defer wg.Done()
 
-            // Compute the optimal route
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
+            // Compute the optimal route with hops of 3
+            path, cost, err := ComputeOptimalRouteWithHops(graph, marketData.StartToken, endToken, 3)
             if err != nil || len(path) <= 1 {
                 log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
                 return
