@@ -251,8 +251,6 @@ const (
     DefaultGasEstimate1       = 800_000       // Default gas estimate per hop
 )
 
-
-
 // OrderBook represents the liquidity and other details of a trading pair
 type OrderBook struct {
 	Liquidity *big.Float
