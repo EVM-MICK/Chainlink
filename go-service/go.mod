@@ -9,6 +9,7 @@ require (
     github.com/patrickmn/go-cache v2.1.0+incompatible
     github.com/deckarep/golang-set/v2 v2.7.0
     github.com/fsnotify/fsnotify v1.8.0
+    github.com/redis/go-redis/v9 v9.0.0
     github.com/go-stack/stack v1.8.1
     github.com/google/uuid v1.6.0
     github.com/holiman/uint256 v1.3.2
