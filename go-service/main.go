@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"context"
 	"encoding/json"
@@ -306,11 +305,12 @@ type BigInt struct {
 }
 
 type LiquidityData struct {
-    BaseToken      string
-    TargetToken    string
-    DstAmount      *big.Int
-    Gas            int64
-    Paths          [][][]PathSegment
+    BaseToken      string      `json:"baseToken"`
+    TargetToken    string      `json:"targetToken"`
+    DstAmount      *big.Int     `json:"dstAmount"`
+    Gas            float64       `json:"gas"`
+   // Gas            int64
+    Paths          [][][]PathSegment  `json:"paths"`
     NormalizedPrice *big.Float // Add this field for compatibility
 }
 
