@@ -1837,8 +1837,6 @@ func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMa
     return tokenPriceMap
 }
 
-
-
 func generateRoutes(marketData MarketData) ([]Route, error) {
     // Step 1: Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
@@ -1928,8 +1926,14 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
+            // Convert `tokenPricesMap` to `map[string]*big.Float`
+            pricesForProfitEval := make(map[string]*big.Float)
+            for token, price := range tokenPricesMap {
+                pricesForProfitEval[token] = price.Price // Extract the `*big.Float` price
+            }
+
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPricesMap, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, pricesForProfitEval, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1958,8 +1962,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
-
-
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
@@ -2124,9 +2126,9 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
             continue
         }
 
-        gas := uint64(0)
+        var gas int64
         if gasFloat, ok := liquidityItem["gas"].(float64); ok {
-            gas = uint64(gasFloat)
+            gas = int64(gasFloat) // Convert gas value to int64
         }
 
         paths, err := parsePaths(liquidityItem["paths"])
@@ -2139,7 +2141,7 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
             BaseToken:   liquidityItem["baseToken"].(string),
             TargetToken: liquidityItem["targetToken"].(string),
             DstAmount:   dstAmount,
-            Gas:         gas,
+            Gas:         gas, // Assign converted int64 value
             Paths:       paths,
         })
     }
@@ -2147,6 +2149,7 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
     log.Printf("Fetched and parsed liquidity data: %d items", len(liquidityData))
     return liquidityData, nil
 }
+
 
 func parsePaths(rawPaths interface{}) ([][][]PathSegment, error) {
     rawPathList, ok := rawPaths.([]interface{})
