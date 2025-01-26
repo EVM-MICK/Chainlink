@@ -792,15 +792,17 @@ function normalizeTokenPrices(tokenPrices) {
 async function gatherMarketData() {
     try {
         console.log("Starting to gather market data...");
-        const usdAmount = 100000; // $100,000
-        const startToken = HARDCODED_STABLE_ADDRESSES[0]; // First token as the default start token
-        const startAmount = await getAmountInBaseToken(startToken, usdAmount, tokenPrices);
+       
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         const liquidityData = [];
         const historicalProfits = await redisClient.lrange('profitHistory', 0, -1).map(Number);
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
        
+        const usdAmount = 100000; // $100,000
+        const startToken = HARDCODED_STABLE_ADDRESSES[0]; // First token as the default start token
+        const startAmount = await getAmountInBaseToken(startToken, usdAmount, tokenPrices);
+
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
       // Calculate the equivalent amount in the base token
       const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
