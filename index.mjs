@@ -796,7 +796,7 @@ async function gatherMarketData() {
         const startToken = HARDCODED_STABLE_ADDRESSES[0]; // First token as the default start token
         const startAmount = await getAmountInBaseToken(startToken, usdAmount, tokenPrices);
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-
+        const liquidityData = [];
         const historicalProfits = await redisClient.lrange('profitHistory', 0, -1).map(Number);
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
@@ -840,12 +840,13 @@ async function gatherMarketData() {
             maxHops: MAX_HOPS,
             profitThreshold: new BigNumber(dynamicProfitThreshold).shiftedBy(6).toFixed(), // In wei
             tokenPrices,
-            liquidity: liquidityData.map(({ baseToken, targetToken, dstAmount, gas }) => ({
-                baseToken,
-                targetToken,
-                dstAmount,
-                gas,
-            })),
+            liquidity: liquidityData,
+    //liquidityData.map(({ baseToken, targetToken, dstAmount, gas }) => ({
+            //     baseToken,
+            //     targetToken,
+            //     dstAmount,
+            //     gas,
+            // })),
         };
 
         console.log("Constructed market data payload:", JSON.stringify(payload, null, 2));
