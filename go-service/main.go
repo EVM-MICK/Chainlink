@@ -1930,7 +1930,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 }
 
 
-
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
     prioritizedLiquidity := []LiquidityData{}
@@ -2318,7 +2317,7 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
         // Construct individual path segment
         segment := PathSegment{
             Name:             fmt.Sprintf("%s -> %s", entry.BaseToken, entry.TargetToken),
-            Part:             1.0, // Assume 100% allocation for now
+            Part:             1.0, // Assume 100% allocation for simplicity
             FromTokenAddress: entry.BaseToken,
             ToTokenAddress:   entry.TargetToken,
         }
@@ -2326,19 +2325,17 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
         // Wrap the segment in [][]PathSegment, and then wrap that in [][][]PathSegment
         paths := [][][]PathSegment{
             {
-                {segment}, // Wrap each segment in the required nesting
+                {segment}, // Wrap each segment in the required nesting structure
             },
         }
 
-        // Append the constructed LiquidityData
+        // Populate LiquidityData
         liquidityData[i] = LiquidityData{
-            BaseToken:      entry.BaseToken,
-            TargetToken:    entry.TargetToken,
-            Liquidity:      entry.Liquidity,
-            NormalizedPrice: entry.NormalizedPrice,
-            DstAmount:      new(big.Int), // Default value, adjust as needed
-            Gas:            21000,       // Default gas, adjust based on real data
-            Paths:          paths,       // Set paths with proper structure
+            BaseToken:   entry.BaseToken,
+            TargetToken: entry.TargetToken,
+            DstAmount:   entry.DstAmount,     // Map DstAmount from LiquidityEntry
+            Gas:         entry.Gas,          // Map Gas from LiquidityEntry
+            Paths:       paths,              // Assign paths with the required structure
         }
     }
 
