@@ -16,6 +16,7 @@ import (
         "bytes"
 	"strings"
 	"time"
+        "go-redis"
         "strconv"
 	"math"
         "runtime"
@@ -24,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+        "github.com/redis/go-redis/v8"
         "github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -68,6 +70,7 @@ type HealthCheckResponse struct {
 }
 
 var startTime time.Time
+var redisClient *redis.Client
 
 var (
 	uniswapABI    abi.ABI
@@ -886,7 +889,6 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 //     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
 // }
 
-
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxHops int) ([]string, *big.Float, error) {
     startToken = strings.ToLower(startToken) // Normalize input
     endToken = strings.ToLower(endToken)    // Normalize input
@@ -902,10 +904,12 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxH
         return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
     }
 
-    // Initialize distances, previous map, and hop count
+    // Initialize distances, previous map, hop count, and visited map
     distances := make(map[string]*big.Float)
     previous := make(map[string]string)
     hops := make(map[string]int)
+    visited := make(map[string]bool)
+
     for token := range graph.AdjacencyList {
         distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
         hops[token] = 0                             // Initialize hop count to 0
@@ -916,8 +920,6 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxH
     pq := make(PriorityQueue, 0)
     heap.Init(&pq)
     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
-
-    visited := make(map[string]bool) // Map to track visited nodes
 
     for pq.Len() > 0 {
         current := heap.Pop(&pq).(*Node)
@@ -935,10 +937,7 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxH
         // Check if the endToken is reached
         if currentToken == endToken {
             log.Println("Destination reached. Reconstructing path...")
-            path := []string{}
-            for token := endToken; token != ""; token = previous[token] {
-                path = append([]string{token}, path...)
-            }
+            path := reconstructPath(previous, startToken, endToken)
             log.Printf("Path found: %v | Total distance: %s", path, distances[endToken].String())
             return path, distances[endToken], nil
         }
@@ -968,8 +967,12 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxH
                 continue
             }
 
-            // Relax the edge
-            tentativeDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
+            // Adjust weight with historical stability
+            stabilityScore := calculateStabilityScore(edge.HistoricalLiquidity)
+            adjustedWeight := new(big.Float).Quo(edge.Weight, big.NewFloat(stabilityScore))
+
+            // Calculate tentative distance
+            tentativeDistance := new(big.Float).Add(distances[currentToken], adjustedWeight)
             if tentativeDistance.Cmp(distances[neighbor]) < 0 {
                 distances[neighbor] = tentativeDistance
                 previous[neighbor] = currentToken
@@ -991,15 +994,41 @@ func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxH
     return nil, nil, fmt.Errorf("no path found from %s to %s within %d hops", startToken, endToken, maxHops)
 }
 
+// Helper function to calculate stability score based on historical liquidity
+func calculateStabilityScore(historicalLiquidity []float64) float64 {
+    if len(historicalLiquidity) == 0 {
+        return 1.0 // Default stability score
+    }
+    sum := 0.0
+    for _, value := range historicalLiquidity {
+        sum += value
+    }
+    return sum / float64(len(historicalLiquidity))
+}
+
+// Helper function to reconstruct the path from startToken to endToken
+func reconstructPath(previous map[string]string, startToken, endToken string) []string {
+    path := []string{}
+    for token := endToken; token != ""; token = previous[token] {
+        path = append([]string{token}, path...)
+    }
+    return path
+}
 
 
 // calculateTotalGasCost calculates the total gas cost for a transaction.
-func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
-    if gasPrice == nil || gasPrice.Cmp(big.NewInt(0)) <= 0 {
-        gasPrice = big.NewInt(50 * 1e9) // Default to 50 Gwei
-    }
-    return new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
+// func calculateTotalGasCost(gasPrice *big.Int, gasLimit uint64) *big.Int {
+//     if gasPrice == nil || gasPrice.Cmp(big.NewInt(0)) <= 0 {
+//         gasPrice = big.NewInt(50 * 1e9) // Default to 50 Gwei
+//     }
+//     return new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
+// }
+
+func calculateTotalGasCost(gasPrice *big.Int, gasEstimate int64) *big.Int {
+    gasEstimateBig := big.NewInt(gasEstimate)
+    return new(big.Int).Mul(gasPrice, gasEstimateBig)
 }
+
 
 
 // Helper to convert *big.Float to *big.Int
@@ -1043,56 +1072,80 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
 }
 
 
-func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
-    normalizedPrices := normalizeTokenPrices(tokenPrices)
+// func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
+//     normalizedPrices := normalizeTokenPrices(tokenPrices)
 
-    normalizedLiquidity := []LiquidityData{}
-    log.Printf("Processing market data. Total liquidity entries: %d", len(data.Liquidity))
+//     normalizedLiquidity := []LiquidityData{}
+//     log.Printf("Processing market data. Total liquidity entries: %d", len(data.Liquidity))
 
-    skippedCount := 0
-    validCount := 0
+//     skippedCount := 0
+//     validCount := 0
 
-    for _, entry := range data.Liquidity {
-        targetToken := strings.ToLower(entry.TargetToken)
+//     for _, entry := range data.Liquidity {
+//         targetToken := strings.ToLower(entry.TargetToken)
 
-        // Skip if USD price is missing and it's not USDC or the start token
-        if _, isStartToken := tokenPrices[strings.ToLower(data.StartToken)]; !isStartToken && targetToken != "usdc" {
-            if _, exists := normalizedPrices[targetToken]; !exists {
-                log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
-                skippedCount++
-                continue
-            }
-        }
+//         // Skip if USD price is missing and it's not USDC or the start token
+//         if _, isStartToken := tokenPrices[strings.ToLower(data.StartToken)]; !isStartToken && targetToken != "usdc" {
+//             if _, exists := normalizedPrices[targetToken]; !exists {
+//                 log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
+//                 skippedCount++
+//                 continue
+//             }
+//         }
 
-        decimals, exists := tokenDecimals[targetToken]
-        if !exists {
-            log.Printf("Missing decimals for token %s. Defaulting to 18 decimals.", targetToken)
-            decimals = 18
-        }
+//         decimals, exists := tokenDecimals[targetToken]
+//         if !exists {
+//             log.Printf("Missing decimals for token %s. Defaulting to 18 decimals.", targetToken)
+//             decimals = 18
+//         }
 
-        dstAmountUSD := convertToUSD(entry.DstAmount, normalizedPrices[targetToken], decimals)
-        dstAmountUSDInt := new(big.Int)
-        dstAmountUSD.Int(dstAmountUSDInt)
+//         dstAmountUSD := convertToUSD(entry.DstAmount, normalizedPrices[targetToken], decimals)
+//         dstAmountUSDInt := new(big.Int)
+//         dstAmountUSD.Int(dstAmountUSDInt)
 
-        normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
-            BaseToken:  strings.ToLower(entry.BaseToken),
-            TargetToken: targetToken,
-            DstAmount:  dstAmountUSDInt,
-            Gas:        entry.Gas,
-        })
+//         normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
+//             BaseToken:  strings.ToLower(entry.BaseToken),
+//             TargetToken: targetToken,
+//             DstAmount:  dstAmountUSDInt,
+//             Gas:        entry.Gas,
+//         })
 
-        validCount++
+//         validCount++
 
-        // Stop processing if we have at least 7 valid liquidity pairs
-        if validCount >= 7 {
-            break
+//         // Stop processing if we have at least 7 valid liquidity pairs
+//         if validCount >= 7 {
+//             break
+//         }
+//     }
+
+//     log.Printf("Processed market data: Skipped %d entries, Normalized %d entries.",
+//         skippedCount, len(normalizedLiquidity))
+
+//     return normalizedLiquidity
+// }
+
+func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
+    // Normalize token prices
+    log.Println("Normalizing token prices with historical data...")
+    historicalPrices := fetchAndUpdateHistoricalData("token_prices", marketData.TokenPrices, 0.7)
+
+    // Normalize liquidity data
+    log.Println("Normalizing liquidity entries with historical data...")
+    normalizedLiquidity := make([]LiquidityEntry, 0)
+    for _, entry := range marketData.Liquidity {
+        if avgPrice, exists := historicalPrices[entry.BaseToken]; exists {
+            entry.NormalizedPrice = avgPrice
+            normalizedLiquidity = append(normalizedLiquidity, entry)
+        } else {
+            log.Printf("Skipping entry for %s: Missing historical price.", entry.BaseToken)
         }
     }
 
-    log.Printf("Processed market data: Skipped %d entries, Normalized %d entries.",
-        skippedCount, len(normalizedLiquidity))
+    if len(normalizedLiquidity) < 7 {
+        return nil, fmt.Errorf("insufficient valid liquidity entries after normalization")
+    }
 
-    return normalizedLiquidity
+    return normalizedLiquidity, nil
 }
 
 func evaluateRouteProfit(
@@ -1244,10 +1297,14 @@ func logEdgeDetails(src, dst string, weight float64, liquidity *big.Float) {
 // }
 
 func calculateDynamicProfitThreshold(gasCost *big.Int, gasPriceUSD *big.Float, decimals int) *big.Float {
+    // Convert gas cost to USD
     gasCostInUSD := convertToUSD(gasCost, gasPriceUSD, decimals)
 
-    baseProfitUSD := big.NewFloat(100)                          // Base profit in USD
+    // Define base profit and buffer factors
+    baseProfitUSD := big.NewFloat(100)                           // Base profit in USD
     gasBuffer := new(big.Float).Mul(gasCostInUSD, big.NewFloat(2)) // Gas cost * 2 buffer
+
+    // Dynamic threshold = gas buffer + base profit
     dynamicThreshold := new(big.Float).Add(gasBuffer, baseProfitUSD)
 
     log.Printf("Calculated dynamic profit threshold: %s (Gas Cost in USD: %s, Base Profit: %s)",
@@ -1592,6 +1649,49 @@ func convertFloat64MapToBigFloat(prices map[string]float64) map[string]*big.Floa
         converted[token] = big.NewFloat(price)
     }
     return converted
+}
+
+func initRedis() {
+    redisClient = redis.NewClient(&redis.Options{
+        Addr:     os.Getenv("REDIS_HOST") + ":" + os.Getenv("REDIS_PORT"),
+        Username: os.Getenv("REDIS_USERNAME"), // Add this for ACL authentication
+        Password: os.Getenv("REDIS_PASSWORD"),
+        DB:       0, // Default DB
+    })
+
+    _, err := redisClient.Ping(context.Background()).Result()
+    if err != nil {
+        log.Fatalf("Failed to connect to Redis: %v", err)
+    }
+    log.Println("Connected to Redis.")
+}
+
+// Retrieve historical data and update rolling averages
+func fetchAndUpdateHistoricalData(key string, liveData map[string]float64, weight float64) map[string]float64 {
+    ctx := context.Background()
+    historicalDataJSON, err := redisClient.Get(ctx, key).Result()
+    historicalData := make(map[string]float64)
+
+    if err == nil {
+        err = json.Unmarshal([]byte(historicalDataJSON), &historicalData)
+        if err != nil {
+            log.Printf("Error unmarshalling historical data for %s: %v", key, err)
+        }
+    }
+
+    for token, liveValue := range liveData {
+        historicalValue, exists := historicalData[token]
+        if exists {
+            historicalData[token] = weight*liveValue + (1-weight)*historicalValue
+        } else {
+            historicalData[token] = liveValue
+        }
+    }
+
+    updatedDataJSON, _ := json.Marshal(historicalData)
+    redisClient.Set(ctx, key, updatedDataJSON, time.Hour) // Cache for 1 hour
+
+    return historicalData
 }
 
 // func generateRoutes(marketData MarketData) ([]Route, error) {
@@ -2876,14 +2976,21 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 //     return usdValue
 // }
 
-func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
-    dstAmountFloat := new(big.Float).SetInt(dstAmount)
-    decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
-    normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
-    usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
-    log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
-        dstAmount.String(), price.String(), decimals, usdValue.String())
-    return usdValue
+// func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
+//     dstAmountFloat := new(big.Float).SetInt(dstAmount)
+//     decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
+//     normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
+//     usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
+//     log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
+//         dstAmount.String(), price.String(), decimals, usdValue.String())
+//     return usdValue
+// }
+
+func convertToUSD(amount *big.Int, priceUSD *big.Float, decimals int) *big.Float {
+    amountInFloat := new(big.Float).SetInt(amount)
+    factor := new(big.Float).SetFloat64(math.Pow10(decimals))
+    normalizedAmount := new(big.Float).Quo(amountInFloat, factor) // Normalize by decimals
+    return new(big.Float).Mul(normalizedAmount, priceUSD)         // Multiply by price in USD
 }
 
 func filterValidAddresses(tokens []StableToken) []string {
