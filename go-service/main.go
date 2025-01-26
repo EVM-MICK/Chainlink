@@ -16,7 +16,6 @@ import (
         "bytes"
 	"strings"
 	"time"
-        "go-redis"
         "strconv"
 	"math"
         "runtime"
@@ -25,7 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-        "github.com/go-redis/redis/v8"
+         "github.com/redis/go-redis/v9"
         "github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -77,7 +76,7 @@ var (
 	sushiSwapABI  abi.ABI
 )
 var marketDataQueue = make(chan MarketData, 500) // Buffered channel to queue update
-var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second
+var apiRateLimiter = NewRateLimiter(5, time.Second) // Allow 5 API calls per second //"go-redis"
 var wg sync.WaitGroup
 var abis = map[string]abi.ABI{}
 var rateLimiter = NewRateLimiter(5, time.Second)
