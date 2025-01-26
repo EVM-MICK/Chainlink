@@ -1849,16 +1849,19 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     gasPriceInt := new(big.Int)
     gasPrice.Int(gasPriceInt)
 
-    // Step 5: Build and process the graph
+    // Step 5: Convert TokenPrices for graph compatibility
+    tokenPricesMap := convertPricesToTokenPriceMap(marketData.TokenPrices)
+
+    // Step 6: Build and process the graph
     log.Println("Building the graph from normalized liquidity data...")
-    graph, err := buildAndProcessGraph(normalizedLiquidity, marketData.TokenPrices, gasPrice)
+    graph, err := buildAndProcessGraph(normalizedLiquidity, tokenPricesMap, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 6: Initialize variables for trade tracking
+    // Step 7: Initialize variables for trade tracking
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
@@ -1868,10 +1871,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $200
 
-    // Step 7: Extract stable token addresses
+    // Step 8: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(normalizedLiquidity)
 
-    // Step 8: Evaluate routes with hops limited to 3
+    // Step 9: Evaluate routes with hops limited to 3
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1892,8 +1895,11 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
+            // Convert TokenPrices to `map[string]*big.Float` for profit evaluation
+            pricesForProfitEval := convertFloat64MapToBigFloat(marketData.TokenPrices)
+
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, marketData.TokenPrices, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, pricesForProfitEval, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1912,7 +1918,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Step 9: Notify Node.js of computed routes
+    // Step 10: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
