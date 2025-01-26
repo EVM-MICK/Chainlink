@@ -1654,11 +1654,11 @@ func fetchWithRetryOrderBook(url string, headers, params map[string]string) ([]b
 
 // Convert map[string]float64 to map[string]*big.Float
 func convertFloat64MapToBigFloat(prices map[string]float64) map[string]*big.Float {
-    converted := make(map[string]*big.Float)
+    bigFloatPrices := make(map[string]*big.Float)
     for token, price := range prices {
-        converted[token] = big.NewFloat(price)
+        bigFloatPrices[token] = big.NewFloat(price)
     }
-    return converted
+    return bigFloatPrices
 }
 
 func initRedis() {
@@ -1850,18 +1850,21 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     gasPrice.Int(gasPriceInt)
 
     // Step 5: Convert TokenPrices for graph compatibility
-    tokenPricesMap := convertPricesToTokenPriceMap(marketData.TokenPrices)
+    tokenPricesMap := convertFloat64MapToBigFloat(marketData.TokenPrices)
 
-    // Step 6: Build and process the graph
+    // Step 6: Transform `normalizedLiquidity` into `[]LiquidityData` for graph compatibility
+    liquidityData := convertToLiquidityData(normalizedLiquidity)
+
+    // Step 7: Build and process the graph
     log.Println("Building the graph from normalized liquidity data...")
-    graph, err := buildAndProcessGraph(normalizedLiquidity, tokenPricesMap, gasPrice)
+    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, gasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 7: Initialize variables for trade tracking
+    // Step 8: Initialize variables for trade tracking
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
@@ -1871,10 +1874,10 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     // Define minimum profit threshold
     minProfitThreshold := big.NewInt(200) // Example threshold: $200
 
-    // Step 8: Extract stable token addresses
-    stableTokenAddresses := extractStableTokens(normalizedLiquidity)
+    // Step 9: Extract stable token addresses
+    stableTokenAddresses := extractStableTokens(liquidityData)
 
-    // Step 9: Evaluate routes with hops limited to 3
+    // Step 10: Evaluate routes with hops limited to 3
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1895,11 +1898,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Convert TokenPrices to `map[string]*big.Float` for profit evaluation
-            pricesForProfitEval := convertFloat64MapToBigFloat(marketData.TokenPrices)
-
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, pricesForProfitEval, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPricesMap, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1918,7 +1918,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Step 10: Notify Node.js of computed routes
+    // Step 11: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1928,6 +1928,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
+
 
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
@@ -2310,16 +2311,16 @@ func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []Liqui
 }
 
 // Converts [][]map[string]interface{} back to []LiquidityData
-func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
-    var liquidityData []LiquidityData
+func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
+    liquidityData := make([]LiquidityData, len(entries))
 
-    for _, pair := range tokenPairs {
+    for i, entry := range entries {
         // Construct individual path segment
         segment := PathSegment{
-            Name:             fmt.Sprintf("%s -> %s", pair.SrcToken, pair.DstToken),
+            Name:             fmt.Sprintf("%s -> %s", entry.BaseToken, entry.TargetToken),
             Part:             1.0, // Assume 100% allocation for now
-            FromTokenAddress: pair.SrcToken,
-            ToTokenAddress:   pair.DstToken,
+            FromTokenAddress: entry.BaseToken,
+            ToTokenAddress:   entry.TargetToken,
         }
 
         // Wrap the segment in [][]PathSegment, and then wrap that in [][][]PathSegment
@@ -2330,13 +2331,15 @@ func convertToLiquidityData(tokenPairs []TokenPair) []LiquidityData {
         }
 
         // Append the constructed LiquidityData
-        liquidityData = append(liquidityData, LiquidityData{
-            BaseToken:   pair.SrcToken,
-            TargetToken: pair.DstToken,
-            DstAmount:   new(big.Int), // Default value, adjust as needed
-            Gas:         21000,           // Default gas, adjust based on real data
-            Paths:       paths,           // Set paths with proper structure
-        })
+        liquidityData[i] = LiquidityData{
+            BaseToken:      entry.BaseToken,
+            TargetToken:    entry.TargetToken,
+            Liquidity:      entry.Liquidity,
+            NormalizedPrice: entry.NormalizedPrice,
+            DstAmount:      new(big.Int), // Default value, adjust as needed
+            Gas:            21000,       // Default gas, adjust based on real data
+            Paths:          paths,       // Set paths with proper structure
+        }
     }
 
     return liquidityData
