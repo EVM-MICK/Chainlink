@@ -381,6 +381,7 @@ var (
 type TokenPrice struct {
 	Price     *big.Float
 	Liquidity *big.Float
+        Decimals int        // Number of decimals for the token
 }
 
 func (pq PriorityQueue) Len() int {
@@ -1818,13 +1819,24 @@ func fetchAndUpdateHistoricalData(key string, liveData map[string]float64, weigh
 //     return finalRoutes, nil
 // }
 
-func convertToTokenPriceMap(prices map[string]float64) map[string]*big.Float {
-    tokenPriceMap := make(map[string]*big.Float)
+
+
+// Converts map[string]*big.Float to map[string]TokenPrice
+func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMap map[string]int) map[string]TokenPrice {
+    tokenPriceMap := make(map[string]TokenPrice)
     for token, price := range prices {
-        tokenPriceMap[token] = big.NewFloat(price)
+        decimals, exists := decimalsMap[token]
+        if !exists {
+            decimals = 18 // Default to 18 decimals if not found
+        }
+        tokenPriceMap[token] = TokenPrice{
+            Price:    price,
+            Decimals: decimals,
+        }
     }
     return tokenPriceMap
 }
+
 
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
@@ -1846,7 +1858,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("error processing market data: %v", err)
     }
 
-    if len(normalizedLiquidity) < 7 { // Ensure at least 7 valid pairs
+    if len(normalizedLiquidity) < 7 {
         log.Println("Insufficient valid liquidity entries after normalization.")
         return nil, fmt.Errorf("insufficient valid liquidity data")
     }
@@ -1861,9 +1873,16 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     gasPrice.Int(gasPriceInt)
 
     // Step 5: Convert TokenPrices for graph compatibility
-    tokenPricesMap := convertToTokenPriceMap(marketData.TokenPrices) // Fix for type compatibility
+    decimalsMap := map[string]int{
+        "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,  // USDC
+        "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,  // USDT
+        "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18, // DAI
+        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18, // WETH
+        "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,  // WBTC
+    }
+    tokenPricesMap := convertToTokenPriceMapWithDecimals(convertFloat64MapToBigFloat(marketData.TokenPrices), decimalsMap)
 
-    // Step 6: Transform `normalizedLiquidity` into `[]LiquidityData` for graph compatibility
+    // Step 6: Transform `normalizedLiquidity` into `[]LiquidityData`
     liquidityData := convertToLiquidityData(normalizedLiquidity)
 
     // Step 7: Build and process the graph
@@ -2272,7 +2291,12 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     count := 0
 
     for _, entry := range liquidityData {
-        totalGas.Add(totalGas, new(big.Int).SetUint64(entry.Gas))
+        if entry.Gas < 0 {
+            log.Printf("Skipping entry with negative gas value: %d", entry.Gas)
+            continue
+        }
+        // Convert `entry.Gas` to uint64 before using `SetUint64`
+        totalGas.Add(totalGas, new(big.Int).SetUint64(uint64(entry.Gas)))
         count++
     }
 
@@ -2283,6 +2307,7 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
     avgGas := new(big.Float).Quo(new(big.Float).SetInt(totalGas), big.NewFloat(float64(count)))
     return avgGas
 }
+
 
 func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []LiquidityData) map[string]map[string]TokenPrice {
     tokenPrices := make(map[string]map[string]TokenPrice)
@@ -2341,11 +2366,14 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
             },
         }
 
+        // Convert NormalizedPrice from float64 to *big.Float
+        normalizedPrice := new(big.Float).SetFloat64(entry.NormalizedPrice)
+
         // Populate LiquidityData (fields adjusted to avoid undefined fields)
         liquidityData[i] = LiquidityData{
             BaseToken:      entry.BaseToken,
             TargetToken:    entry.TargetToken,
-            NormalizedPrice: entry.NormalizedPrice, // Map NormalizedPrice correctly
+            NormalizedPrice: normalizedPrice,       // Convert to *big.Float
             DstAmount:      new(big.Int),          // Default value; adjust if needed
             Gas:            21000,                 // Use a default or derived value
             Paths:          paths,                 // Assign paths with the required structure
