@@ -135,7 +135,7 @@ type MarketData struct {
         ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
         TokenPrices     map[string]float64        `json:"tokenPrices"`
         Liquidity       []LiquidityData           `json:"liquidity"`
-        GasPrice        *big.Float                  `json:"gasPrice"` // Ensure GasPrice is added
+        GasPrice        *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
     }
 
 type EdgeWeight struct {
@@ -2141,7 +2141,7 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
             BaseToken:   liquidityItem["baseToken"].(string),
             TargetToken: liquidityItem["targetToken"].(string),
             DstAmount:   dstAmount,
-            Gas:         gas, // Assign converted int64 value
+            Gas:         float64(gas), // Convert int64 to float64
             Paths:       paths,
         })
     }
@@ -2149,7 +2149,6 @@ func fetchUpdatedLiquidity(payload map[string]interface{}) ([]LiquidityData, err
     log.Printf("Fetched and parsed liquidity data: %d items", len(liquidityData))
     return liquidityData, nil
 }
-
 
 func parsePaths(rawPaths interface{}) ([][][]PathSegment, error) {
     rawPathList, ok := rawPaths.([]interface{})
