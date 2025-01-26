@@ -1850,7 +1850,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     gasPrice.Int(gasPriceInt)
 
     // Step 5: Convert TokenPrices for graph compatibility
-    tokenPricesMap := convertFloat64MapToBigFloat(marketData.TokenPrices)
+    tokenPricesMap := convertToTokenPriceMap(marketData.TokenPrices) // Fix for type compatibility
 
     // Step 6: Transform `normalizedLiquidity` into `[]LiquidityData` for graph compatibility
     liquidityData := convertToLiquidityData(normalizedLiquidity)
@@ -1928,6 +1928,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
+
 
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
@@ -2329,18 +2330,20 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
             },
         }
 
-        // Populate LiquidityData
+        // Populate LiquidityData (fields adjusted to avoid undefined fields)
         liquidityData[i] = LiquidityData{
-            BaseToken:   entry.BaseToken,
-            TargetToken: entry.TargetToken,
-            DstAmount:   entry.DstAmount,     // Map DstAmount from LiquidityEntry
-            Gas:         entry.Gas,          // Map Gas from LiquidityEntry
-            Paths:       paths,              // Assign paths with the required structure
+            BaseToken:      entry.BaseToken,
+            TargetToken:    entry.TargetToken,
+            NormalizedPrice: entry.NormalizedPrice, // Map NormalizedPrice correctly
+            DstAmount:      new(big.Int),          // Default value; adjust if needed
+            Gas:            21000,                 // Use a default or derived value
+            Paths:          paths,                 // Assign paths with the required structure
         }
     }
 
     return liquidityData
 }
+
 
 func adjustForTokenDecimals(token string, amount *big.Int) (*big.Int, error) {
     tokenDecimals := getTokenDecimals(token)
