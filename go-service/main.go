@@ -306,12 +306,14 @@ type BigInt struct {
 }
 
 type LiquidityData struct {
-    BaseToken  string
-    TargetToken string
-    DstAmount  *big.Int
-    Gas        uint64
-    Paths      [][][]PathSegment
+    BaseToken      string
+    TargetToken    string
+    DstAmount      *big.Int
+    Gas            int64
+    Paths          [][][]PathSegment
+    NormalizedPrice *big.Float // Add this field for compatibility
 }
+
 
 type Liquidity struct {
     // Define fields based on your use case
@@ -1815,6 +1817,15 @@ func fetchAndUpdateHistoricalData(key string, liveData map[string]float64, weigh
 
 //     return finalRoutes, nil
 // }
+
+func convertToTokenPriceMap(prices map[string]float64) map[string]*big.Float {
+    tokenPriceMap := make(map[string]*big.Float)
+    for token, price := range prices {
+        tokenPriceMap[token] = big.NewFloat(price)
+    }
+    return tokenPriceMap
+}
+
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
     // Step 1: Validate the start token
