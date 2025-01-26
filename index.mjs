@@ -795,7 +795,7 @@ async function gatherMarketData() {
        
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         const liquidityData = [];
-        const historicalProfits = await redisClient.lrange('profitHistory', 0, -1).map(Number);
+        const historicalProfits = await redisClient.lRange('profitHistory', 0, -1).map(Number);
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
        
