@@ -127,23 +127,38 @@ type WeightedGraph struct {
     TokenPrices   map[string]*big.Float           // Token prices mapped by token address
 }
 
+// type MarketData struct {
+//         ChainID         int64                      `json:"chainId"`
+//         StartToken      string                     `json:"startToken"`
+//         StartAmount     string                     `json:"startAmount"` // Use string for large numbers
+//         MaxHops         int                        `json:"maxHops"`
+//         ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
+//         TokenPrices     map[string]float64        `json:"tokenPrices"`
+//         Liquidity       []LiquidityData           `json:"liquidity"`
+//         GasPrice        *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
+//         HistoricalProfits []float64           `json:"historicalProfits"` // Add this field
+//     }
+
 type MarketData struct {
-        ChainID         int64                      `json:"chainId"`
-        StartToken      string                     `json:"startToken"`
-        StartAmount     string                     `json:"startAmount"` // Use string for large numbers
-        MaxHops         int                        `json:"maxHops"`
-        ProfitThreshold string                     `json:"profitThreshold"` // Use string for large numbers
-        TokenPrices     map[string]float64        `json:"tokenPrices"`
-        Liquidity       []LiquidityData           `json:"liquidity"`
-        GasPrice        *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
-        HistoricalProfits []float64           `json:"historicalProfits"` // Add this field
-    }
+    ChainID          int64                      `json:"chainId"`
+    StartToken       string                     `json:"startToken"`
+    StartAmount      *BigInt                    `json:"startAmount"` // Custom type for large numbers
+    MaxHops          int                        `json:"maxHops"`
+    ProfitThreshold  *BigInt                    `json:"profitThreshold"` // Custom type for large numbers
+    TokenPrices      map[string]float64         `json:"tokenPrices"`
+    Liquidity        []LiquidityData            `json:"liquidity"`
+    GasPrice         *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
+    HistoricalProfits []float64                 `json:"historicalProfits"` // Add this field
+}
+
 
 type EdgeWeight struct {
 	Weight            *big.Float   // Weight of the edge (e.g., price or inverse liquidity)
 	Liquidity         *big.Float   // Liquidity available for the edge
 	HistoricalLiquidity []float64  // Historical liquidity data for stability scoring
 }
+
+type BigInt big.Int
 
 type LiquidityEntry struct {
 	BaseToken      string   `json:"baseToken"`
@@ -534,6 +549,30 @@ func (rl *RateLimiter) Adjust(newCapacity int, newInterval time.Duration) {
 	rl.interval = newInterval
 	rl.tokens = min(rl.tokens, rl.capacity) // Ensure tokens do not exceed capacity
 }
+
+
+func (b *BigInt) UnmarshalJSON(data []byte) error {
+    // Remove quotes from JSON string
+    var str string
+    if err := json.Unmarshal(data, &str); err != nil {
+        return fmt.Errorf("failed to unmarshal big.Int as string: %w", err)
+    }
+
+    // Parse string into big.Int
+    temp := new(big.Int)
+    if _, ok := temp.SetString(str, 10); !ok {
+        return fmt.Errorf("invalid big.Int value: %s", str)
+    }
+
+    *b = BigInt(*temp)
+    return nil
+}
+
+// Convert back to `*big.Int` if needed
+func (b *BigInt) ToBigInt() *big.Int {
+    return (*big.Int)(b)
+}
+
 
 // NewRateLimiter initializes a new rate limiter with 1 message per second.
 func NewRateLimiter(capacity int, interval time.Duration) *RateLimiter {
@@ -1134,7 +1173,9 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
 // }
 
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
-
+    startAmount := marketData.StartAmount.ToBigInt()
+    profitThreshold := marketData.ProfitThreshold.ToBigInt()
+    fmt.Printf("StartAmount: %s, ProfitThreshold: %s\n", startAmount.String(), profitThreshold.String())
     log.Println("Normalizing token prices with historical data...")
     historicalPrices := fetchAndUpdateHistoricalData(
         "token_prices",
