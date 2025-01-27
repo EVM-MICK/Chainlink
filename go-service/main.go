@@ -2289,6 +2289,7 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Routes generated and sent successfully.")
 }
 
+
 func flattenTokenPrices(nestedPrices map[string]map[string]TokenPrice) map[string]TokenPrice {
     flatPrices := make(map[string]TokenPrice)
     for _, innerMap := range nestedPrices {
