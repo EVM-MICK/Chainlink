@@ -1832,18 +1832,30 @@ func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMa
 }
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
-// Step 1: Validate the start token
+    // Step 1: Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
     // Step 2: Parse the start amount
+    if marketData.StartAmount == nil {
+        return nil, fmt.Errorf("startAmount is nil or invalid")
+    }
     startAmount := marketData.StartAmount.ToBigInt()
     if startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", startAmount.String())
     }
 
-    // Step 3: Process and normalize liquidity data
+    // Step 3: Parse the profit threshold
+    if marketData.ProfitThreshold == nil {
+        return nil, fmt.Errorf("profitThreshold is nil or invalid")
+    }
+    minProfitThreshold := marketData.ProfitThreshold.ToBigInt()
+    if minProfitThreshold.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", minProfitThreshold.String())
+    }
+
+    // Step 4: Process and normalize liquidity data
     log.Println("Processing and normalizing liquidity data...")
     normalizedLiquidity, err := processMarketData(marketData)
     if err != nil {
@@ -1856,15 +1868,14 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
 
-    // Step 4: Extract and convert gas price
-    gasPrice := marketData.GasPrice
-    if gasPrice == nil {
+    // Step 5: Extract and convert gas price
+    if marketData.GasPrice == nil {
         return nil, fmt.Errorf("gas price is missing in market data")
     }
     gasPriceInt := new(big.Int)
-    gasPrice.Int(gasPriceInt)
+    marketData.GasPrice.Int(gasPriceInt)
 
-    // Step 5: Convert TokenPrices for graph compatibility
+    // Step 6: Convert TokenPrices for graph compatibility
     decimalsMap := map[string]int{
         "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,  // USDC
         "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,  // USDT
@@ -1874,38 +1885,29 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     tokenPricesMap := convertToTokenPriceMapWithDecimals(convertFloat64MapToBigFloat(marketData.TokenPrices), decimalsMap)
 
-    // Step 6: Transform `normalizedLiquidity` into `[]LiquidityData`
+    // Step 7: Transform `normalizedLiquidity` into `[]LiquidityData`
     liquidityData := convertToLiquidityData(normalizedLiquidity)
 
-    // Step 7: Build and process the graph
+    // Step 8: Build and process the graph
     log.Println("Building the graph from normalized liquidity data...")
-    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, gasPrice)
+    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, marketData.GasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 8: Initialize variables for trade tracking
+    // Step 9: Initialize variables for trade tracking
     var tradeCount int
     cumulativeProfit := new(big.Int)
     var finalRoutes []Route
     var mu sync.Mutex
     var wg sync.WaitGroup
 
-    // Define minimum profit threshold
-    minProfitThreshold := new(big.Int)
-    if marketData.ProfitThreshold == "" {
-        return nil, fmt.Errorf("profitThreshold is empty or invalid")
-    }
-    if _, ok := minProfitThreshold.SetString(marketData.ProfitThreshold, 10); !ok || minProfitThreshold.Cmp(big.NewInt(0)) <= 0 {
-        return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
-    }
-
-    // Step 9: Extract stable token addresses
+    // Step 10: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(liquidityData)
 
-    // Step 10: Evaluate routes with hops limited to 3
+    // Step 11: Evaluate routes with hops limited to 3
     for _, endToken := range stableTokenAddresses {
         if strings.EqualFold(endToken, marketData.StartToken) {
             continue
@@ -1927,7 +1929,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             cost.Int(costInt)
 
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPricesMap, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, convertFloat64MapToBigFloat(marketData.TokenPrices), gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1946,7 +1948,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     wg.Wait()
 
-    // Step 11: Notify Node.js of computed routes
+    // Step 12: Notify Node.js of computed routes
     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
         log.Printf("Failed to notify Node.js script of routes: %v", err)
     }
@@ -1956,7 +1958,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
-
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
