@@ -145,7 +145,7 @@ type MarketData struct {
     StartToken       string                     `json:"startToken"`
     StartAmount      *BigInt                    `json:"startAmount"` // Custom type for large numbers
     MaxHops          int                        `json:"maxHops"`
-    ProfitThreshold  *BigInt                    `json:"profitThreshold"` // Custom type for large numbers
+    ProfitThreshold  *big.Float                    `json:"profitThreshold"` // Custom type for large numbers
     TokenPrices      map[string]float64         `json:"tokenPrices"`
     Liquidity        []LiquidityData            `json:"liquidity"`
     GasPrice         *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
@@ -1850,8 +1850,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     if marketData.ProfitThreshold == nil {
         return nil, fmt.Errorf("profitThreshold is nil or invalid")
     }
-    minProfitThreshold := marketData.ProfitThreshold.ToBigInt()
-    if minProfitThreshold.Cmp(big.NewInt(0)) <= 0 {
+    minProfitThreshold := marketData.ProfitThreshold.NewFloat()
+    if minProfitThreshold.Cmp(big.NewFloat(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", minProfitThreshold.String())
     }
 
