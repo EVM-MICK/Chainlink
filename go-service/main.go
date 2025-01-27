@@ -136,6 +136,7 @@ type MarketData struct {
         TokenPrices     map[string]float64        `json:"tokenPrices"`
         Liquidity       []LiquidityData           `json:"liquidity"`
         GasPrice        *big.Float                 `json:"gasPrice"` // Ensure GasPrice is added
+        HistoricalProfits []float64           `json:"historicalProfits"` // Add this field
     }
 
 type EdgeWeight struct {
