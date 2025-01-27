@@ -1812,6 +1812,9 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     // Step 2: Parse the start amount
     startAmount := new(big.Int)
+    if marketData.StartAmount == "" {
+        return nil, fmt.Errorf("startAmount is empty or invalid")
+    }
     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
     }
@@ -1867,7 +1870,13 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var wg sync.WaitGroup
 
     // Define minimum profit threshold
-    minProfitThreshold := big.NewInt(200) // Example threshold: $200
+    minProfitThreshold := new(big.Int)
+    if marketData.ProfitThreshold == "" {
+        return nil, fmt.Errorf("profitThreshold is empty or invalid")
+    }
+    if _, ok := minProfitThreshold.SetString(marketData.ProfitThreshold, 10); !ok || minProfitThreshold.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", marketData.ProfitThreshold)
+    }
 
     // Step 9: Extract stable token addresses
     stableTokenAddresses := extractStableTokens(liquidityData)
@@ -1893,14 +1902,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Convert `tokenPricesMap` to `map[string]*big.Float`
-            pricesForProfitEval := make(map[string]*big.Float)
-            for token, price := range tokenPricesMap {
-                pricesForProfitEval[token] = price.Price // Extract the `*big.Float` price
-            }
-
             // Evaluate route profitability
-            profitable, profit := evaluateRouteProfit(startAmount, path, pricesForProfitEval, gasPriceInt, costInt, minProfitThreshold)
+            profitable, profit := evaluateRouteProfit(startAmount, path, tokenPricesMap, gasPriceInt, costInt, minProfitThreshold)
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
@@ -1929,6 +1932,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
 
     return finalRoutes, nil
 }
+
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
     usdcAddress := "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // USDC address
@@ -2215,9 +2219,17 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if marketData.StartToken == "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" || marketData.StartAmount == "100000000000000000000000" || len(marketData.Liquidity) == 0 {
+	if marketData.StartToken == "" || marketData.StartAmount == nil || len(marketData.Liquidity) == 0 {
 		log.Println("Missing required fields in the request body")
 		http.Error(w, "Missing required fields: 'startToken', 'startAmount', or 'liquidity'", http.StatusBadRequest)
+		return
+	}
+
+	// Convert marketData.StartAmount to a string for comparison
+	startAmountStr := marketData.StartAmount.String()
+	if marketData.StartToken == "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" || startAmountStr == "100000000000000000000000" {
+		log.Println("Invalid 'startToken' or 'startAmount' value in the request body")
+		http.Error(w, "Invalid 'startToken' or 'startAmount' value", http.StatusBadRequest)
 		return
 	}
 
