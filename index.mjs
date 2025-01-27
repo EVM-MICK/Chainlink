@@ -814,47 +814,26 @@ async function gatherMarketData() {
         // Process API data to gather liquidity data and update historical profits
         const usdAmount = 100000; // $100,000 as base capital
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-            const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
+           const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
-            for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-                if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue; // Skip self-pairs
+       for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
+        if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
-                try {
-                    const liquidityQuote = await fetchLiquidityForAllPairs(baseToken, baseAmount, targetToken);
-                    if (liquidityQuote) {
-                        // Add liquidity data to the payload
-                        liquidityData.push({
-                            baseToken,
-                            targetToken,
-                            dstAmount: parseInt(liquidityQuote.dstAmount, 10), // Convert to integer
-                            gas: liquidityQuote.gas,
-                            protocols: liquidityQuote.protocols,
-                        });
+        try {
+            const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
+            const processedQuotes = await processLiquidityQuotes(rawQuotes);
 
-                        // Derive profit from the quote and update historical profits
-                      
-                        const derivedProfit = calculateProfit(
-                                                 liquidityQuote,
-                                                 dynamicProfitThreshold,
-                                                 tokenPrices,
-                                                0.010 // 1.0% slippage tolerance
-                                            );
-
-                        historicalProfits.push(derivedProfit);
-                        if (historicalProfits.length > 100) {
-                            historicalProfits.shift(); // Maintain a rolling window of 100 entries
-                        }
-                    } else {
-                        console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
-                    }
-                } catch (error) {
-                    console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
-                }
-
-                // Respect API rate limits
-                await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
-            }
+            liquidityData.push(...processedQuotes);
+        } catch (error) {
+            console.error(
+                `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
+                error.message
+            );
         }
+      await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
+
+         }
+      }
 
         // Save updated historical profits back to Redis
         await redisClient.del('profitHistory');
@@ -877,6 +856,77 @@ async function gatherMarketData() {
         console.error("Error in gatherMarketData:", error.message);
     }
 }
+
+async function processLiquidityQuotes(rawQuotes) {
+    try {
+        console.log('Validating and normalizing liquidity quotes...');
+        let quotes = validateAndNormalizeLiquidityQuotes(rawQuotes);
+
+        console.log('Filtering quotes by dstAmount...');
+        quotes = filterByDstAmount(quotes);
+
+        console.log('Capping gas values...');
+        quotes = capGasValues(quotes);
+
+        console.log(`Processed ${quotes.length} valid liquidity quotes.`);
+        return quotes;
+    } catch (error) {
+        console.error('Error processing liquidity quotes:', error.message);
+        throw error;
+    }
+}
+
+function capGasValues(quotes, maxGas = 500000) {
+    return quotes.map((quote) => {
+        if (quote.gas > maxGas) {
+            console.warn(
+                `Capping gas value from ${quote.gas} to ${maxGas} for quote:`,
+                quote
+            );
+            quote.gas = maxGas;
+        }
+        return quote;
+    });
+}
+
+function filterByDstAmount(quotes, minDstAmount = 1000) {
+    return quotes.filter((quote) => {
+        const dstAmount = BigInt(quote.dstAmount);
+        if (dstAmount < BigInt(minDstAmount)) {
+            console.warn(
+                `Quote discarded: dstAmount ${dstAmount} is below threshold ${minDstAmount}`
+            );
+            return false;
+        }
+        return true;
+    });
+}
+
+function validateAndNormalizeLiquidityQuotes(quotes) {
+    return quotes
+        .filter((quote) => {
+            // Validate required fields
+            if (
+                !quote.fromToken ||
+                !quote.toToken ||
+                !quote.liquidity ||
+                !quote.liquidity.dstAmount ||
+                !quote.liquidity.gas
+            ) {
+                console.warn('Skipping invalid liquidity quote:', quote);
+                return false;
+            }
+            return true;
+        })
+        .map((quote) => ({
+            fromToken: quote.fromToken,
+            toToken: quote.toToken,
+            dstAmount: BigInt(quote.liquidity.dstAmount).toString(), // Normalize to string for consistency
+            gas: parseInt(quote.liquidity.gas, 10), // Ensure gas is an integer
+            protocols: quote.liquidity.protocols || [],
+        }));
+}
+
 
 /**
  * Calculate profit from a given liquidity quote.
