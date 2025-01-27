@@ -353,27 +353,38 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 
 async function fetchAndCacheWithAverages(key, fetchFn, weight = 0.7) {
     try {
-        const liveData = await fetchFn();
+        // Use the rate-limited wrapper for the fetch function
+        const liveData = await rateLimitedRequest1(fetchFn);
+
         const historicalData = await redisClient.get(key);
         let averagedData;
 
         if (historicalData) {
             const parsedHistorical = JSON.parse(historicalData);
+
+            // Compute weighted averages
             averagedData = Object.keys(liveData).reduce((acc, token) => {
-                acc[token] = liveData[token] * weight + (parsedHistorical[token] || 0) * (1 - weight);
+                acc[token] =
+                    liveData[token] * weight +
+                    (parsedHistorical[token] || 0) * (1 - weight);
                 return acc;
             }, {});
         } else {
+            // If no historical data exists, use live data as is
             averagedData = liveData;
         }
 
-        await redisClient.set(key, JSON.stringify(averagedData), 'EX', 3600); // Cache for 1 hour
+        // Cache the averaged data in Redis with a 1-hour expiration
+        await redisClient.set(key, JSON.stringify(averagedData), 'EX', 3600);
+
+        console.log(`Averaged data cached under key: ${key}`);
         return averagedData;
     } catch (error) {
         console.error(`Error in fetchAndCacheWithAverages: ${error.message}`);
         throw error;
     }
 }
+
 
 function calculateDynamicProfitThreshold(historicalProfits) {
     if (historicalProfits.length === 0) return 0.02; // Default to 2%
@@ -678,7 +689,6 @@ async function rateLimitedRequest1(fn, retries = 3, delay = RETRY_DELAY) {
 
   throw new Error("Maximum retry attempts exceeded.");
 }
-
 
 async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
   const tokenPriceInUSD = tokenPrices[baseToken.toLowerCase()]; // Fetch price for baseToken
