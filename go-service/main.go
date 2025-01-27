@@ -159,7 +159,7 @@ type EdgeWeight struct {
 	HistoricalLiquidity []float64  // Historical liquidity data for stability scoring
 }
 
-type BigInt big.Int
+//type BigInt big.Int
 
 type LiquidityEntry struct {
 	BaseToken      string   `json:"baseToken"`
@@ -317,9 +317,9 @@ type Payload struct {
     Liquidity       []LiquidityData
 }
 
-// type BigInt struct {
-//     big.Int
-// }
+type BigInt struct {
+    value *big.Int
+}
 
 type LiquidityData struct {
     BaseToken      string      `json:"baseToken"`
@@ -551,29 +551,56 @@ func (rl *RateLimiter) Adjust(newCapacity int, newInterval time.Duration) {
 	rl.tokens = min(rl.tokens, rl.capacity) // Ensure tokens do not exceed capacity
 }
 
-
+// UnmarshalJSON implements JSON unmarshaling for BigInt
 func (b *BigInt) UnmarshalJSON(data []byte) error {
-    // Remove quotes from JSON string
-    var str string
-    if err := json.Unmarshal(data, &str); err != nil {
-        return fmt.Errorf("failed to unmarshal big.Int as string: %w", err)
-    }
-
-    // Parse string into big.Int
-    temp := new(big.Int)
-    if _, ok := temp.SetString(str, 10); !ok {
-        return fmt.Errorf("invalid big.Int value: %s", str)
-    }
-
-    *b = BigInt(*temp)
-    return nil
+	str := string(data)
+	str = strings.Trim(str, `"`) // Remove quotes if present
+	val := new(big.Int)
+	if _, ok := val.SetString(str, 10); !ok {
+		return fmt.Errorf("invalid BigInt format: %s", str)
+	}
+	b.value = val
+	return nil
 }
+
+// MarshalJSON implements JSON marshaling for BigInt
+func (b *BigInt) MarshalJSON() ([]byte, error) {
+	if b.value == nil {
+		return []byte(`"0"`), nil // Default to "0" if nil
+	}
+	return []byte(fmt.Sprintf(`"%s"`, b.value.String())), nil
+}
+
+
+// func (b *BigInt) UnmarshalJSON(data []byte) error {
+//     // Remove quotes from JSON string
+//     var str string
+//     if err := json.Unmarshal(data, &str); err != nil {
+//         return fmt.Errorf("failed to unmarshal big.Int as string: %w", err)
+//     }
+
+//     // Parse string into big.Int
+//     temp := new(big.Int)
+//     if _, ok := temp.SetString(str, 10); !ok {
+//         return fmt.Errorf("invalid big.Int value: %s", str)
+//     }
+
+//     *b = BigInt(*temp)
+//     return nil
+// }
 
 // Convert back to `*big.Int` if needed
-func (b *BigInt) ToBigInt() *big.Int {
-    return (*big.Int)(b)
-}
+// func (b *BigInt) ToBigInt() *big.Int {
+//     return (*big.Int)(b)
+// }
 
+// ToBigInt converts a *BigInt to a *big.Int
+func (b *BigInt) ToBigInt() *big.Int {
+	if b == nil || b.value == nil {
+		return big.NewInt(0) // Return a zero value if BigInt or its value is nil
+	}
+	return b.value
+}
 
 // NewRateLimiter initializes a new rate limiter with 1 message per second.
 func NewRateLimiter(capacity int, interval time.Duration) *RateLimiter {
@@ -1805,18 +1832,15 @@ func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMa
 }
 
 func generateRoutes(marketData MarketData) ([]Route, error) {
-    // Step 1: Validate the start token
+// Step 1: Validate the start token
     if !common.IsHexAddress(marketData.StartToken) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
     }
 
     // Step 2: Parse the start amount
-    startAmount := new(big.Int)
-    if marketData.StartAmount == "" {
-        return nil, fmt.Errorf("startAmount is empty or invalid")
-    }
-    if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
-        return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
+    startAmount := marketData.StartAmount.ToBigInt()
+    if startAmount.Cmp(big.NewInt(0)) <= 0 {
+        return nil, fmt.Errorf("invalid or non-positive startAmount: %s", startAmount.String())
     }
 
     // Step 3: Process and normalize liquidity data
