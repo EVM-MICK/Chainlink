@@ -1680,146 +1680,61 @@ func initRedis() {
 }
 
 // Retrieve historical data and update rolling averages
-func fetchAndUpdateHistoricalData(key string, liveData map[string]float64, weight float64) map[string]float64 {
-    ctx := context.Background()
-    historicalDataJSON, err := redisClient.Get(ctx, key).Result()
-    historicalData := make(map[string]float64)
+// func fetchAndUpdateHistoricalData(key string, liveData map[string]float64, weight float64) map[string]float64 {
+//     ctx := context.Background()
+//     historicalDataJSON, err := redisClient.Get(ctx, key).Result()
+//     historicalData := make(map[string]float64)
 
-    if err == nil {
-        err = json.Unmarshal([]byte(historicalDataJSON), &historicalData)
-        if err != nil {
-            log.Printf("Error unmarshalling historical data for %s: %v", key, err)
-        }
-    }
-
-    for token, liveValue := range liveData {
-        historicalValue, exists := historicalData[token]
-        if exists {
-            historicalData[token] = weight*liveValue + (1-weight)*historicalValue
-        } else {
-            historicalData[token] = liveValue
-        }
-    }
-
-    updatedDataJSON, _ := json.Marshal(historicalData)
-    redisClient.Set(ctx, key, updatedDataJSON, time.Hour) // Cache for 1 hour
-
-    return historicalData
-}
-
-// func generateRoutes(marketData MarketData) ([]Route, error) {
-//     // Step 1: Validate the start token
-//     if !common.IsHexAddress(marketData.StartToken) {
-//         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
-//     }
-
-//     // Step 2: Parse the start amount
-//     startAmount := new(big.Int)
-//     if _, ok := startAmount.SetString(marketData.StartAmount, 10); !ok || startAmount.Cmp(big.NewInt(0)) <= 0 {
-//         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", marketData.StartAmount)
-//     }
-
-//     // Step 3: Normalize token prices
-//     log.Println("Normalizing token prices and decimals...")
-//     normalizedPrices := normalizeTokenPrices(marketData.TokenPrices) // `marketData.TokenPrices` is `map[string]*big.Float`
-
-//     // Step 4: Define or fetch token decimals as needed
-//     tokenDecimals := map[string]int{
-//         "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,
-//         "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,
-//         "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18,
-//         "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18,
-//         "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,
-//     }
-
-//     // Step 5: Process and normalize liquidity data
-//     normalizedLiquidity := processMarketData(marketData, normalizedPrices, tokenDecimals)
-//     if len(normalizedLiquidity) == 0 {
-//         log.Println("No valid liquidity entries after normalization.")
-//         return nil, fmt.Errorf("no valid liquidity data found")
-//     }
-
-//     log.Printf("Generating routes with %d normalized liquidity entries...", len(normalizedLiquidity))
-
-//     // Step 6: Build and process the graph
-//     gasPrice := extractGasPriceFromLiquidity(normalizedLiquidity)
-//     gasPriceBigInt := new(big.Int).Set(gasPrice) // Convert `*big.Float` to `*big.Int`
-
-//     graph, err := buildAndProcessGraph(normalizedLiquidity, convertPricesToTokenPriceMap(normalizedPrices), gasPrice)
-//     if err != nil {
-//         return nil, fmt.Errorf("failed to build graph: %v", err)
-//     }
-
-//     log.Println("Graph built successfully. Starting route evaluation.")
-
-//     // Step 7: Initialize trade tracking variables
-//     var tradeCount int
-//     cumulativeProfit := new(big.Int)
-//     var finalRoutes []Route
-//     var mu sync.Mutex
-//     var wg sync.WaitGroup
-
-//     // Define minimum profit threshold
-//     minProfitThreshold := big.NewInt(200) // Example threshold: $200
-
-//     // Step 8: Extract stable token addresses
-//     stableTokenAddresses := extractStableTokens(normalizedLiquidity)
-
-//     // Step 9: Evaluate routes for each stable token
-//     for _, endToken := range stableTokenAddresses {
-//         if strings.EqualFold(endToken, marketData.StartToken) {
-//             continue
+//     if err == nil {
+//         err = json.Unmarshal([]byte(historicalDataJSON), &historicalData)
+//         if err != nil {
+//             log.Printf("Error unmarshalling historical data for %s: %v", key, err)
 //         }
-
-//         wg.Add(1)
-//         go func(endToken string) {
-//             defer wg.Done()
-
-//             // Compute the optimal route
-//             path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, true)
-//             if err != nil || len(path) <= 1 {
-//                 log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
-//                 return
-//             }
-
-//             // Convert `normalizedPrices` to a flat map
-//             tokenPrices := normalizedPrices
-
-//             // Convert cost (*big.Float) to *big.Int
-//             costInt := new(big.Int).Set(cost) // Use `Set` to avoid overwriting
-
-//             // Evaluate route profitability
-//             profitable, profit := evaluateRouteProfit(startAmount, path, tokenPrices, gasPriceBigInt, costInt, minProfitThreshold)
-//             if profitable {
-//                 mu.Lock()
-//                 finalRoutes = append(finalRoutes, Route{
-//                     Path:   path,
-//                     Profit: profit,
-//                 })
-//                 tradeCount++
-//                 cumulativeProfit.Add(cumulativeProfit, profit)
-//                 mu.Unlock()
-//                 log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
-//             } else {
-//                 log.Printf("Route %s -> %s skipped: Net profit %s below thresholds", marketData.StartToken, endToken, profit.String())
-//             }
-//         }(endToken)
 //     }
 
-//     wg.Wait()
-
-//     // Step 10: Notify Node.js of computed routes
-//     if err := notifyNodeOfRoutes(finalRoutes); err != nil {
-//         log.Printf("Failed to notify Node.js script of routes: %v", err)
+//     for token, liveValue := range liveData {
+//         historicalValue, exists := historicalData[token]
+//         if exists {
+//             historicalData[token] = weight*liveValue + (1-weight)*historicalValue
+//         } else {
+//             historicalData[token] = liveValue
+//         }
 //     }
 
-//     log.Printf("Generated %d profitable routes. Total trades: %d | Cumulative profit: %s",
-//         len(finalRoutes), tradeCount, cumulativeProfit.String())
+//     updatedDataJSON, _ := json.Marshal(historicalData)
+//     redisClient.Set(ctx, key, updatedDataJSON, time.Hour) // Cache for 1 hour
 
-//     return finalRoutes, nil
+//     return historicalData
 // }
 
+func fetchAndUpdateHistoricalData(key string, currentData map[string]float64, weight float64, historicalData []float64) map[string]float64 {
+    if currentData == nil {
+        log.Printf("fetchAndUpdateHistoricalData: currentData is nil for key: %s", key)
+        currentData = make(map[string]float64)
+    }
 
+    if len(historicalData) == 0 {
+        log.Printf("No historical data available for key: %s. Using only current data.", key)
+        return currentData
+    }
+
+    // Calculate average of historical data
+    sum := 0.0
+    for _, value := range historicalData {
+        sum += value
+    }
+    historicalAverage := sum / float64(len(historicalData))
+
+    // Blend current data with historical average
+    blendedData := make(map[string]float64)
+    for token, currentValue := range currentData {
+        blendedValue := weight*historicalAverage + (1-weight)*currentValue
+        blendedData[token] = blendedValue
+    }
+
+    log.Printf("Blended data for key %s: %+v", key, blendedData)
+    return blendedData
+}
 
 // Converts map[string]*big.Float to map[string]TokenPrice
 func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMap map[string]int) map[string]TokenPrice {
