@@ -708,85 +708,71 @@ function normalizeTokenPrices(tokenPrices) {
     );
 }
 
+
 // async function gatherMarketData() {
 //     try {
 //         console.log("Starting to gather market data...");
 
-//         // Step 1: Fetch token prices
+//         // Fetch token prices
 //         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-//         console.log("Token prices fetched successfully.");
-
-//         // Step 2: Initialize liquidity data array
 //         const liquidityData = [];
 
-//         // Step 3: Fetch historical profits from Redis and convert them to numbers
-//         const rawProfits = await redisClient.lRange('profitHistory', 0, -1); // Fetch from Redis
-//         const historicalProfits = rawProfits.map(Number); // Convert strings to numbers
-//         console.log("Historical profits fetched:", historicalProfits);
+//         // Retrieve existing historical profits or initialize defaults
+//         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
+//         if (!historicalProfits || historicalProfits.length === 0) {
+//             console.log("No historical profits found. Initializing empty history.");
+//             historicalProfits = [0.01, 0.02, 0.015, 0.018]; // Default historical profits
+//         } else {
+//             historicalProfits = historicalProfits.map(Number); // Convert to numeric values
+//         }
 
-//         // Step 4: Calculate dynamic profit threshold
+//         // Calculate dynamic profit threshold
 //         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
 //         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
 
-//         // Step 5: Define USD amount and calculate equivalent for the start token
-//         const usdAmount = 100000; // $100,000
-//         const startToken = HARDCODED_STABLE_ADDRESSES[0]; // Use the first stable token as the start token
-//         const startAmount = await getAmountInBaseToken(startToken, usdAmount, tokenPrices);
-
-//         console.log(`Start token: ${startToken}, Start amount: ${startAmount}`);
-
-//         // Step 6: Fetch liquidity data for all token pairs
+//         // Process API data to gather liquidity data and update historical profits
+//         const usdAmount = 100000; // $100,000 as base capital
 //         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-//             // Calculate the equivalent amount in the base token
-//             const amount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
+//            const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
-//             for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-//                 if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue; // Skip same token pairs
+//        for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
+//         if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
-//                 try {
-//                     const data = await fetchLiquidityData(baseToken, targetToken, amount);
+//         try {
+//             const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
+//             const processedQuotes = await processLiquidityQuotes(rawQuotes);
 
-//                     if (data) {
-//                         liquidityData.push({
-//                             baseToken,
-//                             targetToken,
-//                             dstAmount: parseInt(data.dstAmount, 10), // Ensure string compatibility for big.Int
-//                             gas: data.gas,
-//                             protocols: data.protocols,
-//                         });
-
-//                         console.log(`Liquidity data collected: ${baseToken} -> ${targetToken}`);
-//                     } else {
-//                         console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
-//                     }
-//                 } catch (error) {
-//                     console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
-//                 }
-
-//                 // Respect API rate limits
-//                 await delay(1500); // 1.5 seconds delay between requests
-//             }
+//             liquidityData.push(...processedQuotes);
+//         } catch (error) {
+//             console.error(
+//                 `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
+//                 error.message
+//             );
 //         }
+//       await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
 
-//         // Step 7: Construct the payload
+//          }
+//       }
+
+//         // Save updated historical profits back to Redis
+//         await redisClient.del('profitHistory');
+//         await redisClient.rPush('profitHistory', historicalProfits);
+
+//         // Construct payload to send to the Go server
 //         const payload = {
 //             chainId: CHAIN_ID,
-//             startToken,
-//             startAmount: CAPITAL.toFixed(),
+//             startToken: HARDCODED_STABLE_ADDRESSES[0],
+//             startAmount: usdAmount.toString(),
 //             maxHops: MAX_HOPS,
-//             profitThreshold: new BigNumber(dynamicProfitThreshold).shiftedBy(6).toFixed(), // Convert to wei
+//             profitThreshold: dynamicProfitThreshold.toFixed(6), // Precision to six decimal places
 //             tokenPrices,
 //             liquidity: liquidityData,
 //         };
 
-//         console.log("Constructed market data payload:", JSON.stringify(payload, null, 2));
-
-//         // Step 8: Send the market data payload to the Go backend
+//         console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
 //         await sendMarketDataToGo(payload);
-//         console.log("Market data sent successfully.");
 //     } catch (error) {
 //         console.error("Error in gatherMarketData:", error.message);
-//         throw error;
 //     }
 // }
 
@@ -794,58 +780,53 @@ async function gatherMarketData() {
     try {
         console.log("Starting to gather market data...");
 
-        // Fetch token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         const liquidityData = [];
-
-        // Retrieve existing historical profits or initialize defaults
         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
         if (!historicalProfits || historicalProfits.length === 0) {
             console.log("No historical profits found. Initializing empty history.");
-            historicalProfits = [0.01, 0.02, 0.015, 0.018]; // Default historical profits
+            historicalProfits = [0.01, 0.02, 0.015, 0.018];
         } else {
-            historicalProfits = historicalProfits.map(Number); // Convert to numeric values
+            historicalProfits = historicalProfits.map(Number);
         }
 
-        // Calculate dynamic profit threshold
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
 
-        // Process API data to gather liquidity data and update historical profits
-        const usdAmount = 100000; // $100,000 as base capital
+        const usdAmount = 100000;
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-           const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
+            const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
-       for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-        if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
+            for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
+                if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
-        try {
-            const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
-            const processedQuotes = await processLiquidityQuotes(rawQuotes);
+                try {
+                    const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
+                    let processedQuotes = validateAndNormalizeLiquidityQuotes(rawQuotes);
 
-            liquidityData.push(...processedQuotes);
-        } catch (error) {
-            console.error(
-                `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
-                error.message
-            );
+                    processedQuotes = filterByDstAmount(
+                        processedQuotes,
+                        tokenPrices,
+                        dynamicProfitThreshold * 10
+                    );
+
+                    processedQuotes = capGasValues(processedQuotes);
+                    liquidityData.push(...processedQuotes);
+                } catch (error) {
+                    console.error(
+                        `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
+                        error.message
+                    );
+                }
+            }
         }
-      await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
 
-         }
-      }
-
-        // Save updated historical profits back to Redis
-        await redisClient.del('profitHistory');
-        await redisClient.rPush('profitHistory', historicalProfits);
-
-        // Construct payload to send to the Go server
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
             startAmount: usdAmount.toString(),
             maxHops: MAX_HOPS,
-            profitThreshold: dynamicProfitThreshold.toFixed(6), // Precision to six decimal places
+            profitThreshold: dynamicProfitThreshold.toFixed(6),
             tokenPrices,
             liquidity: liquidityData,
         };
@@ -889,18 +870,52 @@ function capGasValues(quotes, maxGas = 500000) {
     });
 }
 
-function filterByDstAmount(quotes, minDstAmount = 1000) {
-    return quotes.filter((quote) => {
-        const dstAmount = BigInt(quote.dstAmount);
-        if (dstAmount < BigInt(minDstAmount)) {
-            console.warn(
-                `Quote discarded: dstAmount ${dstAmount} is below threshold ${minDstAmount}`
-            );
-            return false;
-        }
-        return true;
-    });
+/**
+ * Filters and ensures `dstAmount` is in USD for all quotes.
+ * @param {Array} quotes - Array of liquidity quotes.
+ * @param {Object} tokenPrices - Map of token addresses to USD prices.
+ * @param {Number} minDstAmountUSD - Minimum `dstAmount` in USD.
+ * @returns {Array} - Filtered quotes with `dstAmount` in USD.
+ */
+function filterByDstAmount(quotes, tokenPrices, minDstAmountUSD = 1) {
+    return quotes
+        .map((quote) => {
+            // Determine if dstAmount is in USD
+            const toTokenPriceInUSD = tokenPrices[quote.toToken?.toLowerCase()];
+            if (!toTokenPriceInUSD) {
+                console.warn(
+                    `Skipping quote due to missing price for token: ${quote.toToken}`
+                );
+                return null;
+            }
+
+            // Convert dstAmount to USD if needed
+            let dstAmountInUSD;
+            if (quote.currency === "USD") {
+                dstAmountInUSD = parseFloat(quote.dstAmount);
+            } else {
+                dstAmountInUSD = parseFloat(quote.dstAmount) * toTokenPriceInUSD;
+            }
+
+            // Filter out quotes below the threshold
+            if (dstAmountInUSD < minDstAmountUSD) {
+                console.warn(
+                    `Quote discarded: dstAmountInUSD ${dstAmountInUSD.toFixed(
+                        2
+                    )} is below threshold ${minDstAmountUSD}`
+                );
+                return null;
+            }
+
+            // Attach the USD value for further processing
+            return {
+                ...quote,
+                dstAmountInUSD,
+            };
+        })
+        .filter(Boolean); // Remove null entries
 }
+
 
 function validateAndNormalizeLiquidityQuotes(quotes) {
     return quotes
@@ -916,17 +931,25 @@ function validateAndNormalizeLiquidityQuotes(quotes) {
                 console.warn('Skipping invalid liquidity quote:', quote);
                 return false;
             }
+
+            // Ensure dstAmount is a valid integer
+            if (Math.floor(quote.liquidity.dstAmount) !== quote.liquidity.dstAmount) {
+                console.warn(
+                    `Skipping quote due to non-integer dstAmount: ${quote.liquidity.dstAmount}`
+                );
+                return false;
+            }
+
             return true;
         })
         .map((quote) => ({
             fromToken: quote.fromToken,
             toToken: quote.toToken,
-            dstAmount: BigInt(quote.liquidity.dstAmount).toString(), // Normalize to string for consistency
+            dstAmount: BigInt(Math.round(quote.liquidity.dstAmount)).toString(), // Round and normalize
             gas: parseInt(quote.liquidity.gas, 10), // Ensure gas is an integer
             protocols: quote.liquidity.protocols || [],
         }));
 }
-
 
 /**
  * Calculate profit from a given liquidity quote.
