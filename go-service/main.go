@@ -2251,7 +2251,14 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert marketData.StartAmount to a string for comparison
-	startAmountStr := marketData.StartAmount.String()
+	startAmount := marketData.StartAmount.ToBigInt() // Use ToBigInt() to convert *BigInt to *big.Int
+	if startAmount == nil {
+		log.Println("Invalid 'startAmount' value in the request body")
+		http.Error(w, "Invalid 'startAmount' value", http.StatusBadRequest)
+		return
+	}
+
+	startAmountStr := startAmount.String() // Convert *big.Int to string for comparison
 	if marketData.StartToken == "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" || startAmountStr == "100000000000000000000000" {
 		log.Println("Invalid 'startToken' or 'startAmount' value in the request body")
 		http.Error(w, "Invalid 'startToken' or 'startAmount' value", http.StatusBadRequest)
