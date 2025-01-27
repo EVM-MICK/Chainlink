@@ -784,47 +784,65 @@ async function gatherMarketData() {
     try {
         console.log("Starting to gather market data...");
 
+        // Fetch token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         const liquidityData = [];
 
-        // Retrieve existing historical profits from Redis or initialize as empty array
+        // Retrieve existing historical profits or initialize defaults
         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
         if (!historicalProfits || historicalProfits.length === 0) {
             console.log("No historical profits found. Initializing empty history.");
-            historicalProfits = [];
+            historicalProfits = [0.01, 0.02, 0.015, 0.018]; // Default historical profits
         } else {
-            historicalProfits = historicalProfits.map(Number); // Convert to numbers
+            historicalProfits = historicalProfits.map(Number); // Convert to numeric values
         }
 
-        // Calculate dynamic profit threshold using historical data and current prices
+        // Calculate dynamic profit threshold
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
 
-        // Process API data to derive real-time quotes and add to historical data
-        const usdAmount = 100000; // $100,000
+        // Process API data to gather liquidity data and update historical profits
+        const usdAmount = 100000; // $100,000 as base capital
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
             const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
             for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-                if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
+                if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue; // Skip self-pairs
 
-                const liquidityQuote = await fetchLiquidityData(baseToken, targetToken, baseAmount);
-                if (liquidityQuote) {
-                    liquidityData.push({
-                        baseToken,
-                        targetToken,
-                        dstAmount: parseInt(liquidityQuote.dstAmount, 10),
-                        gas: liquidityQuote.gas,
-                        protocols: liquidityQuote.protocols,
-                    });
+                try {
+                    const liquidityQuote = await fetchLiquidityForAllPairs(baseToken, baseAmount, targetToken);
+                    if (liquidityQuote) {
+                        // Add liquidity data to the payload
+                        liquidityData.push({
+                            baseToken,
+                            targetToken,
+                            dstAmount: parseInt(liquidityQuote.dstAmount, 10), // Convert to integer
+                            gas: liquidityQuote.gas,
+                            protocols: liquidityQuote.protocols,
+                        });
 
-                    // Update historical profits with derived profit from the quote
-                    const derivedProfit = calculateProfit(liquidityQuote);
-                    historicalProfits.push(derivedProfit);
-                    if (historicalProfits.length > 100) {
-                        historicalProfits.shift(); // Maintain a fixed size (rolling window)
+                        // Derive profit from the quote and update historical profits
+                      
+                        const derivedProfit = calculateProfit(
+                                                 liquidityQuote,
+                                                 dynamicProfitThreshold,
+                                                 tokenPrices,
+                                                0.010 // 1.0% slippage tolerance
+                                            );
+
+                        historicalProfits.push(derivedProfit);
+                        if (historicalProfits.length > 100) {
+                            historicalProfits.shift(); // Maintain a rolling window of 100 entries
+                        }
+                    } else {
+                        console.warn(`No liquidity data available for ${baseToken} -> ${targetToken}`);
                     }
+                } catch (error) {
+                    console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
                 }
+
+                // Respect API rate limits
+                await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
             }
         }
 
@@ -832,13 +850,13 @@ async function gatherMarketData() {
         await redisClient.del('profitHistory');
         await redisClient.rPush('profitHistory', historicalProfits);
 
-        // Construct payload
+        // Construct payload to send to the Go server
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
             startAmount: usdAmount.toString(),
             maxHops: MAX_HOPS,
-            profitThreshold: dynamicProfitThreshold.toFixed(),
+            profitThreshold: dynamicProfitThreshold.toFixed(6), // Precision to six decimal places
             tokenPrices,
             liquidity: liquidityData,
         };
@@ -848,6 +866,52 @@ async function gatherMarketData() {
     } catch (error) {
         console.error("Error in gatherMarketData:", error.message);
     }
+}
+
+/**
+ * Calculate profit from a given liquidity quote.
+ * @param {Object} liquidityQuote - The quote data.
+ * @param {Number} dynamicProfitThreshold - The current profit threshold.
+ * @param {Object} tokenPrices - Token prices in USD for accurate conversion.
+ * @param {Number} slippageTolerance - Allowed slippage percentage (e.g., 0.01 for 1%).
+ * @returns {Number} - The derived profit in USD.
+ */
+function calculateProfit(liquidityQuote, dynamicProfitThreshold, tokenPrices, slippageTolerance = 0.01) {
+    const { dstAmount, gas, baseToken, targetToken, gasPrice } = liquidityQuote;
+
+    // Validate required fields
+    if (!dstAmount || !gas || !baseToken || !targetToken || !gasPrice) {
+        console.error("Invalid liquidity quote data:", liquidityQuote);
+        return 0;
+    }
+
+    // Convert destination amount to USD using target token price
+    const dstAmountUSD = parseFloat(dstAmount) * (tokenPrices[targetToken] || 0);
+    if (!dstAmountUSD) {
+        console.error(`Invalid target token price for ${targetToken}. Cannot calculate profit.`);
+        return 0;
+    }
+
+    // Calculate gas cost in USD
+    const gasCostUSD = parseFloat(gas) * parseFloat(gasPrice) * (tokenPrices[baseToken] || 0);
+    if (!gasCostUSD) {
+        console.error(`Invalid gas price or base token price for ${baseToken}. Cannot calculate gas cost.`);
+        return 0;
+    }
+
+    // Adjust for slippage tolerance
+    const adjustedDstAmountUSD = dstAmountUSD * (1 - slippageTolerance);
+
+    // Calculate net profit
+    const netProfitUSD = adjustedDstAmountUSD - gasCostUSD;
+
+    // Apply dynamic profit threshold
+    const profit = Math.max(netProfitUSD - dynamicProfitThreshold, 0);
+
+    console.log(`Calculated profit: ${profit.toFixed(6)} USD`);
+    console.log(`Details -> AdjustedDstAmountUSD: ${adjustedDstAmountUSD.toFixed(6)}, GasCostUSD: ${gasCostUSD.toFixed(6)}, DynamicThreshold: ${dynamicProfitThreshold.toFixed(6)}`);
+
+    return profit;
 }
 
 // Error Handling and Notifications
