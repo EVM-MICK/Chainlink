@@ -1133,9 +1133,18 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
 // }
 
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
+
+    log.Println("Normalizing token prices with historical data...")
+    historicalPrices := fetchAndUpdateHistoricalData(
+        "token_prices",
+        marketData.TokenPrices,
+        0.7, // Weight for historical data
+        marketData.HistoricalProfits, // Assume this field contains historical data
+      )       
+
 	// Step 1: Normalize token prices
-	log.Println("Normalizing token prices with historical data...")
-	historicalPrices := fetchAndUpdateHistoricalData("token_prices", marketData.TokenPrices, 0.7)
+	// log.Println("Normalizing token prices with historical data...")
+	// historicalPrices := fetchAndUpdateHistoricalData("token_prices", marketData.TokenPrices, 0.7)
 
 	// Step 2: Normalize liquidity entries
 	log.Println("Normalizing liquidity entries with historical data...")
