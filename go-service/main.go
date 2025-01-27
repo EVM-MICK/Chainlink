@@ -316,9 +316,9 @@ type Payload struct {
     Liquidity       []LiquidityData
 }
 
-type BigInt struct {
-    big.Int
-}
+// type BigInt struct {
+//     big.Int
+// }
 
 type LiquidityData struct {
     BaseToken      string      `json:"baseToken"`
@@ -1173,43 +1173,43 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
 // }
 
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
+    // Accessing the BigInt values directly
     startAmount := marketData.StartAmount.ToBigInt()
     profitThreshold := marketData.ProfitThreshold.ToBigInt()
     fmt.Printf("StartAmount: %s, ProfitThreshold: %s\n", startAmount.String(), profitThreshold.String())
+
+    // Step 1: Normalize token prices
     log.Println("Normalizing token prices with historical data...")
     historicalPrices := fetchAndUpdateHistoricalData(
         "token_prices",
         marketData.TokenPrices,
         0.7, // Weight for historical data
         marketData.HistoricalProfits, // Assume this field contains historical data
-      )       
+    )
 
-	// Step 1: Normalize token prices
-	// log.Println("Normalizing token prices with historical data...")
-	// historicalPrices := fetchAndUpdateHistoricalData("token_prices", marketData.TokenPrices, 0.7)
+    // Step 2: Normalize liquidity entries
+    log.Println("Normalizing liquidity entries with historical data...")
+    var normalizedLiquidity []LiquidityEntry
+    for _, entry := range marketData.Liquidity {
+        avgPrice, exists := historicalPrices[entry.BaseToken]
+        if !exists {
+            log.Printf("Skipping entry for %s: Missing historical price.", entry.BaseToken)
+            continue
+        }
 
-	// Step 2: Normalize liquidity entries
-	log.Println("Normalizing liquidity entries with historical data...")
-	var normalizedLiquidity []LiquidityEntry
-	for _, entry := range marketData.Liquidity {
-		avgPrice, exists := historicalPrices[entry.BaseToken]
-		if !exists {
-			log.Printf("Skipping entry for %s: Missing historical price.", entry.BaseToken)
-			continue
-		}
+        normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
+            BaseToken:      entry.BaseToken,
+            TargetToken:    entry.TargetToken,
+            NormalizedPrice: avgPrice,
+        })
+    }
 
-		normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
-			BaseToken:      entry.BaseToken,
-			TargetToken:    entry.TargetToken,
-			NormalizedPrice: avgPrice,
-		})
-	}
+    // Check for sufficient normalized liquidity entries
+    if len(normalizedLiquidity) < 7 {
+        return nil, fmt.Errorf("insufficient valid liquidity entries after normalization")
+    }
 
-	if len(normalizedLiquidity) < 7 {
-		return nil, fmt.Errorf("insufficient valid liquidity entries after normalization")
-	}
-
-	return normalizedLiquidity, nil
+    return normalizedLiquidity, nil
 }
 
 func evaluateRouteProfit(
@@ -2214,7 +2214,7 @@ func generateRoutesHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if marketData.StartToken == "" || marketData.StartAmount == "" || len(marketData.Liquidity) == 0 {
+	if marketData.StartToken == "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" || marketData.StartAmount == "100000000000000000000000" || len(marketData.Liquidity) == 0 {
 		log.Println("Missing required fields in the request body")
 		http.Error(w, "Missing required fields: 'startToken', 'startAmount', or 'liquidity'", http.StatusBadRequest)
 		return
