@@ -852,119 +852,6 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// ComputeOptimalRoute finds the optimal route using Dijkstra's algorithm
-// func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, useAStar bool) ([]string, *big.Float, error) {
-//     startToken = strings.ToLower(startToken) // Normalize input
-//     endToken = strings.ToLower(endToken)    // Normalize input
-//     log.Printf("Starting optimal route computation from %s to %s (useAStar: %t)", startToken, endToken, useAStar)
-
-//     // Validate start and end tokens in the graph
-//     if _, exists := graph.AdjacencyList[startToken]; !exists {
-//         log.Printf("Start token %s not found in graph", startToken)
-//         return nil, nil, fmt.Errorf("start token %s not in graph", startToken)
-//     }
-//     if _, exists := graph.AdjacencyList[endToken]; !exists {
-//         log.Printf("End token %s not found in graph", endToken)
-//         return nil, nil, fmt.Errorf("end token %s not in graph", endToken)
-//     }
-
-//     // Initialize distances and previous map
-//     distances := make(map[string]*big.Float)
-//     previous := make(map[string]string)
-//     for token := range graph.AdjacencyList {
-//         distances[token] = big.NewFloat(math.Inf(1)) // Set all distances to infinity
-//     }
-//     distances[startToken] = big.NewFloat(0) // Distance to the startToken is 0
-
-//     // Priority queue for Dijkstra/A* algorithm
-//     pq := make(PriorityQueue, 0)
-//     heap.Init(&pq)
-//     heap.Push(&pq, &Node{Token: startToken, Priority: 0})
-
-//     visited := make(map[string]bool) // Map to track visited nodes
-
-//     // Define an advanced heuristic function for A*
-//     heuristic := func(token string) *big.Float {
-//         if price, ok := graph.TokenPrices[token]; ok {
-//             if endPrice, ok := graph.TokenPrices[endToken]; ok {
-//                 return new(big.Float).Abs(new(big.Float).Sub(endPrice, price))
-//             }
-//         }
-//         return big.NewFloat(1.0) // Default fallback heuristic
-//     }
-
-//     // Main loop for Dijkstra/A* algorithm
-//     for pq.Len() > 0 {
-//         current := heap.Pop(&pq).(*Node)
-//         currentToken := current.Token
-//         currentPriority := current.Priority
-
-//         // Skip already visited nodes
-//         if visited[currentToken] {
-//             log.Printf("Node %s already visited. Skipping...", currentToken)
-//             continue
-//         }
-//         visited[currentToken] = true
-//         log.Printf("Processing node %s with priority %f", currentToken, currentPriority)
-
-//         // Check if the endToken is reached
-//         if currentToken == endToken {
-//             log.Println("Destination reached. Reconstructing path...")
-//             path := []string{}
-//             for token := endToken; token != ""; token = previous[token] {
-//                 path = append([]string{token}, path...)
-//             }
-//             log.Printf("Path found: %v | Total distance: %s", path, distances[endToken].String())
-//             return path, distances[endToken], nil
-//         }
-
-//         // Process all neighbors of the current token
-//         if len(graph.AdjacencyList[currentToken]) == 0 {
-//             log.Printf("Orphan token %s has no neighbors. Skipping...", currentToken)
-//             continue
-//         }
-
-//         for neighbor, edge := range graph.AdjacencyList[currentToken] {
-//             log.Printf("Evaluating neighbor %s from node %s with edge weight %s", neighbor, currentToken, edge.Weight.String())
-
-//             // Skip visited neighbors or low-liquidity edges
-//             if visited[neighbor] {
-//                 log.Printf("Neighbor %s skipped: already visited", neighbor)
-//                 continue
-//             }
-//             if edge.Liquidity.Cmp(big.NewFloat(1e-6)) < 0 {
-//                 log.Printf("Neighbor %s skipped: insufficient liquidity", neighbor)
-//                 continue
-//             }
-
-//             // Relax the edge
-//             tentativeDistance := new(big.Float).Add(distances[currentToken], edge.Weight)
-//             if tentativeDistance.Cmp(distances[neighbor]) < 0 {
-//                 distances[neighbor] = tentativeDistance
-//                 previous[neighbor] = currentToken
-//                 log.Printf("Relaxing edge to neighbor %s. Updated distance: %s", neighbor, tentativeDistance.String())
-
-//                 // Calculate priority for the neighbor
-//                 priority := new(big.Float).Set(tentativeDistance)
-//                 if useAStar {
-//                     priority = new(big.Float).Add(tentativeDistance, heuristic(neighbor))
-//                 }
-
-//                 // Push the neighbor into the priority queue
-//                 priorityFloat, _ := priority.Float64()
-//                 heap.Push(&pq, &Node{Token: neighbor, Priority: priorityFloat})
-//                 log.Printf("Neighbor %s pushed to the queue with priority %f", neighbor, priorityFloat)
-//             } else {
-//                 log.Printf("No relaxation needed for neighbor %s.", neighbor)
-//             }
-//         }
-//     }
-
-//     // If no path was found
-//     log.Printf("No path found from %s to %s", startToken, endToken)
-//     return nil, nil, fmt.Errorf("no path found from %s to %s", startToken, endToken)
-// }
-
 func ComputeOptimalRoute(graph *WeightedGraph, startToken, endToken string, maxHops int) ([]string, *big.Float, error) {
     startToken = strings.ToLower(startToken) // Normalize input
     endToken = strings.ToLower(endToken)    // Normalize input
@@ -1714,14 +1601,14 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", startAmount.String())
     }
 
-     // Step 3: Validate the profit threshold
+    // Step 3: Validate the profit threshold
     minProfitThreshold := marketData.ProfitThreshold
     if minProfitThreshold == nil || minProfitThreshold.Cmp(big.NewFloat(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", minProfitThreshold.Text('f', 6))
     }
-    minProfitInt := new(big.Int)                // Fix for *big.Int conversion
-    minProfitThreshold.Int(minProfitInt)       // Convert to *big.Int
-    minProfitFloat := new(big.Float).SetInt(minProfitInt) // Convert to *big.Float
+    minProfitInt := new(big.Int)
+    minProfitThreshold.Int(minProfitInt)
+    minProfitFloat := new(big.Float).SetInt(minProfitInt)
 
     // Step 4: Process and normalize liquidity data
     log.Println("Processing and normalizing liquidity data...")
@@ -1729,11 +1616,9 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     if err != nil {
         return nil, fmt.Errorf("error processing market data: %v", err)
     }
-
     if len(normalizedLiquidity) < 7 {
         return nil, fmt.Errorf("insufficient valid liquidity entries after normalization")
     }
-
     log.Printf("Generating routes with %d normalized liquidity entries...\n", len(normalizedLiquidity))
 
     // Step 5: Validate and process the gas price
@@ -1765,7 +1650,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
-
     log.Println("Graph built successfully. Starting route evaluation.")
 
     // Step 9: Extract stable token addresses
@@ -1776,55 +1660,50 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var mu sync.Mutex
     var wg sync.WaitGroup
 
-    for _, entry := range marketData.Liquidity {
-        // if strings.EqualFold(endToken, marketData.StartToken) {
-        //     continue
-        // }
-
+    for _, entry := range liquidityData {
         wg.Add(1)
         go func(entry LiquidityData) {
             defer wg.Done()
 
-            // Compute the optimal route with max hops  marketData.StartToken,
-            path, cost, err := ComputeOptimalRoute(graph, entry.BaseToken, entry.TargetToken, marketData.MaxHops)
+            // Compute the optimal route
+            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, entry.TargetToken, marketData.MaxHops)
             if err != nil || len(path) <= 1 {
-                log.Printf("No valid route found from %s to %s: %v", entry.BaseToken, entry.TargetToken, err)
+                log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, entry.TargetToken, err)
                 return
             }
 
             // Convert cost to *big.Int
             costInt := new(big.Int)
             cost.Int(costInt)
-           
-            dstAmountFloat := new(big.Float).SetInt(entry.DstAmount) // Fix for conversion
-            gasInt := int64(entry.Gas)                              // Fix for gas conversion
+
+            // Convert entry.DstAmount to *big.Int
+            dstAmountInt, _ := entry.DstAmount.Int(new(big.Int))
 
             // Evaluate route profitability
-            // StartToken:  marketData.StartToken,
-                    //StartAmount: startAmount,
-                    //Path:path,
-
             profitable, profit := evaluateRouteProfit(
-                marketData.StartAmount,
+                startAmount,
                 path,
-                marketData.TokenPrices,
-                marketData.GasPrice,
-                dstAmountFloat.Int(new(big.Int)),
-               minProfitFloat, // Use fixed minProfitInt
+                tokenPricesMap,
+                gasPriceInt,
+                costInt,
+                minProfitFloat,
             )
 
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
-                    BaseToken: entry.BaseToken,
+                    ChainID:     marketData.ChainID,
+                    StartToken:  marketData.StartToken,
+                    StartAmount: startAmount,
+                    Path:        path,
                     Profit:      profit,
                 })
                 mu.Unlock()
                 log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
             } else {
-                log.Printf("Route %s -> %s skipped: Net profit below threshold", entry.BaseToken, entry.TargetToken)
+                log.Printf("Route %s -> %s skipped: Net profit below threshold", marketData.StartToken, entry.TargetToken)
             }
-        }(endToken)
+        }(entry)
     }
 
     wg.Wait()
