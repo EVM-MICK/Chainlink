@@ -1583,7 +1583,6 @@ func logGraphSummary(graph *WeightedGraph) {
     }
 }
 
-
 // Converts map[string]*big.Float to map[string]TokenPrice
 func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMap map[string]int) map[string]TokenPrice {
     tokenPriceMap := make(map[string]TokenPrice)
@@ -1724,7 +1723,6 @@ func convertToTokenPriceMapWithDecimals(prices map[string]*big.Float, decimalsMa
 
 //     return finalRoutes, nil
 // }
-
 func generateRoutes(marketData MarketData) ([]Route, error) {
     if !common.IsHexAddress(marketData.StartToken) {
         return nil, fmt.Errorf("invalid start token address: %s", marketData.StartToken)
@@ -1788,13 +1786,22 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
                     Profit:      profit,
                 })
                 mu.Unlock()
-                log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
             }
         }(entry)
     }
 
     wg.Wait()
     return finalRoutes, nil
+}
+
+func clamp(value, min, max float64) float64 {
+    if value < min {
+        return min
+    }
+    if value > max {
+        return max
+    }
+    return value
 }
 
 func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
