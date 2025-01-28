@@ -1118,13 +1118,6 @@ func convertBigFloatToInt(input interface{}) *big.Int {
     return gasPriceInt
 }
 
-// func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
-//     normalized := make(map[string]*big.Float)
-//     for token, price := range tokenPrices {
-//         normalized[strings.ToLower(token)] = price
-//     }
-//     return normalized
-// }
 
 func normalizeTokenPrices(tokenPrices map[string]*big.Float) map[string]*big.Float {
     normalized := make(map[string]*big.Float)
@@ -1143,7 +1136,6 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
 }
 
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
-    // Ensure StartAmount and ProfitThreshold are properly extracted
     startAmount := marketData.StartAmount.ToBigInt()
     if startAmount.Cmp(big.NewInt(0)) <= 0 {
         return nil, fmt.Errorf("invalid start amount: %s", startAmount.String())
@@ -1154,26 +1146,21 @@ func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
         return nil, fmt.Errorf("invalid profit threshold: %s", profitThreshold.Text('f', 6))
     }
 
-    fmt.Printf("StartAmount: %s, ProfitThreshold: %s\n", startAmount.String(), profitThreshold.Text('f', 6))
-
-    // Normalize liquidity entries
     var normalizedLiquidity []LiquidityEntry
     for _, entry := range marketData.Liquidity {
-        // Convert DstAmount from *big.Float to float64
         dstAmountFloat, err := strconv.ParseFloat(entry.DstAmount.Text('f', 6), 64)
         if err != nil {
             return nil, fmt.Errorf("failed to convert DstAmount to float64: %v", err)
         }
+
+        dstAmountInt := new(big.Int)
+        entry.DstAmount.Int(dstAmountInt)
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
             BaseToken:      entry.BaseToken,
             TargetToken:    entry.TargetToken,
             NormalizedPrice: dstAmountFloat,
         })
-    }
-
-    if len(normalizedLiquidity) < 7 {
-        return nil, fmt.Errorf("insufficient valid liquidity entries after normalization")
     }
 
     return normalizedLiquidity, nil
