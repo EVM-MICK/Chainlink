@@ -125,7 +125,7 @@ const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
 const HARDCODED_STABLE_ADDRESSES = [
-"0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
   "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
   "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
@@ -133,7 +133,7 @@ const HARDCODED_STABLE_ADDRESSES = [
 ];
 
 const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
-   "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
   "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
   "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
   "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
@@ -1009,54 +1009,52 @@ function checkCircuitBreaker() {
 
 async function gatherMarketData() {
     try {
-        console.log("Starting to gather market data...");
+        console.log("[INFO] Starting market data gathering...");
 
-        // Validate HARDCODED_STABLE_ADDRESSES and TOKEN_DECIMALS
-         if (!HARDCODED_STABLE_ADDRESSES || HARDCODED_STABLE_ADDRESSES.length === 0) {
+        // Validate HARDCODED_STABLE_ADDRESSES
+        if (!HARDCODED_STABLE_ADDRESSES || HARDCODED_STABLE_ADDRESSES.length === 0) {
             throw new Error("HARDCODED_STABLE_ADDRESSES is not defined or empty.");
         }
 
-       // Fetch and validate token decimals dynamically
+        // Fetch and validate token decimals
         const TOKEN_DECIMALS = {};
         for (const token of HARDCODED_STABLE_ADDRESSES) {
             try {
                 TOKEN_DECIMALS[token.toLowerCase()] = await getTokenDecimals(token);
+                console.log(`[DEBUG] Fetched decimals for ${token}: ${TOKEN_DECIMALS[token.toLowerCase()]}`);
             } catch (error) {
-                console.error(`Failed to fetch decimals for token ${token}:`, error.message);
-                throw error; // Stop execution if critical token data is missing
+                console.error(`[ERROR] Failed to fetch decimals for ${token}:`, error.message);
+                throw error; // Critical error, stop execution
             }
         }
-        // Fetch token prices
+
+        // Fetch and validate token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-        // Validate token prices
         for (const [token, price] of Object.entries(tokenPrices)) {
             if (typeof price !== "number" || price <= 0) {
                 throw new Error(`Invalid token price for ${token}: ${price}`);
             }
         }
-        // Proceed with liquidity processing and payload construction...
-        console.log("Token decimals:", TOKEN_DECIMALS);
-        console.log("Token prices:", tokenPrices);
+        console.log("[INFO] Token decimals and prices fetched successfully.");
 
-        const liquidityData = [];
+        // Historical profits for dynamic threshold
         let historicalProfits = await redisClient.lRange("profitHistory", 0, -1).catch(() => []);
-
-        // Initialize historical profits if none exist
         if (!historicalProfits || historicalProfits.length === 0) {
-            console.log("No historical profits found. Initializing default values.");
+            console.log("[INFO] No historical profits found. Initializing defaults.");
             historicalProfits = [10, 20, 50, 100, 150, 200, 300, 400, 500];
         } else {
             historicalProfits = historicalProfits.map(Number);
         }
 
-        // Calculate dynamic profit threshold
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
-        console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
+        console.log(`[INFO] Calculated dynamic profit threshold: ${dynamicProfitThreshold}`);
 
-        const usdAmount = 100000; // Example: $100,000
+        const usdAmount = 100000; // $100,000 as the base trading amount
+        const liquidityData = [];
         let totalGas = 0;
         let gasCount = 0;
 
+        // Iterate over token pairs
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
             const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
@@ -1077,33 +1075,41 @@ async function gatherMarketData() {
                         }))
                         .filter((quote) => quote.dstAmount >= dynamicProfitThreshold);
 
+                    // Accumulate gas data
+                    const gasPrices = rawQuotes.map((quote) => quote.gas);
+                    totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
+                    gasCount += gasPrices.length;
+
                     liquidityData.push(...processedQuotes);
                 } catch (error) {
                     console.error(
-                        `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
+                        `[ERROR] Failed to process liquidity for ${baseToken} -> ${targetToken}:`,
                         error.message
                     );
                 }
             }
         }
 
+        const averageGasPrice = gasCount > 0 ? totalGas / gasCount : 0;
+
+        // Prepare the payload
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
             startAmount: new BigNumber(usdAmount)
-                .shiftedBy(getTokenDecimals(HARDCODED_STABLE_ADDRESSES[0]))
+                .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0].toLowerCase()])
                 .toFixed(0),
             maxHops: MAX_HOPS,
             profitThreshold: new BigNumber(dynamicProfitThreshold).toFixed(6),
             tokenPrices,
             liquidity: liquidityData,
-            gasPrice: totalGas / Math.max(1, gasCount), // Avoid division by zero
+            gasPrice: averageGasPrice.toFixed(0),
         };
 
-        console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
+        console.log("[INFO] Sending market data payload:", JSON.stringify(payload, null, 2));
         await sendMarketDataToGo(payload);
     } catch (error) {
-        console.error("Error in gatherMarketData:", error.message);
+        console.error("[ERROR] gatherMarketData failed:", error.message);
         addErrorToSummary(error, "gatherMarketData");
     }
 }
