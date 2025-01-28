@@ -1047,102 +1047,6 @@ function checkCircuitBreaker() {
   }
 }
 
-// async function gatherMarketData() {
-//     try {
-//         console.log("Starting to gather market data...");
-
-//         // Fetch token prices
-//         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-
-//         const liquidityData = [];
-//         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
-
-//         // Initialize historical profits if none exist
-//         if (!historicalProfits || historicalProfits.length === 0) {
-//             console.log("No historical profits found. Initializing default values.");
-//             historicalProfits = [10, 20, 50, 100, 150, 200, 300, 400, 500];
-//         } else {
-//             historicalProfits = historicalProfits.map(Number);
-//         }
-
-//         // Calculate dynamic profit threshold
-//         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
-//         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
-
-//         const usdAmount = 100000; // Example: $100,000
-//         let totalGas = 0;
-//         let gasCount = 0;
-
-//         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-//             const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
-
-//             for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-//                 if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
-
-//                 try {
-//                     // Fetch raw liquidity quotes
-//                     const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
-
-//                     // Calculate USD equivalent for dstAmount and validate quotes
-//                     const processedQuotes = rawQuotes
-//                         .map((quote) => ({
-//                             ...quote,
-//                             dstAmount: convertToUsdEquivalent(
-//                                 quote.dstAmount,
-//                                 targetToken,
-//                                 tokenPrices
-//                             ),
-//                         }))
-//                         .filter((quote) => quote.dstAmount >= dynamicProfitThreshold);
-
-//                     // Accumulate gas data
-//                     const gasPrices = rawQuotes.map((quote) => quote.gas);
-//                     totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
-//                     gasCount += gasPrices.length;
-
-//                     // Apply further processing
-//                     const validatedQuotes = validateAndNormalizeLiquidityQuotes(processedQuotes);
-//                     const filteredQuotes = filterByDstAmount(
-//                         validatedQuotes,
-//                         tokenPrices,
-//                         dynamicProfitThreshold * 10
-//                     );
-//                     const cappedQuotes = capGasValues(filteredQuotes);
-
-//                     liquidityData.push(...cappedQuotes);
-//                 } catch (error) {
-//                     console.error(
-//                         `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
-//                         error.message
-//                     );
-//                 }
-//             }
-//         }
-
-//         // Calculate average gas price and prepare the payload
-//         const averageGasPrice = gasCount > 0 ? totalGas / gasCount : 0;
-//         const GAS_PRICE = averageGasPrice.toFixed(0);
-
-//         const payload = {
-//             chainId: CHAIN_ID,
-//             startToken: HARDCODED_STABLE_ADDRESSES[0],
-//             startAmount: new BigNumber(usdAmount)
-//                 .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0]])
-//                 .toFixed(0), // Convert to integer-like string
-//             maxHops: MAX_HOPS,
-//             profitThreshold: new BigNumber(dynamicProfitThreshold).toFixed(6),
-//             tokenPrices,
-//             liquidity: liquidityData,
-//             gasPrice: GAS_PRICE,
-//         };
-
-//         console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
-//         await sendMarketDataToGo(payload);
-//     } catch (error) {
-//         console.error("Error in gatherMarketData:", error.message);
-//     }
-// }
-
 async function gatherMarketData() {
     try {
         console.log("Starting to gather market data...");
@@ -1153,8 +1057,8 @@ async function gatherMarketData() {
         }
 
         HARDCODED_STABLE_ADDRESSES.forEach((token) => {
-            if (TOKEN_DECIMALS[token] === undefined) {
-                throw new Error(`TOKEN_DECIMALS missing for token: ${token}`);
+            if (getTokenDecimals(token) === undefined) {
+                console.error(`TOKEN_DECIMALS missing for token: ${token}`);
             }
         });
 
@@ -1192,10 +1096,8 @@ async function gatherMarketData() {
                 if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
                 try {
-                    // Fetch raw liquidity quotes
                     const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
 
-                    // Calculate USD equivalent for dstAmount and validate quotes
                     const processedQuotes = rawQuotes
                         .map((quote) => ({
                             ...quote,
@@ -1207,21 +1109,7 @@ async function gatherMarketData() {
                         }))
                         .filter((quote) => quote.dstAmount >= dynamicProfitThreshold);
 
-                    // Accumulate gas data
-                    const gasPrices = rawQuotes.map((quote) => quote.gas);
-                    totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
-                    gasCount += gasPrices.length;
-
-                    // Apply further processing
-                    const validatedQuotes = validateAndNormalizeLiquidityQuotes(processedQuotes);
-                    const filteredQuotes = filterByDstAmount(
-                        validatedQuotes,
-                        tokenPrices,
-                        dynamicProfitThreshold * 10
-                    );
-                    const cappedQuotes = capGasValues(filteredQuotes);
-
-                    liquidityData.push(...cappedQuotes);
+                    liquidityData.push(...processedQuotes);
                 } catch (error) {
                     console.error(
                         `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
@@ -1231,27 +1119,24 @@ async function gatherMarketData() {
             }
         }
 
-        // Calculate average gas price and prepare the payload
-        const averageGasPrice = gasCount > 0 ? totalGas / gasCount : 0;
-        const GAS_PRICE = averageGasPrice.toFixed(0);
-
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
             startAmount: new BigNumber(usdAmount)
-                .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0]])
+                .shiftedBy(getTokenDecimals(HARDCODED_STABLE_ADDRESSES[0]))
                 .toFixed(0),
             maxHops: MAX_HOPS,
             profitThreshold: new BigNumber(dynamicProfitThreshold).toFixed(6),
             tokenPrices,
             liquidity: liquidityData,
-            gasPrice: GAS_PRICE,
+            gasPrice: totalGas / Math.max(1, gasCount), // Avoid division by zero
         };
 
         console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
         await sendMarketDataToGo(payload);
     } catch (error) {
         console.error("Error in gatherMarketData:", error.message);
+        addErrorToSummary(error, "gatherMarketData");
     }
 }
 
