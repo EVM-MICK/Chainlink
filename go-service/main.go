@@ -1268,11 +1268,11 @@ func calculateDynamicProfitThreshold(gasCost *big.Int, gasPriceUSD *big.Float, d
     return dynamicThreshold
 }
 
-
 func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
     validEntries := []LiquidityData{}
     for _, entry := range liquidity {
-        if entry.DstAmount.Cmp(big.NewInt(0)) > 0 && entry.BaseToken != entry.TargetToken {
+        zeroFloat := new(big.Float).SetInt(big.NewInt(0)) // Fix for *big.Float comparison
+        if entry.DstAmount.Cmp(zeroFloat) > 0 && entry.BaseToken != entry.TargetToken {
             validEntries = append(validEntries, entry)
         } else {
             log.Printf("Skipping invalid liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
@@ -1710,14 +1710,13 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         return nil, fmt.Errorf("invalid or non-positive startAmount: %s", startAmount.String())
     }
 
-    // Step 3: Parse and validate the profit threshold
-    if marketData.ProfitThreshold == nil {
-        return nil, fmt.Errorf("profitThreshold is nil or invalid")
-    }
+     // Step 3: Validate the profit threshold
     minProfitThreshold := marketData.ProfitThreshold
-    if minProfitThreshold.Cmp(big.NewFloat(0)) <= 0 {
+    if minProfitThreshold == nil || minProfitThreshold.Cmp(big.NewFloat(0)) <= 0 {
         return nil, fmt.Errorf("invalid or non-positive profitThreshold: %s", minProfitThreshold.Text('f', 6))
     }
+    minProfitInt := new(big.Int)                // Fix for *big.Int conversion
+    minProfitThreshold.Int(minProfitInt)       // Convert to *big.Int
 
     // Step 4: Process and normalize liquidity data
     log.Println("Processing and normalizing liquidity data...")
@@ -1791,7 +1790,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             // Convert cost to *big.Int
             costInt := new(big.Int)
             cost.Int(costInt)
-
+            dstAmountFloat := new(big.Float).SetInt(dstAmount) // Fix for *big.Float conversion
             // Evaluate route profitability
             profitable, profit := evaluateRouteProfit(
                 startAmount,
@@ -1799,13 +1798,12 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
                 convertFloat64MapToBigFloat(marketData.TokenPrices),
                 gasPriceInt,
                 costInt,
-                minProfitThreshold.ToBigInt(),
+               minProfitInt, // Use fixed minProfitInt
             )
 
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
-                    ChainID:     marketData.ChainID,
                     StartToken:  marketData.StartToken,
                     StartAmount: startAmount,
                     Path:        path,
@@ -2239,9 +2237,11 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
 
     for i, entry := range entries {
         // Construct individual path segment
+        gas := entry.Gas // Use gas price from liquidity array
+
         segment := PathSegment{
             Name:             fmt.Sprintf("%s -> %s", entry.BaseToken, entry.TargetToken),
-            Part:             1.0, // Assume 100% allocation for simplicity
+            Part:             50, // Assume 100% allocation for simplicity
             FromTokenAddress: entry.BaseToken,
             ToTokenAddress:   entry.TargetToken,
         }
@@ -2262,7 +2262,7 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
             TargetToken:    entry.TargetToken,
             NormalizedPrice: normalizedPrice,       // Convert to *big.Float
             DstAmount:      new(big.Int),          // Default value; adjust if needed
-            Gas:            21000,                 // Use a default or derived value
+            Gas:           gas, // Correctly use gas price
             Paths:          paths,                 // Assign paths with the required structure
         }
     }
