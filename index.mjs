@@ -12,7 +12,7 @@ import { Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import { JsonRpcProvider } from 'ethers';
+//import { JsonRpcProvider } from 'ethers';
 
 dotenv.config();
 const { Telegraf } = pkg;
@@ -747,7 +747,7 @@ function convertToUsdEquivalent(dstAmount, targetToken, tokenPrices) {
 
 async function getTokenDecimals(tokenAddress) {
     try {
-        const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+        const contract = new ethers.Contract(tokenAddress, ERC20_ABI, providerA);
         return await contract.decimals();
     } catch (error) {
         console.error(`Error fetching decimals for token ${tokenAddress}:`, error.message);
@@ -1026,7 +1026,6 @@ async function gatherMarketData() {
                 throw error; // Stop execution if critical token data is missing
             }
         }
-
         // Fetch token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
         // Validate token prices
@@ -1035,7 +1034,6 @@ async function gatherMarketData() {
                 throw new Error(`Invalid token price for ${token}: ${price}`);
             }
         }
-
         // Proceed with liquidity processing and payload construction...
         console.log("Token decimals:", TOKEN_DECIMALS);
         console.log("Token prices:", tokenPrices);
