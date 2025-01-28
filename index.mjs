@@ -12,7 +12,7 @@ import { Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-//import { JsonRpcProvider } from 'ethers';
+
 
 dotenv.config();
 const { Telegraf } = pkg;
