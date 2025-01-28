@@ -1632,8 +1632,15 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         tokenPricesMap[token] = new(big.Float).SetFloat64(priceData)
     }
 
+    // Convert tokenPricesMap to map[string]float64
+    flatTokenPrices := make(map[string]float64)
+    for token, price := range tokenPricesMap {
+        priceFloat, _ := price.Float64()
+        flatTokenPrices[token] = priceFloat
+    }
+
     // Step 6: Build and process the graph
-    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, marketData.GasPrice)
+    graph, err := buildAndProcessGraph(liquidityData, flatTokenPrices, marketData.GasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
@@ -1662,15 +1669,16 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Convert entry.DstAmount to *big.Float
-            dstAmountFloat := new(big.Float).SetInt(entry.DstAmount)
+            // Convert entry.DstAmount to *big.Int
+            dstAmountInt, _ := entry.DstAmount.Int(new(big.Int))
+            dstAmountFloat := new(big.Float).SetInt(dstAmountInt)
 
             // Evaluate route profitability
             gasPriceInt, _ := marketData.GasPrice.Int(new(big.Int))
             profitable, profit := evaluateRouteProfit(
                 startAmount,
                 path,
-                tokenPricesMap,
+                flatTokenPrices, // Use converted map[string]float64
                 gasPriceInt,
                 costInt,
                 minProfitFloat,
@@ -3134,12 +3142,12 @@ func MonitorMarketAndRebuildGraph(
         // Convert rawTokenPrices to a nested TokenPrice map
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
         nestedTokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity)
-        flatTokenPrices := flattenTokenPrices(nestedTokenPrices)
 
-        // **Fix**: Convert `flatTokenPrices` to `map[string]float64`
+        // Flatten TokenPrice map to map[string]float64 for use in other processes
         floatTokenPrices := make(map[string]float64)
-        for token, tokenPrice := range flatTokenPrices {
-            floatTokenPrices[token] = tokenPrice.Price // Extract the Price field
+        for token, tokenPrice := range nestedTokenPrices {
+            priceFloat, _ := tokenPrice.Price.Float64() // Convert *big.Float to float64
+            floatTokenPrices[token] = priceFloat
         }
 
         // Validate token prices
@@ -3150,7 +3158,7 @@ func MonitorMarketAndRebuildGraph(
         }
 
         // Validate and filter liquidity using validated token prices
-        filteredLiquidity := processAndValidateLiquidity(validatedLiquidity, floatTokenPrices, adjustedThreshold)
+        filteredLiquidity := processAndValidateLiquidity(validatedLiquidity, nestedTokenPrices, adjustedThreshold)
 
         // Build and process the graph
         graph, err := buildAndProcessGraph(filteredLiquidity, floatTokenPrices, gasPrice)
