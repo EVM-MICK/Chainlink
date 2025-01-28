@@ -702,24 +702,14 @@ async function rateLimitedRequest1(fn, retries = 3, delay = RETRY_DELAY) {
   throw new Error("Maximum retry attempts exceeded.");
 }
 
-// async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
-//   const tokenPriceInUSD = tokenPrices[baseToken.toLowerCase()]; // Fetch price for baseToken
-//   if (!tokenPriceInUSD) {
-//     throw new Error(`Price for base token ${baseToken} not found in tokenPrices.`);
-//   }
-
-//   // Calculate equivalent amount in the base token's smallest unit
-//   const baseTokenAmount = new BigNumber(usdAmount).dividedBy(tokenPriceInUSD).toFixed(0); // Use BigNumber for precision
-//   console.log(`Equivalent of $${usdAmount} in ${baseToken}: ${baseTokenAmount}`);
-//   return baseTokenAmount; // Returns the amount as a string
-// }
-
 async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
-    const price = tokenPrices[baseToken];
+    const price = tokenPrices[baseToken.toLowerCase()];
     if (!price) {
         throw new Error(`Token price not found for baseToken: ${baseToken}`);
     }
-    return new BigNumber(usdAmount).dividedBy(price).toFixed();
+    const baseTokenAmount = new BigNumber(usdAmount).dividedBy(price).toFixed(0);
+    console.log(`Equivalent of $${usdAmount} in ${baseToken}: ${baseTokenAmount}`);
+    return baseTokenAmount;
 }
 
 
