@@ -1632,8 +1632,15 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         tokenPricesMap[token] = new(big.Float).SetFloat64(priceData)
     }
 
+    // Convert tokenPricesMap to map[string]float64 for buildAndProcessGraph
+    flatTokenPrices := make(map[string]float64)
+    for token, price := range tokenPricesMap {
+        priceFloat, _ := price.Float64() // Extract float64 value
+        flatTokenPrices[token] = priceFloat
+    }
+
     // Step 6: Build and process the graph
-    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, marketData.GasPrice)
+    graph, err := buildAndProcessGraph(liquidityData, flatTokenPrices, marketData.GasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
@@ -1667,7 +1674,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             profitable, profit := evaluateRouteProfit(
                 startAmount,
                 path,
-                tokenPricesMap, // Correctly pass map[string]*big.Float
+                tokenPricesMap, // Use map[string]*big.Float here for accuracy in evaluation
                 gasPriceInt,
                 costInt,
                 minProfitFloat,
@@ -2804,6 +2811,7 @@ func filterValidAddresses(tokens []StableToken) []string {
 	return addresses
 }
 
+
 func buildAndProcessGraph(
     liquidity []LiquidityData,
     tokenPrices map[string]float64,
@@ -2814,7 +2822,7 @@ func buildAndProcessGraph(
         TokenPrices:   make(map[string]*big.Float),
     }
 
-    // Add token prices to graph
+    // Add token prices to the graph
     for token, price := range tokenPrices {
         graph.TokenPrices[strings.ToLower(token)] = new(big.Float).SetFloat64(price)
     }
@@ -2826,14 +2834,15 @@ func buildAndProcessGraph(
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
-        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas <= 0 {
+        // Fix Error 1: Use `big.NewFloat(0)` to compare with `entry.DstAmount`
+        if entry.DstAmount.Cmp(big.NewFloat(0)) <= 0 || entry.Gas <= 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
-                baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
+                baseToken, targetToken, entry.DstAmount.Text('f', 6), entry.Gas)
             continue
         }
 
-        dstAmountFloat := new(big.Float).SetInt(entry.DstAmount)
-        dstAmountUSDValue, _ := dstAmountFloat.Float64()
+        // Fix Error 2: Directly use `entry.DstAmount` without conversion
+        dstAmountUSDValue, _ := entry.DstAmount.Float64()
 
         // Add edge for the current pair
         weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
@@ -2844,12 +2853,11 @@ func buildAndProcessGraph(
         })
 
         // **Dynamic Pair Linking**
-        // If BaseToken is not USDC, link it using other pairs
         if baseToken != "usdc" {
             for _, linkEntry := range liquidity {
                 if strings.ToLower(linkEntry.TargetToken) == baseToken {
-                    linkedDstAmountFloat := new(big.Float).SetInt(linkEntry.DstAmount)
-                    linkedDstAmountUSD, _ := linkedDstAmountFloat.Float64()
+                    // Fix Error 3: Directly use `linkEntry.DstAmount` without `SetInt`
+                    linkedDstAmountUSD, _ := linkEntry.DstAmount.Float64()
 
                     // Add linked edge
                     linkedWeight := calculateWeightFromLiquidity(linkedDstAmountUSD, float64(linkEntry.Gas))
@@ -2873,7 +2881,6 @@ func buildAndProcessGraph(
     log.Printf("Graph constructed with %d nodes and %d edges.", len(constructedGraph.AdjacencyList), countEdges(constructedGraph))
     return constructedGraph, nil
 }
-
 
 
 // func buildAndProcessGraph(
@@ -3158,7 +3165,7 @@ func MonitorMarketAndRebuildGraph(
         }
 
         // Adjust profit threshold dynamically
-        adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
+        //adjustedThreshold := adjustProfitThreshold(baseThreshold, gasPrice, volatilityFactor)
 
         // Convert rawTokenPrices to a nested TokenPrice map
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
