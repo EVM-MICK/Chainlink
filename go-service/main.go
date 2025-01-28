@@ -1632,15 +1632,8 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
         tokenPricesMap[token] = new(big.Float).SetFloat64(priceData)
     }
 
-    // Convert tokenPricesMap to map[string]float64
-    flatTokenPrices := make(map[string]float64)
-    for token, price := range tokenPricesMap {
-        priceFloat, _ := price.Float64()
-        flatTokenPrices[token] = priceFloat
-    }
-
     // Step 6: Build and process the graph
-    graph, err := buildAndProcessGraph(liquidityData, flatTokenPrices, marketData.GasPrice)
+    graph, err := buildAndProcessGraph(liquidityData, tokenPricesMap, marketData.GasPrice)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
@@ -1669,16 +1662,12 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
             costInt := new(big.Int)
             cost.Int(costInt)
 
-            // Convert entry.DstAmount to *big.Int
-            dstAmountInt, _ := entry.DstAmount.Int(new(big.Int))
-            dstAmountFloat := new(big.Float).SetInt(dstAmountInt)
-
             // Evaluate route profitability
             gasPriceInt, _ := marketData.GasPrice.Int(new(big.Int))
             profitable, profit := evaluateRouteProfit(
                 startAmount,
                 path,
-                flatTokenPrices, // Use converted map[string]float64
+                tokenPricesMap, // Correctly pass map[string]*big.Float
                 gasPriceInt,
                 costInt,
                 minProfitFloat,
@@ -2825,34 +2814,66 @@ func buildAndProcessGraph(
         TokenPrices:   make(map[string]*big.Float),
     }
 
-    for token, priceData := range tokenPrices {
-        graph.TokenPrices[strings.ToLower(token)] = new(big.Float).SetFloat64(priceData)
+    // Add token prices to graph
+    for token, price := range tokenPrices {
+        graph.TokenPrices[strings.ToLower(token)] = new(big.Float).SetFloat64(price)
     }
 
     var tokenPairs []TokenPair
+
+    // Build graph with dynamic pair linking
     for _, entry := range liquidity {
-        dstAmountInt, _ := entry.DstAmount.Int(new(big.Int))
-        dstAmountFloat := new(big.Float).SetInt(dstAmountInt)
+        baseToken := strings.ToLower(entry.BaseToken)
+        targetToken := strings.ToLower(entry.TargetToken)
 
+        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas <= 0 {
+            log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
+                baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
+            continue
+        }
+
+        dstAmountFloat := new(big.Float).SetInt(entry.DstAmount)
         dstAmountUSDValue, _ := dstAmountFloat.Float64()
-        weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
-        weight = clamp(weight, -1e6, 1e6)
 
+        // Add edge for the current pair
+        weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
         tokenPairs = append(tokenPairs, TokenPair{
-            SrcToken: strings.ToLower(entry.BaseToken),
-            DstToken: strings.ToLower(entry.TargetToken),
+            SrcToken: baseToken,
+            DstToken: targetToken,
             Weight:   weight,
         })
+
+        // **Dynamic Pair Linking**
+        // If BaseToken is not USDC, link it using other pairs
+        if baseToken != "usdc" {
+            for _, linkEntry := range liquidity {
+                if strings.ToLower(linkEntry.TargetToken) == baseToken {
+                    linkedDstAmountFloat := new(big.Float).SetInt(linkEntry.DstAmount)
+                    linkedDstAmountUSD, _ := linkedDstAmountFloat.Float64()
+
+                    // Add linked edge
+                    linkedWeight := calculateWeightFromLiquidity(linkedDstAmountUSD, float64(linkEntry.Gas))
+                    tokenPairs = append(tokenPairs, TokenPair{
+                        SrcToken: strings.ToLower(linkEntry.BaseToken),
+                        DstToken: targetToken,
+                        Weight:   linkedWeight,
+                    })
+                    log.Printf("Linked pair: %s -> %s via %s", linkEntry.BaseToken, targetToken, baseToken)
+                }
+            }
+        }
     }
 
+    // Construct graph from token pairs
     constructedGraph, err := BuildGraph(tokenPairs, graph.TokenPrices)
     if err != nil {
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
-    logGraphSummary(constructedGraph)
+    log.Printf("Graph constructed with %d nodes and %d edges.", len(constructedGraph.AdjacencyList), countEdges(constructedGraph))
     return constructedGraph, nil
 }
+
 
 
 // func buildAndProcessGraph(
@@ -3143,11 +3164,13 @@ func MonitorMarketAndRebuildGraph(
         rawTokenPrices := payload["tokenPrices"].(map[string]float64)
         nestedTokenPrices := convertTokenPricesToMap(rawTokenPrices, updatedLiquidity)
 
-        // Flatten TokenPrice map to map[string]float64 for use in other processes
-        floatTokenPrices := make(map[string]float64)
-        for token, tokenPrice := range nestedTokenPrices {
-            priceFloat, _ := tokenPrice.Price.Float64() // Convert *big.Float to float64
-            floatTokenPrices[token] = priceFloat
+        // Flatten TokenPrice map to map[string]float64
+        flatTokenPrices := make(map[string]float64)
+        for token, tokenPriceMap := range nestedTokenPrices {
+            for _, tokenPrice := range tokenPriceMap {
+                priceFloat, _ := tokenPrice.Price.Float64()
+                flatTokenPrices[token] = priceFloat
+            }
         }
 
         // Validate token prices
@@ -3157,23 +3180,18 @@ func MonitorMarketAndRebuildGraph(
             continue
         }
 
-        // Validate and filter liquidity using validated token prices
-        filteredLiquidity := processAndValidateLiquidity(validatedLiquidity, nestedTokenPrices, adjustedThreshold)
-
         // Build and process the graph
-        graph, err := buildAndProcessGraph(filteredLiquidity, floatTokenPrices, gasPrice)
+        graph, err := buildAndProcessGraph(validatedLiquidity, flatTokenPrices, gasPrice)
         if err != nil {
             log.Printf("Failed to build graph: %v", err)
             continue
         }
 
-        // Log the graph update success
-        log.Println("Graph updated successfully.")
-
         // Send updated graph through the channel
         graphChan <- graph
     }
 }
+
 
 func validateTokenPrices(tokenPrices map[string]map[string]TokenPrice, liquidityData []LiquidityData) []LiquidityData {
     validLiquidity := []LiquidityData{}
