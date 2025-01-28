@@ -8,7 +8,7 @@ import retry from "async-retry";
 import PQueue from "p-queue";
 import Redis from "ioredis";
 import { createClient } from "redis";
-import { Wallet, JsonRpcProvider, Contract } from "ethers";
+import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
