@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"context"
 	"encoding/json"
@@ -1143,59 +1142,6 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
     return tokenPriceMap
 }
 
-
-// func processMarketData(data MarketData, tokenPrices map[string]*big.Float, tokenDecimals map[string]int) []LiquidityData {
-//     normalizedPrices := normalizeTokenPrices(tokenPrices)
-
-//     normalizedLiquidity := []LiquidityData{}
-//     log.Printf("Processing market data. Total liquidity entries: %d", len(data.Liquidity))
-
-//     skippedCount := 0
-//     validCount := 0
-
-//     for _, entry := range data.Liquidity {
-//         targetToken := strings.ToLower(entry.TargetToken)
-
-//         // Skip if USD price is missing and it's not USDC or the start token
-//         if _, isStartToken := tokenPrices[strings.ToLower(data.StartToken)]; !isStartToken && targetToken != "usdc" {
-//             if _, exists := normalizedPrices[targetToken]; !exists {
-//                 log.Printf("Skipping entry: Missing USD price for token %s", targetToken)
-//                 skippedCount++
-//                 continue
-//             }
-//         }
-
-//         decimals, exists := tokenDecimals[targetToken]
-//         if !exists {
-//             log.Printf("Missing decimals for token %s. Defaulting to 18 decimals.", targetToken)
-//             decimals = 18
-//         }
-
-//         dstAmountUSD := convertToUSD(entry.DstAmount, normalizedPrices[targetToken], decimals)
-//         dstAmountUSDInt := new(big.Int)
-//         dstAmountUSD.Int(dstAmountUSDInt)
-
-//         normalizedLiquidity = append(normalizedLiquidity, LiquidityData{
-//             BaseToken:  strings.ToLower(entry.BaseToken),
-//             TargetToken: targetToken,
-//             DstAmount:  dstAmountUSDInt,
-//             Gas:        entry.Gas,
-//         })
-
-//         validCount++
-
-//         // Stop processing if we have at least 7 valid liquidity pairs
-//         if validCount >= 7 {
-//             break
-//         }
-//     }
-
-//     log.Printf("Processed market data: Skipped %d entries, Normalized %d entries.",
-//         skippedCount, len(normalizedLiquidity))
-
-//     return normalizedLiquidity
-// }
-
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
     // Ensure StartAmount and ProfitThreshold are properly extracted
     startAmount := marketData.StartAmount.ToBigInt()
@@ -1213,14 +1159,16 @@ func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
     // Normalize liquidity entries
     var normalizedLiquidity []LiquidityEntry
     for _, entry := range marketData.Liquidity {
-        // Convert DstAmount from *big.Float to *big.Int
-        dstAmountInt := new(big.Int)
-        entry.DstAmount.Int(dstAmountInt)
+        // Convert DstAmount from *big.Float to float64
+        dstAmountFloat, err := strconv.ParseFloat(entry.DstAmount.Text('f', 6), 64)
+        if err != nil {
+            return nil, fmt.Errorf("failed to convert DstAmount to float64: %v", err)
+        }
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
             BaseToken:      entry.BaseToken,
             TargetToken:    entry.TargetToken,
-            NormalizedPrice: entry.DstAmount.Text('f', 6), // Use DstAmount directly
+            NormalizedPrice: dstAmountFloat,
         })
     }
 
@@ -1237,56 +1185,41 @@ func evaluateRouteProfit(
     tokenPrices map[string]*big.Float,
     gasPrice *big.Int,
     cost *big.Int,
-    minProfitThreshold *big.Int,
+    minProfitThreshold *big.Float,
 ) (bool, *big.Int) {
-    // Step 1: Calculate the total gas fee in the native token
+    // Calculate gas fee
     gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
 
-    // Step 2: Fetch the price of the gas token in USD
-    gasToken := path[0] // Assume the first token in the path is the gas token
+    // Fetch gas token price
+    gasToken := path[0]
     gasPriceUSD, ok := tokenPrices[gasToken]
     if !ok {
         log.Printf("Missing USD price for gas token: %s. Skipping route.", gasToken)
         return false, nil
     }
 
-    // Step 3: Define token decimals (assumed 18 for typical tokens like ETH)
-    tokenDecimals := 18 // Update dynamically if required
+    // Convert thresholds and amounts
+    minProfitInt := new(big.Int)
+    minProfitThreshold.Int(minProfitInt)
 
-    // Step 4: Convert the gas fee and swap cost to USD
-    gasFeeUSD := convertToUSD(gasFee, gasPriceUSD, tokenDecimals)
-    costUSD := convertToUSD(cost, gasPriceUSD, tokenDecimals)
-
-    // Step 5: Calculate the dynamic profit threshold in USD
-    dynamicThreshold := calculateDynamicProfitThreshold(gasFee, gasPriceUSD, tokenDecimals)
-
-    // Step 6: Calculate the total cost in USD
+    // Convert costs to USD
+    costUSD := convertToUSD(cost, gasPriceUSD, 18)
+    gasFeeUSD := convertToUSD(gasFee, gasPriceUSD, 18)
     totalCostUSD := new(big.Float).Add(costUSD, gasFeeUSD)
 
-    // Step 7: Convert startAmount to USD
-    startAmountUSD := convertToUSD(startAmount, gasPriceUSD, tokenDecimals)
+    // Convert startAmount to USD
+    startAmountUSD := convertToUSD(startAmount, gasPriceUSD, 18)
 
-    // Step 8: Calculate the profit in USD
+    // Calculate profit
     profitUSD := new(big.Float).Sub(startAmountUSD, totalCostUSD)
 
-    // Step 9: Log detailed evaluation for debugging
-    log.Printf(
-        "Evaluating route profit: StartAmountUSD=%s, Path=%v, TotalCostUSD=%s, GasFeeUSD=%s, ProfitUSD=%s, DynamicThreshold=%s",
-        startAmountUSD.Text('f', 8), path, totalCostUSD.Text('f', 8), gasFeeUSD.Text('f', 8), profitUSD.Text('f', 8), dynamicThreshold.Text('f', 8),
-    )
-
-    // Step 10: Compare profit with thresholds
-    if profitUSD.Cmp(dynamicThreshold) > 0 && profitUSD.Cmp(new(big.Float).SetInt(minProfitThreshold)) > 0 {
-        // Convert profit to *big.Int
+    // Evaluate profitability
+    if profitUSD.Cmp(minProfitThreshold) > 0 {
         profitInt := new(big.Int)
-        profitUSD.Int(profitInt) // Convert profit to *big.Int for compatibility
-        log.Printf("Profitable route found: %v | Profit: %s", path, profitUSD.Text('f', 8))
+        profitUSD.Int(profitInt)
         return true, profitInt
     }
 
-    log.Printf("Route skipped: %v | Profit: %s below thresholds (Dynamic: %s, Minimum: %s)",
-        path, profitUSD.Text('f', 8), dynamicThreshold.Text('f', 8), new(big.Float).SetInt(minProfitThreshold).Text('f', 8),
-    )
     return false, nil
 }
 
