@@ -1135,26 +1135,46 @@ func convertPricesToTokenPriceMap(prices map[string]*big.Float) map[string]Token
     return tokenPriceMap
 }
 
+// func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
+//     startAmount := marketData.StartAmount.ToBigInt()
+//     if startAmount.Cmp(big.NewInt(0)) <= 0 {
+//         return nil, fmt.Errorf("invalid start amount: %s", startAmount.String())
+//     }
+
+//     profitThreshold := marketData.ProfitThreshold
+//     if profitThreshold == nil || profitThreshold.Cmp(big.NewFloat(0)) <= 0 {
+//         return nil, fmt.Errorf("invalid profit threshold: %s", profitThreshold.Text('f', 6))
+//     }
+
+//     var normalizedLiquidity []LiquidityEntry
+//     for _, entry := range marketData.Liquidity {
+//         dstAmountFloat, err := strconv.ParseFloat(entry.DstAmount.Text('f', 6), 64)
+//         if err != nil {
+//             return nil, fmt.Errorf("failed to convert DstAmount to float64: %v", err)
+//         }
+
+//         dstAmountInt := new(big.Int)
+//         entry.DstAmount.Int(dstAmountInt)
+
+//         normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
+//             BaseToken:      entry.BaseToken,
+//             TargetToken:    entry.TargetToken,
+//             NormalizedPrice: dstAmountFloat,
+//         })
+//     }
+
+//     return normalizedLiquidity, nil
+// }
+
 func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
-    startAmount := marketData.StartAmount.ToBigInt()
-    if startAmount.Cmp(big.NewInt(0)) <= 0 {
-        return nil, fmt.Errorf("invalid start amount: %s", startAmount.String())
-    }
-
-    profitThreshold := marketData.ProfitThreshold
-    if profitThreshold == nil || profitThreshold.Cmp(big.NewFloat(0)) <= 0 {
-        return nil, fmt.Errorf("invalid profit threshold: %s", profitThreshold.Text('f', 6))
-    }
-
     var normalizedLiquidity []LiquidityEntry
+
     for _, entry := range marketData.Liquidity {
+        // Convert DstAmount from *big.Float to float64
         dstAmountFloat, err := strconv.ParseFloat(entry.DstAmount.Text('f', 6), 64)
         if err != nil {
             return nil, fmt.Errorf("failed to convert DstAmount to float64: %v", err)
         }
-
-        dstAmountInt := new(big.Int)
-        entry.DstAmount.Int(dstAmountInt)
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
             BaseToken:      entry.BaseToken,
@@ -1162,7 +1182,6 @@ func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
             NormalizedPrice: dstAmountFloat,
         })
     }
-
     return normalizedLiquidity, nil
 }
 
@@ -1177,19 +1196,12 @@ func evaluateRouteProfit(
     // Calculate gas fee
     gasFee := calculateTotalGasCost(gasPrice, DefaultGasEstimate)
 
-    // Fetch gas token price
-    gasToken := path[0]
-    gasPriceUSD, ok := tokenPrices[gasToken]
-    if !ok {
-        log.Printf("Missing USD price for gas token: %s. Skipping route.", gasToken)
-        return false, nil
-    }
-
-    // Convert thresholds and amounts
+    // Convert minProfitThreshold to *big.Int
     minProfitInt := new(big.Int)
     minProfitThreshold.Int(minProfitInt)
 
     // Convert costs to USD
+    gasPriceUSD := tokenPrices[path[0]]
     costUSD := convertToUSD(cost, gasPriceUSD, 18)
     gasFeeUSD := convertToUSD(gasFee, gasPriceUSD, 18)
     totalCostUSD := new(big.Float).Add(costUSD, gasFeeUSD)
@@ -1200,15 +1212,15 @@ func evaluateRouteProfit(
     // Calculate profit
     profitUSD := new(big.Float).Sub(startAmountUSD, totalCostUSD)
 
-    // Evaluate profitability
+    // Check profitability
     if profitUSD.Cmp(minProfitThreshold) > 0 {
         profitInt := new(big.Int)
         profitUSD.Int(profitInt)
         return true, profitInt
     }
-
     return false, nil
 }
+
 
 // Adjust for slippage
 func adjustForSlippage(amountIn *big.Float, liquidity *big.Float) (*big.Float, error) {
@@ -1889,17 +1901,22 @@ func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
 }
 
 func combineLiquidity(usdcLiquidity, nonUSDCEntry LiquidityData) LiquidityData {
-    combinedDstAmount := new(big.Int).Mul(usdcLiquidity.DstAmount, nonUSDCEntry.DstAmount)
-    combinedDstAmount.Div(combinedDstAmount, big.NewInt(1e18)) // Adjust for token decimals
+    // Convert *big.Float to *big.Int for multiplication
+    usdcDstAmountInt := new(big.Int)
+    nonUSDCEntry.DstAmount.Int(usdcDstAmountInt)
+    combinedDstAmount := new(big.Int).Mul(usdcLiquidity.DstAmount.Int(new(big.Int)), usdcDstAmountInt)
+    combinedDstAmount.Div(combinedDstAmount, big.NewInt(1e18)) // Adjust for decimals
+
+    // Convert back to *big.Float if needed
+    combinedDstAmountFloat := new(big.Float).SetInt(combinedDstAmount)
 
     return LiquidityData{
-        BaseToken:  usdcLiquidity.BaseToken, // Start with USDC
+        BaseToken:  usdcLiquidity.BaseToken,
         TargetToken: nonUSDCEntry.TargetToken,
-        DstAmount: combinedDstAmount,
-        Gas:       usdcLiquidity.Gas + nonUSDCEntry.Gas, // Combine gas costs
+        DstAmount: combinedDstAmountFloat,
+        Gas:       usdcLiquidity.Gas + nonUSDCEntry.Gas,
     }
 }
-
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
