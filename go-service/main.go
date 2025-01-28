@@ -1139,14 +1139,13 @@ func processMarketData(marketData MarketData) ([]LiquidityEntry, error) {
     var normalizedLiquidity []LiquidityEntry
 
     for _, entry := range marketData.Liquidity {
-        // Convert DstAmount from *big.Float to *big.Int
-        dstAmountInt, _ := entry.DstAmount.Int(new(big.Int))
-        dstAmountFloat := new(big.Float).SetInt(dstAmountInt)
+        // Convert *big.Float to float64
+        dstAmountFloat64, _ := entry.DstAmount.Float64()
 
         normalizedLiquidity = append(normalizedLiquidity, LiquidityEntry{
             BaseToken:      entry.BaseToken,
             TargetToken:    entry.TargetToken,
-            NormalizedPrice: dstAmountFloat,
+            NormalizedPrice: dstAmountFloat64,
         })
     }
 
@@ -1167,13 +1166,11 @@ func evaluateRouteProfit(
     minProfitInt := new(big.Int)
     minProfitThreshold.Int(minProfitInt)
 
-    // Convert costs to USD
+    // Convert startAmount and costs to USD
     gasPriceUSD := tokenPrices[path[0]]
     costUSD := convertToUSD(cost, gasPriceUSD, 18)
     gasFeeUSD := convertToUSD(gasFee, gasPriceUSD, 18)
     totalCostUSD := new(big.Float).Add(costUSD, gasFeeUSD)
-
-    // Convert startAmount to USD
     startAmountUSD := convertToUSD(startAmount, gasPriceUSD, 18)
 
     // Calculate profit
@@ -1867,15 +1864,12 @@ func prioritizeUSDCLiquidity(liquidity []LiquidityData) []LiquidityData {
 }
 
 func combineLiquidity(usdcLiquidity, nonUSDCEntry LiquidityData) LiquidityData {
-    // Convert DstAmount to *big.Int
     usdcDstAmountInt, _ := usdcLiquidity.DstAmount.Int(new(big.Int))
     nonUSDCEntryDstAmountInt, _ := nonUSDCEntry.DstAmount.Int(new(big.Int))
 
-    // Combine liquidity
     combinedDstAmount := new(big.Int).Mul(usdcDstAmountInt, nonUSDCEntryDstAmountInt)
-    combinedDstAmount.Div(combinedDstAmount, big.NewInt(1e18)) // Adjust for decimals
+    combinedDstAmount.Div(combinedDstAmount, big.NewInt(1e18))
 
-    // Convert back to *big.Float
     combinedDstAmountFloat := new(big.Float).SetInt(combinedDstAmount)
 
     return LiquidityData{
@@ -1885,6 +1879,7 @@ func combineLiquidity(usdcLiquidity, nonUSDCEntry LiquidityData) LiquidityData {
         Gas:       usdcLiquidity.Gas + nonUSDCEntry.Gas,
     }
 }
+
 
 func processAndValidateLiquidity(
     liquidity []LiquidityData,
