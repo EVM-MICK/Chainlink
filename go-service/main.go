@@ -161,10 +161,13 @@ type EdgeWeight struct {
 //type BigInt big.Int
 
 type LiquidityEntry struct {
-	BaseToken      string   `json:"baseToken"`
-	TargetToken    string   `json:"targetToken"`
-	NormalizedPrice float64 `json:"normalizedPrice"`
+    BaseToken      string
+    TargetToken    string
+    DstAmount      *big.Float
+    NormalizedPrice float64
+    Gas            int64 // Add Gas field
 }
+
 
 type Receipt struct {
 	TransactionHash string `json:"transactionHash"`
@@ -1270,8 +1273,9 @@ func calculateDynamicProfitThreshold(gasCost *big.Int, gasPriceUSD *big.Float, d
 
 func validateLiquidityEntries(liquidity []LiquidityData) []LiquidityData {
     validEntries := []LiquidityData{}
+    zeroFloat := new(big.Float).SetInt(big.NewInt(0)) // Fix for comparison
+
     for _, entry := range liquidity {
-        zeroFloat := new(big.Float).SetInt(big.NewInt(0)) // Fix for *big.Float comparison
         if entry.DstAmount.Cmp(zeroFloat) > 0 && entry.BaseToken != entry.TargetToken {
             validEntries = append(validEntries, entry)
         } else {
@@ -1717,6 +1721,7 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     minProfitInt := new(big.Int)                // Fix for *big.Int conversion
     minProfitThreshold.Int(minProfitInt)       // Convert to *big.Int
+    minProfitFloat := new(big.Float).SetInt(minProfitInt) // Convert to *big.Float
 
     // Step 4: Process and normalize liquidity data
     log.Println("Processing and normalizing liquidity data...")
@@ -1771,48 +1776,53 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     var mu sync.Mutex
     var wg sync.WaitGroup
 
-    for _, endToken := range stableTokenAddresses {
-        if strings.EqualFold(endToken, marketData.StartToken) {
-            continue
-        }
+    for _, entry := range marketData.Liquidity {
+        // if strings.EqualFold(endToken, marketData.StartToken) {
+        //     continue
+        // }
 
         wg.Add(1)
-        go func(endToken string) {
+        go func(entry LiquidityData) {
             defer wg.Done()
 
-            // Compute the optimal route with max hops
-            path, cost, err := ComputeOptimalRoute(graph, marketData.StartToken, endToken, marketData.MaxHops)
+            // Compute the optimal route with max hops  marketData.StartToken,
+            path, cost, err := ComputeOptimalRoute(graph, entry.BaseToken, entry.TargetToken, marketData.MaxHops)
             if err != nil || len(path) <= 1 {
-                log.Printf("No valid route found from %s to %s: %v", marketData.StartToken, endToken, err)
+                log.Printf("No valid route found from %s to %s: %v", entry.BaseToken, entry.TargetToken, err)
                 return
             }
 
             // Convert cost to *big.Int
             costInt := new(big.Int)
             cost.Int(costInt)
-            dstAmountFloat := new(big.Float).SetInt(dstAmount) // Fix for *big.Float conversion
+           
+            dstAmountFloat := new(big.Float).SetInt(entry.DstAmount) // Fix for conversion
+            gasInt := int64(entry.Gas)                              // Fix for gas conversion
+
             // Evaluate route profitability
+            // StartToken:  marketData.StartToken,
+                    //StartAmount: startAmount,
+                    //Path:path,
+
             profitable, profit := evaluateRouteProfit(
-                startAmount,
+                marketData.StartAmount,
                 path,
-                convertFloat64MapToBigFloat(marketData.TokenPrices),
-                gasPriceInt,
-                costInt,
-               minProfitInt, // Use fixed minProfitInt
+                marketData.TokenPrices,
+                marketData.GasPrice,
+                dstAmountFloat.Int(new(big.Int)),
+               minProfitFloat, // Use fixed minProfitInt
             )
 
             if profitable {
                 mu.Lock()
                 finalRoutes = append(finalRoutes, Route{
-                    StartToken:  marketData.StartToken,
-                    StartAmount: startAmount,
-                    Path:        path,
+                    BaseToken: entry.BaseToken,
                     Profit:      profit,
                 })
                 mu.Unlock()
                 log.Printf("Profitable route found: %s with profit: %s", strings.Join(path, " ➡️ "), profit.String())
             } else {
-                log.Printf("Route %s -> %s skipped: Net profit below threshold", marketData.StartToken, endToken)
+                log.Printf("Route %s -> %s skipped: Net profit below threshold", entry.BaseToken, entry.TargetToken)
             }
         }(endToken)
     }
@@ -2236,12 +2246,13 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
     liquidityData := make([]LiquidityData, len(entries))
 
     for i, entry := range entries {
-        // Construct individual path segment
-        gas := entry.Gas // Use gas price from liquidity array
+        // Convert gas dynamically from the entry
+        gasInt := int64(entry.Gas)
 
+        // Construct individual path segment
         segment := PathSegment{
             Name:             fmt.Sprintf("%s -> %s", entry.BaseToken, entry.TargetToken),
-            Part:             50, // Assume 100% allocation for simplicity
+            Part:             100, // Assume 100% allocation for simplicity
             FromTokenAddress: entry.BaseToken,
             ToTokenAddress:   entry.TargetToken,
         }
@@ -2260,15 +2271,16 @@ func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
         liquidityData[i] = LiquidityData{
             BaseToken:      entry.BaseToken,
             TargetToken:    entry.TargetToken,
-            NormalizedPrice: normalizedPrice,       // Convert to *big.Float
-            DstAmount:      new(big.Int),          // Default value; adjust if needed
-            Gas:           gas, // Correctly use gas price
-            Paths:          paths,                 // Assign paths with the required structure
+            NormalizedPrice: normalizedPrice, // Convert NormalizedPrice to *big.Float
+            DstAmount:      entry.DstAmount,  // Use DstAmount from the entry
+            Gas:            gasInt,          // Dynamically calculate gas
+            Paths:          paths,           // Assign paths with nested structure
         }
     }
 
     return liquidityData
 }
+
 
 
 func adjustForTokenDecimals(token string, amount *big.Int) (*big.Int, error) {
@@ -2862,31 +2874,10 @@ func fetchWithRetryTokenPrices(url string, headers map[string]string, backoff ti
 	return nil, fmt.Errorf("failed to fetch data after retries: %v", err)
 }
 
-// func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
-//     dstAmountFloat := new(big.Float).SetInt(dstAmount)
-//     decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
-//     normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
-//     usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
-//     log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
-//         dstAmount.String(), price.String(), decimals, usdValue.String())
-//     return usdValue
-// }
-
-// func convertToUSD(dstAmount *big.Int, price *big.Float, decimals int) *big.Float {
-//     dstAmountFloat := new(big.Float).SetInt(dstAmount)
-//     decimalFactor := new(big.Float).SetFloat64(math.Pow10(decimals))
-//     normalizedAmount := new(big.Float).Quo(dstAmountFloat, decimalFactor) // Normalize by decimals
-//     usdValue := new(big.Float).Mul(normalizedAmount, price)              // Convert to USD
-//     log.Printf("convertToUSD: DstAmount=%s, TokenPrice=%s, Decimals=%d, USDValue=%s",
-//         dstAmount.String(), price.String(), decimals, usdValue.String())
-//     return usdValue
-// }
-
-func convertToUSD(amount *big.Int, priceUSD *big.Float, decimals int) *big.Float {
-    amountInFloat := new(big.Float).SetInt(amount)
-    factor := new(big.Float).SetFloat64(math.Pow10(decimals))
-    normalizedAmount := new(big.Float).Quo(amountInFloat, factor) // Normalize by decimals
-    return new(big.Float).Mul(normalizedAmount, priceUSD)         // Multiply by price in USD
+func convertToUSD(amount *big.Int, price *big.Float, decimals int) *big.Float {
+    amountFloat := new(big.Float).SetInt(amount) // Fix for *big.Int to *big.Float conversion
+    scale := new(big.Float).SetInt(big.NewInt(int64(math.Pow10(decimals))))
+    return new(big.Float).Quo(new(big.Float).Mul(amountFloat, price), scale)
 }
 
 func filterValidAddresses(tokens []StableToken) []string {
