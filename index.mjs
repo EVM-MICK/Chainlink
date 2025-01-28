@@ -12,10 +12,14 @@ import { Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
+import { JsonRpcProvider } from 'ethers';
 
 dotenv.config();
 const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
+const ERC20_ABI = [
+    "function decimals() view returns (uint8)"
+];
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
 const permit2Abi = [
@@ -86,6 +90,7 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const providerA = new JsonRpcProvider("https://arb-mainnet.g.alchemy.com/v2/TNqLsUr-1r20DnYhBhHqghjNlcZpQYNw");
 //const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
@@ -741,8 +746,13 @@ function convertToUsdEquivalent(dstAmount, targetToken, tokenPrices) {
 }
 
 async function getTokenDecimals(tokenAddress) {
-    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-    return await contract.decimals();
+    try {
+        const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+        return await contract.decimals();
+    } catch (error) {
+        console.error(`Error fetching decimals for token ${tokenAddress}:`, error.message);
+        throw error; // Re-throw the error to propagate it
+    }
 }
 
 async function processLiquidityQuotes(rawQuotes) {
@@ -777,55 +787,6 @@ function capGasValues(quotes, maxGas = 500000) {
     });
 }
 
-
-
-
-/**
- * Filters and ensures `dstAmount` is in USD for all quotes.
- * @param {Array} quotes - Array of liquidity quotes.
- * @param {Object} tokenPrices - Map of token addresses to USD prices.
- * @param {Number} minDstAmountUSD - Minimum `dstAmount` in USD.
- * @returns {Array} - Filtered quotes with `dstAmount` in USD.
- */
-// function filterByDstAmount(quotes, tokenPrices, minDstAmountUSD = 1) {
-//     return quotes
-//         .map((quote) => {
-//             // Determine if dstAmount is in USD
-//             const toTokenPriceInUSD = tokenPrices[quote.toToken?.toLowerCase()];
-//             if (!toTokenPriceInUSD) {
-//                 console.warn(
-//                     `Skipping quote due to missing price for token: ${quote.toToken}`
-//                 );
-//                 return null;
-//             }
-
-//             // Convert dstAmount to USD if needed
-//             let dstAmountInUSD;
-//             if (quote.currency === "USD") {
-//                 dstAmountInUSD = parseFloat(quote.dstAmount);
-//             } else {
-//                 dstAmountInUSD = parseFloat(quote.dstAmount) * toTokenPriceInUSD;
-//             }
-
-//             // Filter out quotes below the threshold
-//             if (dstAmountInUSD < minDstAmountUSD) {
-//                 console.warn(
-//                     `Quote discarded: dstAmountInUSD ${dstAmountInUSD.toFixed(
-//                         2
-//                     )} is below threshold ${minDstAmountUSD}`
-//                 );
-//                 return null;
-//             }
-
-//             // Attach the USD value for further processing
-//             return {
-//                 ...quote,
-//                 dstAmountInUSD,
-//             };
-//         })
-//         .filter(Boolean); // Remove null entries
-// }
-
 function filterByDstAmount(quotes, tokenPrices, threshold=1000) {
     return quotes.filter((quote) => {
         const dstAmountInUsd = convertToUsdEquivalent(
@@ -836,7 +797,6 @@ function filterByDstAmount(quotes, tokenPrices, threshold=1000) {
         return dstAmountInUsd >= threshold;
     });
 }
-
 
 function validateAndNormalizeLiquidityQuotes(quotes) {
     return quotes
@@ -1052,23 +1012,33 @@ async function gatherMarketData() {
         console.log("Starting to gather market data...");
 
         // Validate HARDCODED_STABLE_ADDRESSES and TOKEN_DECIMALS
-        if (!HARDCODED_STABLE_ADDRESSES || HARDCODED_STABLE_ADDRESSES.length === 0) {
+         if (!HARDCODED_STABLE_ADDRESSES || HARDCODED_STABLE_ADDRESSES.length === 0) {
             throw new Error("HARDCODED_STABLE_ADDRESSES is not defined or empty.");
         }
 
-        HARDCODED_STABLE_ADDRESSES.forEach((token) => {
-            if (getTokenDecimals(token) === undefined) {
-                console.error(`TOKEN_DECIMALS missing for token: ${token}`);
+       // Fetch and validate token decimals dynamically
+        const TOKEN_DECIMALS = {};
+        for (const token of HARDCODED_STABLE_ADDRESSES) {
+            try {
+                TOKEN_DECIMALS[token.toLowerCase()] = await getTokenDecimals(token);
+            } catch (error) {
+                console.error(`Failed to fetch decimals for token ${token}:`, error.message);
+                throw error; // Stop execution if critical token data is missing
             }
-        });
+        }
 
         // Fetch token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+        // Validate token prices
         for (const [token, price] of Object.entries(tokenPrices)) {
             if (typeof price !== "number" || price <= 0) {
                 throw new Error(`Invalid token price for ${token}: ${price}`);
             }
         }
+
+        // Proceed with liquidity processing and payload construction...
+        console.log("Token decimals:", TOKEN_DECIMALS);
+        console.log("Token prices:", tokenPrices);
 
         const liquidityData = [];
         let historicalProfits = await redisClient.lRange("profitHistory", 0, -1).catch(() => []);
