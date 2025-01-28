@@ -1044,7 +1044,7 @@ async function gatherMarketData() {
         let totalGas = 0;
         let gasCount = 0;
 
-        // Iterate over token pairs
+        // Fetch, process, and filter liquidity for each pair one at a time
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
             const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
@@ -1052,8 +1052,12 @@ async function gatherMarketData() {
                 if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
                 try {
+                    console.log(`[INFO] Fetching liquidity for ${baseToken} -> ${targetToken}...`);
+
+                    // Fetch raw liquidity data for the pair
                     const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
 
+                    // Process, filter, and normalize quotes
                     const processedQuotes = rawQuotes
                         .map((quote) => ({
                             ...quote,
@@ -1070,7 +1074,10 @@ async function gatherMarketData() {
                     totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
                     gasCount += gasPrices.length;
 
+                    // Add processed quotes to the final liquidity data
                     liquidityData.push(...processedQuotes);
+
+                    console.log(`[INFO] Processed ${processedQuotes.length} valid quotes for ${baseToken} -> ${targetToken}`);
                 } catch (error) {
                     console.error(
                         `[ERROR] Failed to process liquidity for ${baseToken} -> ${targetToken}:`,
@@ -1096,8 +1103,10 @@ async function gatherMarketData() {
             gasPrice: averageGasPrice.toFixed(0),
         };
 
-        console.log("[INFO] Sending market data payload:", JSON.stringify(payload, null, 2));
+        console.log("[INFO] Sending market data payload to Go script:", JSON.stringify(payload, null, 2));
         await sendMarketDataToGo(payload);
+
+        console.log("[INFO] Market data gathering and processing completed successfully.");
     } catch (error) {
         console.error("[ERROR] gatherMarketData failed:", error.message);
         addErrorToSummary(error, "gatherMarketData");
