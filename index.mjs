@@ -708,92 +708,32 @@ function normalizeTokenPrices(tokenPrices) {
     );
 }
 
-
-// async function gatherMarketData() {
-//     try {
-//         console.log("Starting to gather market data...");
-
-//         // Fetch token prices
-//         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-//         const liquidityData = [];
-
-//         // Retrieve existing historical profits or initialize defaults
-//         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
-//         if (!historicalProfits || historicalProfits.length === 0) {
-//             console.log("No historical profits found. Initializing empty history.");
-//             historicalProfits = [0.01, 0.02, 0.015, 0.018]; // Default historical profits
-//         } else {
-//             historicalProfits = historicalProfits.map(Number); // Convert to numeric values
-//         }
-
-//         // Calculate dynamic profit threshold
-//         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
-//         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
-
-//         // Process API data to gather liquidity data and update historical profits
-//         const usdAmount = 100000; // $100,000 as base capital
-//         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-//            const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
-
-//        for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-//         if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
-
-//         try {
-//             const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
-//             const processedQuotes = await processLiquidityQuotes(rawQuotes);
-
-//             liquidityData.push(...processedQuotes);
-//         } catch (error) {
-//             console.error(
-//                 `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
-//                 error.message
-//             );
-//         }
-//       await delay(1500); // Delay to prevent rate limiting (1.5 seconds)
-
-//          }
-//       }
-
-//         // Save updated historical profits back to Redis
-//         await redisClient.del('profitHistory');
-//         await redisClient.rPush('profitHistory', historicalProfits);
-
-//         // Construct payload to send to the Go server
-//         const payload = {
-//             chainId: CHAIN_ID,
-//             startToken: HARDCODED_STABLE_ADDRESSES[0],
-//             startAmount: usdAmount.toString(),
-//             maxHops: MAX_HOPS,
-//             profitThreshold: dynamicProfitThreshold.toFixed(6), // Precision to six decimal places
-//             tokenPrices,
-//             liquidity: liquidityData,
-//         };
-
-//         console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
-//         await sendMarketDataToGo(payload);
-//     } catch (error) {
-//         console.error("Error in gatherMarketData:", error.message);
-//     }
-// }
-
 async function gatherMarketData() {
     try {
         console.log("Starting to gather market data...");
 
+        // Fetch token prices
         const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
+
         const liquidityData = [];
         let historicalProfits = await redisClient.lRange('profitHistory', 0, -1).catch(() => []);
+
+        // Initialize historical profits if none exist
         if (!historicalProfits || historicalProfits.length === 0) {
-            console.log("No historical profits found. Initializing empty history.");
-            historicalProfits = [0.01, 0.02, 0.015, 0.018];
+            console.log("No historical profits found. Initializing default values.");
+            historicalProfits = [10, 20, 50, 100, 150, 200, 300, 400, 500];
         } else {
             historicalProfits = historicalProfits.map(Number);
         }
 
+        // Calculate dynamic profit threshold
         const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
         console.log(`Dynamic profit threshold: ${dynamicProfitThreshold}`);
 
-        const usdAmount = 100000;
+        const usdAmount = 100000; // Example: $100,000
+        let totalGas = 0;
+        let gasCount = 0;
+
         for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
             const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
 
@@ -801,17 +741,36 @@ async function gatherMarketData() {
                 if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
 
                 try {
+                    // Fetch raw liquidity quotes
                     const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
-                    let processedQuotes = validateAndNormalizeLiquidityQuotes(rawQuotes);
 
-                    processedQuotes = filterByDstAmount(
-                        processedQuotes,
+                    // Calculate USD equivalent for dstAmount and validate quotes
+                    const processedQuotes = rawQuotes
+                        .map((quote) => ({
+                            ...quote,
+                            dstAmount: convertToUsdEquivalent(
+                                quote.dstAmount,
+                                targetToken,
+                                tokenPrices
+                            ),
+                        }))
+                        .filter((quote) => quote.dstAmount >= dynamicProfitThreshold);
+
+                    // Accumulate gas data
+                    const gasPrices = rawQuotes.map((quote) => quote.gas);
+                    totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
+                    gasCount += gasPrices.length;
+
+                    // Apply further processing
+                    const validatedQuotes = validateAndNormalizeLiquidityQuotes(processedQuotes);
+                    const filteredQuotes = filterByDstAmount(
+                        validatedQuotes,
                         tokenPrices,
                         dynamicProfitThreshold * 10
                     );
+                    const cappedQuotes = capGasValues(filteredQuotes);
 
-                    processedQuotes = capGasValues(processedQuotes);
-                    liquidityData.push(...processedQuotes);
+                    liquidityData.push(...cappedQuotes);
                 } catch (error) {
                     console.error(
                         `Error processing liquidity for ${baseToken} -> ${targetToken}:`,
@@ -821,14 +780,21 @@ async function gatherMarketData() {
             }
         }
 
+        // Calculate average gas price and prepare the payload
+        const averageGasPrice = gasCount > 0 ? totalGas / gasCount : 0;
+        const GAS_PRICE = averageGasPrice.toFixed(0);
+
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
-            startAmount: usdAmount.toString(),
+            startAmount: new BigNumber(usdAmount)
+                .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0]])
+                .toFixed(0), // Convert to integer-like string
             maxHops: MAX_HOPS,
-            profitThreshold: dynamicProfitThreshold.toFixed(6),
+            profitThreshold: new BigNumber(dynamicProfitThreshold).toFixed(6),
             tokenPrices,
             liquidity: liquidityData,
+            gasPrice: GAS_PRICE,
         };
 
         console.log("Sending market data payload:", JSON.stringify(payload, null, 2));
@@ -837,6 +803,32 @@ async function gatherMarketData() {
         console.error("Error in gatherMarketData:", error.message);
     }
 }
+
+const TOKEN_DECIMALS = {
+    "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,  // USDC
+    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,  // USDT
+    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18, // DAI
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18, // WETH
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,  // WBTC
+};
+
+/**
+ * Converts a token amount to its USD equivalent using token prices and decimals.
+ * @param {string|number} amount - The token amount.
+ * @param {string} tokenAddress - The token's address.
+ * @param {Object} tokenPrices - Map of token addresses to their USD prices.
+ * @returns {number} - USD equivalent value.
+ */
+function convertToUsdEquivalent(amount, tokenAddress, tokenPrices) {
+    const decimals = TOKEN_DECIMALS[tokenAddress] || 18; // Default to 18 decimals
+    const price = tokenPrices[tokenAddress];
+    if (!price) {
+        console.warn(`Missing token price for ${tokenAddress}`);
+        return 0;
+    }
+    return (amount / Math.pow(10, decimals)) * price;
+}
+
 
 async function processLiquidityQuotes(rawQuotes) {
     try {
@@ -877,43 +869,54 @@ function capGasValues(quotes, maxGas = 500000) {
  * @param {Number} minDstAmountUSD - Minimum `dstAmount` in USD.
  * @returns {Array} - Filtered quotes with `dstAmount` in USD.
  */
-function filterByDstAmount(quotes, tokenPrices, minDstAmountUSD = 1) {
-    return quotes
-        .map((quote) => {
-            // Determine if dstAmount is in USD
-            const toTokenPriceInUSD = tokenPrices[quote.toToken?.toLowerCase()];
-            if (!toTokenPriceInUSD) {
-                console.warn(
-                    `Skipping quote due to missing price for token: ${quote.toToken}`
-                );
-                return null;
-            }
+// function filterByDstAmount(quotes, tokenPrices, minDstAmountUSD = 1) {
+//     return quotes
+//         .map((quote) => {
+//             // Determine if dstAmount is in USD
+//             const toTokenPriceInUSD = tokenPrices[quote.toToken?.toLowerCase()];
+//             if (!toTokenPriceInUSD) {
+//                 console.warn(
+//                     `Skipping quote due to missing price for token: ${quote.toToken}`
+//                 );
+//                 return null;
+//             }
 
-            // Convert dstAmount to USD if needed
-            let dstAmountInUSD;
-            if (quote.currency === "USD") {
-                dstAmountInUSD = parseFloat(quote.dstAmount);
-            } else {
-                dstAmountInUSD = parseFloat(quote.dstAmount) * toTokenPriceInUSD;
-            }
+//             // Convert dstAmount to USD if needed
+//             let dstAmountInUSD;
+//             if (quote.currency === "USD") {
+//                 dstAmountInUSD = parseFloat(quote.dstAmount);
+//             } else {
+//                 dstAmountInUSD = parseFloat(quote.dstAmount) * toTokenPriceInUSD;
+//             }
 
-            // Filter out quotes below the threshold
-            if (dstAmountInUSD < minDstAmountUSD) {
-                console.warn(
-                    `Quote discarded: dstAmountInUSD ${dstAmountInUSD.toFixed(
-                        2
-                    )} is below threshold ${minDstAmountUSD}`
-                );
-                return null;
-            }
+//             // Filter out quotes below the threshold
+//             if (dstAmountInUSD < minDstAmountUSD) {
+//                 console.warn(
+//                     `Quote discarded: dstAmountInUSD ${dstAmountInUSD.toFixed(
+//                         2
+//                     )} is below threshold ${minDstAmountUSD}`
+//                 );
+//                 return null;
+//             }
 
-            // Attach the USD value for further processing
-            return {
-                ...quote,
-                dstAmountInUSD,
-            };
-        })
-        .filter(Boolean); // Remove null entries
+//             // Attach the USD value for further processing
+//             return {
+//                 ...quote,
+//                 dstAmountInUSD,
+//             };
+//         })
+//         .filter(Boolean); // Remove null entries
+// }
+
+function filterByDstAmount(quotes, tokenPrices, threshold=1000) {
+    return quotes.filter((quote) => {
+        const dstAmountInUsd = convertToUsdEquivalent(
+            quote.dstAmount,
+            quote.targetToken,
+            tokenPrices
+        );
+        return dstAmountInUsd >= threshold;
+    });
 }
 
 
