@@ -1238,7 +1238,7 @@ async function gatherMarketData() {
         const payload = {
             chainId: CHAIN_ID,
             startToken: HARDCODED_STABLE_ADDRESSES[0],
-           startAmount: new BigNumber(usdAmount)
+            startAmount: new BigNumber(usdAmount)
                 .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0]])
                 .toFixed(0),
             maxHops: MAX_HOPS,
@@ -1254,6 +1254,7 @@ async function gatherMarketData() {
         console.error("Error in gatherMarketData:", error.message);
     }
 }
+
 
 async function sendMarketDataToGo(marketData) {
   try {
