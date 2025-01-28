@@ -1652,9 +1652,6 @@ func generateRoutes(marketData MarketData) ([]Route, error) {
     }
     log.Println("Graph built successfully. Starting route evaluation.")
 
-    // Step 9: Extract stable token addresses
-    stableTokenAddresses := extractStableTokens(liquidityData)
-
     // Step 10: Evaluate routes with parallel processing
     var finalRoutes []Route
     var mu sync.Mutex
@@ -2083,42 +2080,76 @@ func extractGasPriceFromLiquidity(liquidityData []LiquidityData) *big.Float {
 }
 
 
+// func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []LiquidityData) map[string]map[string]TokenPrice {
+//     tokenPrices := make(map[string]map[string]TokenPrice)
+
+//     for _, entry := range liquidityData {
+//         // Normalize BaseToken and TargetToken addresses to lowercase
+//         baseToken := strings.ToLower(entry.BaseToken)
+//         targetToken := strings.ToLower(entry.TargetToken)
+
+//         // Ensure BaseToken price exists
+//         if _, baseExists := rawPrices[baseToken]; !baseExists {
+//             log.Printf("Skipping BaseToken %s due to missing price", baseToken)
+//             continue
+//         }
+
+//         // Ensure TargetToken price exists
+//         targetPrice, targetExists := rawPrices[targetToken]
+//         if !targetExists {
+//             log.Printf("Skipping TargetToken %s due to missing price", targetToken)
+//             continue
+//         }
+
+//         // Initialize map for BaseToken if not present
+//         if _, exists := tokenPrices[baseToken]; !exists {
+//             tokenPrices[baseToken] = make(map[string]TokenPrice)
+//         }
+
+//         // Map BaseToken -> TargetToken
+//         tokenPrices[baseToken][targetToken] = TokenPrice{
+//             Price:     new(big.Float).SetFloat64(targetPrice),
+//             Liquidity: new(big.Float).SetInt(entry.DstAmount),
+//         }
+//     }
+
+//     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
+//     return tokenPrices
+// }
+
 func convertTokenPricesToMap(rawPrices map[string]float64, liquidityData []LiquidityData) map[string]map[string]TokenPrice {
     tokenPrices := make(map[string]map[string]TokenPrice)
 
     for _, entry := range liquidityData {
-        // Normalize BaseToken and TargetToken addresses to lowercase
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
-        // Ensure BaseToken price exists
         if _, baseExists := rawPrices[baseToken]; !baseExists {
             log.Printf("Skipping BaseToken %s due to missing price", baseToken)
             continue
         }
 
-        // Ensure TargetToken price exists
         targetPrice, targetExists := rawPrices[targetToken]
         if !targetExists {
             log.Printf("Skipping TargetToken %s due to missing price", targetToken)
             continue
         }
 
-        // Initialize map for BaseToken if not present
         if _, exists := tokenPrices[baseToken]; !exists {
             tokenPrices[baseToken] = make(map[string]TokenPrice)
         }
 
-        // Map BaseToken -> TargetToken
+        dstAmountInt, _ := entry.DstAmount.Int(new(big.Int)) // Convert to *big.Int
         tokenPrices[baseToken][targetToken] = TokenPrice{
             Price:     new(big.Float).SetFloat64(targetPrice),
-            Liquidity: new(big.Float).SetInt(entry.DstAmount),
+            Liquidity: new(big.Float).SetInt(dstAmountInt),
         }
     }
 
     log.Printf("Converted token prices map with %d entries.", len(tokenPrices))
     return tokenPrices
 }
+
 
 // Converts [][]map[string]interface{} back to []LiquidityData
 func convertToLiquidityData(entries []LiquidityEntry) []LiquidityData {
@@ -2789,7 +2820,8 @@ func buildAndProcessGraph(
         baseToken := strings.ToLower(entry.BaseToken)
         targetToken := strings.ToLower(entry.TargetToken)
 
-        if entry.DstAmount.Cmp(big.NewInt(0)) <= 0 || entry.Gas <= 0 {
+        zeroFloat := new(big.Float).SetInt(big.NewInt(0)) // Fix for *big.Float comparison
+        if entry.DstAmount.Cmp(zeroFloat) <= 0 || entry.Gas <= 0 {
             log.Printf("Skipping invalid entry: BaseToken=%s, TargetToken=%s, DstAmount=%s, Gas=%d",
                 baseToken, targetToken, entry.DstAmount.String(), entry.Gas)
             continue
@@ -2802,8 +2834,10 @@ func buildAndProcessGraph(
             continue
         }
 
-        decimals := 18 // Default decimals for tokens, update if dynamic
-        dstAmountUSD := convertToUSD(entry.DstAmount, dstPrice.Price, decimals)
+        decimals := 18 // Default decimals
+        dstAmountInt, _ := entry.DstAmount.Int(new(big.Int)) // Convert *big.Float to *big.Int
+        dstAmountUSD := convertToUSD(dstAmountInt, dstPrice.Price, decimals)
+
         dstAmountUSDValue, accuracy := dstAmountUSD.Float64()
         if accuracy != big.Exact || dstAmountUSDValue <= 0 {
             log.Printf("Skipping entry with invalid USD value: %s -> %s, USD=%f",
@@ -2813,13 +2847,7 @@ func buildAndProcessGraph(
 
         weight := calculateWeightFromLiquidity(dstAmountUSDValue, float64(entry.Gas))
         const maxWeight = 1e6
-        if weight > maxWeight {
-            log.Printf("Capping weight: Original=%f, Capped=%f", weight, maxWeight)
-            weight = maxWeight
-        } else if weight < -maxWeight {
-            log.Printf("Capping weight: Original=%f, Capped=%f", weight, -maxWeight)
-            weight = -maxWeight
-        }
+        weight = clamp(weight, -maxWeight, maxWeight) // Clamp weight to the allowed range
 
         tokenPairs = append(tokenPairs, TokenPair{
             SrcToken: baseToken,
@@ -2833,19 +2861,10 @@ func buildAndProcessGraph(
         return nil, fmt.Errorf("failed to build graph: %v", err)
     }
 
-    totalEdges := countEdges(constructedGraph)
-    log.Printf("Graph constructed with %d nodes and %d edges.", len(constructedGraph.AdjacencyList), totalEdges)
-
-    for node, neighbors := range constructedGraph.AdjacencyList {
-        neighborKeys := []string{}
-        for neighbor := range neighbors {
-            neighborKeys = append(neighborKeys, neighbor)
-        }
-        log.Printf("Node: %s | Neighbors: %v", node, neighborKeys)
-    }
-
+    logGraphSummary(constructedGraph)
     return constructedGraph, nil
 }
+
 
 // Updated convertToTokenPairsWithWeights function
 func convertToTokenPairsWithWeights(liquidityData []LiquidityData) []TokenPair {
@@ -3129,23 +3148,51 @@ func convertTokenPrices(rawTokenPrices map[string]interface{}) map[string]float6
     return tokenPrices
 }
 
+// func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken string) (*big.Float, error) {
+//     // Initialize total liquidity and count variables
+//     totalLiquidity := big.NewFloat(0)
+//     count := 0
+
+//     // Iterate over liquidity data to compute total liquidity and count
+//     for _, entry := range liquidityData {
+//         // Log details for each entry
+//         log.Printf("Processing liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
+//             entry.BaseToken, entry.TargetToken, entry.DstAmount.String())
+
+//         // Check if the BaseToken matches the startToken
+//         if strings.EqualFold(entry.BaseToken, startToken) {
+//             // Convert DstAmount from *big.Int to *big.Float
+//             liquidity := new(big.Float).SetInt(entry.DstAmount)
+
+//             // Accumulate total liquidity and increment count if liquidity is greater than zero
+//             if liquidity.Cmp(big.NewFloat(0)) > 0 {
+//                 totalLiquidity.Add(totalLiquidity, liquidity)
+//                 count++
+//             }
+//         }
+//     }
+
+//     // Calculate and return the average liquidity
+//     if count > 0 {
+//         return new(big.Float).Quo(totalLiquidity, big.NewFloat(float64(count))), nil
+//     }
+
+//     // Return an error if no liquidity data was available for the start token
+//     return big.NewFloat(0), fmt.Errorf("no liquidity data available for token: %s", startToken)
+// }
+
 func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken string) (*big.Float, error) {
-    // Initialize total liquidity and count variables
     totalLiquidity := big.NewFloat(0)
     count := 0
 
-    // Iterate over liquidity data to compute total liquidity and count
     for _, entry := range liquidityData {
-        // Log details for each entry
         log.Printf("Processing liquidity entry: BaseToken=%s, TargetToken=%s, DstAmount=%s",
             entry.BaseToken, entry.TargetToken, entry.DstAmount.String())
 
-        // Check if the BaseToken matches the startToken
         if strings.EqualFold(entry.BaseToken, startToken) {
-            // Convert DstAmount from *big.Int to *big.Float
-            liquidity := new(big.Float).SetInt(entry.DstAmount)
+            dstAmountInt, _ := entry.DstAmount.Int(new(big.Int)) // Convert to *big.Int
+            liquidity := new(big.Float).SetInt(dstAmountInt)
 
-            // Accumulate total liquidity and increment count if liquidity is greater than zero
             if liquidity.Cmp(big.NewFloat(0)) > 0 {
                 totalLiquidity.Add(totalLiquidity, liquidity)
                 count++
@@ -3153,14 +3200,12 @@ func calculateAverageLiquidityFromData(liquidityData []LiquidityData, startToken
         }
     }
 
-    // Calculate and return the average liquidity
     if count > 0 {
         return new(big.Float).Quo(totalLiquidity, big.NewFloat(float64(count))), nil
     }
-
-    // Return an error if no liquidity data was available for the start token
     return big.NewFloat(0), fmt.Errorf("no liquidity data available for token: %s", startToken)
 }
+
 
 // Helper function to parse liquidity as *big.Float
 func parseDstAmount(dstAmount string) (float64, error) {
