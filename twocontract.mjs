@@ -12,7 +12,9 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import { SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+import POLYGON_ABI from "./abis/PolygonSmartContract.json";
+import ARBITRUM_ABI from "./abis/ArbitrumSmartContract.json";
 
 const sdk = new SDK({
   url: "https://api.1inch.dev/fusion-plus",
@@ -24,6 +26,23 @@ const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
 const ERC20_ABI = [
     "function decimals() view returns (uint8)"
+];
+// Define contract addresses
+const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
+const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
+
+// Define providers and wallets for both networks
+const providerPolygon = new ethers.providers.JsonRpcProvider(process.env.POLYGON_RPC);
+const providerArbitrum = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC);
+
+const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
+const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
+
+// Load Smart Contracts for both networks
+const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
+const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
+const SMART_CONTRACT_ABI = [
+  // Add your contract ABI here
 ];
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
@@ -95,7 +114,7 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const providerA = new JsonRpcProvider("https://arb-mainnet.g.alchemy.com/v2/TNqLsUr-1r20DnYhBhHqghjNlcZpQYNw");
+//const providerA = new JsonRpcProvider("https://arb-mainnet.g.alchemy.com/v2/TNqLsUr-1r20DnYhBhHqghjNlcZpQYNw");
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
 const REDIS_HOST = process.env.REDIS_HOST || 'redis-14324.c232.us-east-1-2.ec2.redns.redis-cloud.com';
@@ -111,6 +130,7 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
+const nonce = await permit2Contract.methods.nonces(wallet.address).call();
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
@@ -184,7 +204,13 @@ validateEnvVars([
   "PRIVATE_KEY",
   "TELEGRAM_BOT_TOKEN",
   "REDIS_URL",
+  "ONEINCH_API_KEY",
+  "WALLET_ADDRESS",
+  "SMART_CONTRACT_ADDRESS",
+  "POLYGON_RPC",
+  "ARBITRUM_RPC",
 ]);
+
 
 async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
   try {
@@ -323,31 +349,36 @@ async function fetchTokenPrices(network, tokens) {
 async function executeFusionSwap(srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
 
-    // Define the Networks
-    const srcChain = "ARBITRUM"; // Change based on trade
-    const dstChain = "POLYGON"; // Change based on trade
+    const srcChain = "ARBITRUM";
+    const dstChain = "POLYGON";
 
-    // Fetch Quote from Fusion+
     const quote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
     if (!quote) {
-        console.error("❌ Failed to fetch Fusion+ quote. Exiting...");
+        console.error("❌ Failed to fetch Fusion+ quote.");
         return;
     }
 
+    const secretsCount = quote.getPreset().secretsCount;
+    const secrets = Array.from({ length: secretsCount }).map(() => getRandomBytes32());
+    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
+
+    const hashLock = secretsCount === 1
+        ? HashLock.forSingleFill(secrets[0])
+        : HashLock.forMultipleFills(secretHashes);
+
     try {
-        // Execute Cross-Chain Swap
         const order = await sdk.placeOrder(quote, {
             walletAddress: process.env.WALLET_ADDRESS,
+            hashLock,
+            secretHashes,
         });
 
         console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
 
-        // 🔥 Notify via Telegram
         await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
         🔹 **From:** ${srcChain} (${srcToken})  
         🔹 **To:** ${dstChain} (${dstToken})  
         🔹 **Amount:** ${amount}`);
-
     } catch (error) {
         console.error(`❌ Error executing Fusion+ swap:`, error);
     }
@@ -439,7 +470,7 @@ const urlx = `https://api.telegram.org/bot${botTokenz}/sendMessage`;
     //await bot.telegram.sendMessage(chatId1, message);
   try {
     const response = await axios.post(urlx, {
-      chat_id: chatId,
+      chat_id: chatId1,
       text: message1,
     });
     console.log('Telegram message sent:', response.data);
@@ -492,6 +523,8 @@ async function sendErrorSummary() {
 
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
+    const nonce = await permit2Contract.methods.nonces(wallet.address).call(); // ✅ Fetch nonce
+
     const domain = {
         name: "Permit2",
         version: "1",
@@ -501,7 +534,7 @@ async function generatePermitSignature(token, spender, amount, deadline) {
 
     const permitData = {
         permitted: { token, amount },
-        nonce: nonce, // Replace with actual nonce fetched from Permit2
+        nonce,
         deadline
     };
 
@@ -517,6 +550,7 @@ async function generatePermitSignature(token, spender, amount, deadline) {
     console.log("Signature:", signature);
     return { signature, permitData };
 }
+
 
 // Transferring tokens using Permit2
 async function executePermitTransferFrom(token, recipient, amount, signature) {
@@ -536,11 +570,15 @@ async function executePermitTransferFrom(token, recipient, amount, signature) {
 }
 
 // Circuit-Breaker Logic
-function checkCircuitBreaker() {
+async function checkCircuitBreaker() {
   if (consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     log('Circuit breaker activated. Halting operations temporarily.', 'error');
     sendTelegramMessage('*Circuit Breaker Activated*: Too many consecutive failures.', true);
-    throw new Error('Circuit breaker activated');
+
+    // Wait 5 minutes before retrying
+    await new Promise((resolve) => setTimeout(resolve, 300000));
+    
+    consecutiveFailures = 0; // Reset failure count
   }
 }
 
@@ -674,25 +712,9 @@ async function executeSwap(trade) {
         🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
-    // 🔹 Set Provider & Wallet for Buy Network
-    const providerBuy = new ethers.providers.JsonRpcProvider(
-        buyOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
-    );
-    const walletBuy = new ethers.Wallet(process.env.PRIVATE_KEY, providerBuy);
-
-    // 🔹 Set Provider & Wallet for Sell Network
-    const providerSell = new ethers.providers.JsonRpcProvider(
-        sellOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
-    );
-    const walletSell = new ethers.Wallet(process.env.PRIVATE_KEY, providerSell);
-
-    // 🔹 Define Smart Contract Addresses (Flash Loan + 1inch Router)
-    const buyContractAddress = buyOn === "Polygon" ? process.env.POLYGON_SMART_CONTRACT : process.env.ARBITRUM_SMART_CONTRACT;
-    const sellContractAddress = sellOn === "Polygon" ? process.env.POLYGON_SMART_CONTRACT : process.env.ARBITRUM_SMART_CONTRACT;
-
-    // 🔹 Load Smart Contract Interfaces
-    const buyContract = new ethers.Contract(buyContractAddress, ABI, walletBuy);
-    const sellContract = new ethers.Contract(sellContractAddress, ABI, walletSell);
+    // 🔹 Dynamically Select the Correct Contract
+    const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
+    const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
     try {
         // 🔹 1️⃣ Execute Buy on First Chain (Flash Loan + Swap)
@@ -714,6 +736,15 @@ async function executeSwap(trade) {
         );
         await sellTx.wait();
         console.log(`✅ Sell Transaction Confirmed on ${sellOn}`);
+
+        // 🔹 3️⃣ Execute Fusion+ Swap for Loan Repayment
+        try {
+            console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
+            await executeFusionSwap(TOKENS[sellOn].USDC, TOKENS[buyOn].USDC, sellAmount);
+        } catch (error) {
+            console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
+            await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
+        }
 
         // 🔹 Send Telegram Notification on Successful Trade
         await sendTelegramTradeAlert({
@@ -852,9 +883,19 @@ async function executeArbitrage() {
 
         console.log("🎉 Arbitrage trade completed successfully!");
 
-           // 🔹 Execute Cross-Chain Swap for Flash Loan Repayment
-        console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
-        await executeFusionSwap(TOKENS[bestTrade.sellOn].USDC, TOKENS[bestTrade.buyOn].USDC, bestTrade.sellAmount);
+        // 🔹 Execute Cross-Chain Swap for Flash Loan Repayment
+        try {
+            console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
+            await executeFusionSwap(
+                TOKENS[bestTrade.sellOn].USDC, 
+                TOKENS[bestTrade.buyOn].USDC, 
+                bestTrade.sellAmount
+            );
+            console.log(`✅ Fusion+ Swap for Loan Repayment executed successfully!`);
+        } catch (error) {
+            console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
+            await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
+        }
 
     } catch (error) {
         console.error("❌ Error executing arbitrage trade:", error);
