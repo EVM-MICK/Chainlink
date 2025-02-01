@@ -12,6 +12,12 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
+import { SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+
+const sdk = new SDK({
+  url: "https://api.1inch.dev/fusion-plus",
+  authKey: process.env.ONEINCH_API_KEY,
+});
 
 dotenv.config();
 const { Telegraf } = pkg;
@@ -120,6 +126,8 @@ const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
+// Load Smart Contract
+const contract = new ethers.Contract(process.env.SMART_CONTRACT_ADDRESS, ABI, wallet);
 const NETWORKS = {
     POLYGON: 137,
     ARBITRUM: 42161
@@ -268,6 +276,26 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
+// Function to Fetch Fusion+ Quote
+async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
+    try {
+        const quote = await sdk.getQuote({
+            srcChainId: NetworkEnum[srcChain],
+            dstChainId: NetworkEnum[dstChain],
+            srcTokenAddress: srcToken,
+            dstTokenAddress: dstToken,
+            amount: amount.toString()
+        });
+
+        console.log(`✅ Fusion+ Quote: ${quote}`);
+        return quote;
+    } catch (error) {
+        console.error(`❌ Error fetching Fusion+ quote:`, error);
+        return null;
+    }
+}
+
+
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
 async function fetchTokenPrices(network, tokens) {
     const tokenList = tokens.join(",").toLowerCase();
@@ -291,6 +319,48 @@ async function fetchTokenPrices(network, tokens) {
         return null;
     }
 }
+
+async function executeFusionSwap(srcToken, dstToken, amount) {
+    console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
+
+    // Define the Networks
+    const srcChain = "ARBITRUM"; // Change based on trade
+    const dstChain = "POLYGON"; // Change based on trade
+
+    // Fetch Quote from Fusion+
+    const quote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    if (!quote) {
+        console.error("❌ Failed to fetch Fusion+ quote. Exiting...");
+        return;
+    }
+
+    try {
+        // Execute Cross-Chain Swap
+        const order = await sdk.placeOrder(quote, {
+            walletAddress: process.env.WALLET_ADDRESS,
+        });
+
+        console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
+
+        // 🔥 Notify via Telegram
+        await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
+        🔹 **From:** ${srcChain} (${srcToken})  
+        🔹 **To:** ${dstChain} (${dstToken})  
+        🔹 **Amount:** ${amount}`);
+
+    } catch (error) {
+        console.error(`❌ Error executing Fusion+ swap:`, error);
+    }
+}
+
+// Listen for SwapExecuted Event
+contract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
+    console.log(`🔥 Swap Completed: ${srcToken} → ${dstToken}, Amount: ${amount}`);
+    
+    // Execute cross-chain transfer via Fusion+
+    await executeFusionSwap(srcToken, dstToken, returnAmount);
+});
+
 
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
 async function fetchPricesForBothChains() {
@@ -390,6 +460,7 @@ async function sendTelegramMessage(message) {
       text: message,
     });
     console.log('Telegram message sent:', response.data);
+     console.log("✅ Telegram Message Sent!");
   } catch (error) {
     console.error('Failed to send Telegram message:', error.message);
   }
@@ -780,6 +851,10 @@ async function executeArbitrage() {
         console.log(`✅ Sell executed successfully on ${bestTrade.sellOn}`);
 
         console.log("🎉 Arbitrage trade completed successfully!");
+
+           // 🔹 Execute Cross-Chain Swap for Flash Loan Repayment
+        console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
+        await executeFusionSwap(TOKENS[bestTrade.sellOn].USDC, TOKENS[bestTrade.buyOn].USDC, bestTrade.sellAmount);
 
     } catch (error) {
         console.error("❌ Error executing arbitrage trade:", error);
