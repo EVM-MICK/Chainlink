@@ -13,8 +13,15 @@ import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
 import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
-import POLYGON_ABI from "./PolygonSmartContract.json" assert { type: "json" };
-import ARBITRUM_ABI from "./ArbitrumSmartContract.json" assert { type: "json" };
+import fs from "fs";
+import path from "path";
+
+const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
+const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
+const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
+const POLYGON_ABI = JSON.parse(fs.readFileSync(polygonAbiPath, "utf8"));
+const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
+
 
 const sdk = new SDK({
   url: "https://api.1inch.dev/fusion-plus",
@@ -356,6 +363,71 @@ async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     }
 }
 
+async function buildFusionOrder(quoteResponse, srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
+    const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
+
+    const config = {
+        headers: {
+            "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`,
+            "Content-Type": "application/json"
+        }
+    };
+
+    const payload = {
+        "srcChain": srcChain,
+        "dstChain": dstChain,
+        "srcTokenAddress": srcToken,
+        "dstTokenAddress": dstToken,
+        "amount": amount.toString(),
+        "walletAddress": walletAddress,
+        "fee": 0,  // Custom fee (e.g., 100 bps = 1%)
+        "preset": "fast", // Options: "fast", "medium", "slow", "custom"
+        "source": "BackendBot",
+        "isPermit2": false,
+        "permit": null,
+        "feeReceiver": null
+    };
+
+    try {
+        const response = await axios.post(url, payload, config);
+        console.log("✅ Fusion+ Order Built:", response.data);
+        return response.data;
+    } catch (error) {
+        console.error("❌ Error building Fusion+ order:", error);
+        return null;
+    }
+}
+
+async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, signature) {
+    const url = "https://api.1inch.dev/fusion-plus/relayer/v1.0/submit";
+
+    const config = {
+        headers: {
+            "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`,
+            "Content-Type": "application/json"
+        }
+    };
+
+    const payload = {
+        "order": orderData,
+        "srcChainId": srcChainId,
+        "signature": signature,
+        "extension": "0x",
+        "quoteId": quoteId,
+        "secretHashes": secretHashes
+    };
+
+    try {
+        const response = await axios.post(url, payload, config);
+        console.log("🚀 Order Successfully Submitted:", response.data);
+        return response.data;
+    } catch (error) {
+        console.error("❌ Error submitting Fusion+ order:", error);
+        return null;
+    }
+}
+
+
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
 async function fetchTokenPrices(network, tokens) {
@@ -381,31 +453,60 @@ async function fetchTokenPrices(network, tokens) {
     }
 }
 
-async function executeFusionSwap(srcToken, dstToken, amount) {
+async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
 
-    const srcChain = "ARBITRUM";
-    const dstChain = "POLYGON";
+    // 🔹 Dynamically determine source & destination chains
+    const CHAIN_IDS = {
+        "Polygon": 137,
+        "Arbitrum": 42161
+    };
 
+    const srcChain = CHAIN_IDS[trade.buyOn];
+    const dstChain = CHAIN_IDS[trade.sellOn];
+
+    if (!srcChain || !dstChain) {
+        console.error("❌ Invalid chain mapping. Check trade data:", trade);
+        return;
+    }
+
+    console.log(`🔄 Source Chain: ${trade.buyOn} (${srcChain})`);
+    console.log(`🔄 Destination Chain: ${trade.sellOn} (${dstChain})`);
+
+    // 🔹 Fetch Fusion+ Quote
     const quote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
     if (!quote) {
         console.error("❌ Failed to fetch Fusion+ quote.");
         return;
     }
 
+    // 🔹 Prepare Hash Lock for Fusion+ security
+    const secretsCount = quote.getPreset().secretsCount;
+    const secrets = Array.from({ length: secretsCount }).map(() => getRandomBytes32());
+    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
+
+    const hashLock = secretsCount === 1
+        ? HashLock.forSingleFill(secrets[0])
+        : HashLock.forMultipleFills(secretHashes);
+
     try {
+        // 🔹 Place Fusion+ Order
         const order = await sdk.placeOrder(quote, {
             walletAddress: process.env.WALLET_ADDRESS,
-            hashLock: HashLock.forSingleFill(getRandomBytes32()), // Generate random secret
-            secretHashes: [],
+            hashLock,
+            secretHashes,
         });
 
         console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
-        return order.id;
+
+        // 🔹 Send Telegram Notification
+        await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
+        🔹 **From:** ${trade.buyOn} (${srcToken})  
+        🔹 **To:** ${trade.sellOn} (${dstToken})  
+        🔹 **Amount:** ${amount}`);
     } catch (error) {
         console.error(`❌ Error executing Fusion+ swap:`, error);
-        await sendTelegramMessage(`🚨 **Fusion+ Swap Failed!** Manual intervention required.`);
-        return null;
+        await sendTelegramMessage(`🚨 **Error:** Fusion+ Swap Failed!\nTrade: ${trade.buyOn} → ${trade.sellOn}`);
     }
 }
 
@@ -726,6 +827,30 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
+
+async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
+    console.log(`🔍 Fetching quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
+    const quoteResponse = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount, walletAddress);
+    if (!quoteResponse) return console.log("❌ Failed to fetch quote.");
+
+    console.log("⚡ Building Fusion+ Order...");
+    const orderData = await buildFusionOrder(quoteResponse, srcChain, dstChain, srcToken, dstToken, amount, walletAddress);
+    if (!orderData) return console.log("❌ Failed to build Fusion+ order.");
+
+    // 🔹 Generate Secret Hashes for Security
+    const secrets = Array.from({ length: orderData.preset.secretsCount }).map(() => getRandomBytes32());
+    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
+
+    // 🔹 Sign the order (replace with actual signing logic)
+    const signature = "0xSIGNATURE"; // Replace with real signature logic
+
+    console.log("🚀 Submitting Fusion+ Order...");
+    const executionResponse = await submitFusionOrder(orderData, srcChain, orderData.quoteId, secretHashes, signature);
+    if (!executionResponse) return console.log("❌ Failed to submit Fusion+ order.");
+
+    console.log("✅ Cross-Chain Swap Successfully Executed!");
+}
+
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
 async function executeSwap(trade) {
