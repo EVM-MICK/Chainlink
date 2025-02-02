@@ -13,8 +13,8 @@ import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
 import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
-import POLYGON_ABI from "./PolygonSmartContract.json";
-import ARBITRUM_ABI from "./ArbitrumSmartContract.json";
+import POLYGON_ABI from "./PolygonSmartContract.json" assert { type: "json" };
+import ARBITRUM_ABI from "./ArbitrumSmartContract.json" assert { type: "json" };
 
 const sdk = new SDK({
   url: "https://api.1inch.dev/fusion-plus",
