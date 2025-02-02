@@ -13,8 +13,8 @@ import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
 import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
-import POLYGON_ABI from "./abis/PolygonSmartContract.json";
-import ARBITRUM_ABI from "./abis/ArbitrumSmartContract.json";
+import POLYGON_ABI from "./PolygonSmartContract.json";
+import ARBITRUM_ABI from "./ArbitrumSmartContract.json";
 
 const sdk = new SDK({
   url: "https://api.1inch.dev/fusion-plus",
@@ -130,7 +130,8 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
-const nonce = await permit2Contract.methods.nonces(wallet.address).call();
+//const nonce = await permit2Contract.methods.nonces(wallet.address).call();
+const nonce = await permit2Contract.nonces(wallet.address);
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
@@ -302,21 +303,55 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
-// Function to Fetch Fusion+ Quote
-async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
-    try {
-        const quote = await sdk.getQuote({
-            srcChainId: NetworkEnum[srcChain],
-            dstChainId: NetworkEnum[dstChain],
-            srcTokenAddress: srcToken,
-            dstTokenAddress: dstToken,
-            amount: amount.toString()
-        });
 
-        console.log(`✅ Fusion+ Quote: ${quote}`);
-        return quote;
+// 🚀 Fusion+ Quote Function (Dynamic)
+async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
+    const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
+
+    // 🔹 Get Correct Wallet for Source Chain
+    const walletAddress = srcChain === "ARBITRUM" ? process.env.ARBITRUM_WALLET : process.env.POLYGON_WALLET;
+
+    // 🔹 Convert Network Names to Chain IDs
+    const chainIds = {
+        "ARBITRUM": 42161,
+        "POLYGON": 137
+    };
+
+    const params = {
+        srcChain: chainIds[srcChain],
+        dstChain: chainIds[dstChain],
+        srcTokenAddress: srcToken,
+        dstTokenAddress: dstToken,
+        amount: amount.toString(),
+        walletAddress: walletAddress,
+        enableEstimate: "true"
+    };
+
+    const config = {
+        headers: {
+            "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`
+        },
+        params,
+        paramsSerializer: { indexes: null }
+    };
+
+    console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
+
+    try {
+        const response = await axios.get(url, config);
+        console.log(`✅ Fusion+ Quote Received:`, response.data);
+
+        if (!response.data.dstAmount) {
+            console.warn(`⚠️ Warning: Fusion+ API returned an unexpected response.`);
+            return null;
+        }
+
+        // 🔹 Apply 1% Slippage Tolerance
+        const receivedAmount = parseFloat(response.data.dstAmount) * 0.99;
+
+        return receivedAmount;
     } catch (error) {
-        console.error(`❌ Error fetching Fusion+ quote:`, error);
+        console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
         return null;
     }
 }
@@ -358,29 +393,19 @@ async function executeFusionSwap(srcToken, dstToken, amount) {
         return;
     }
 
-    const secretsCount = quote.getPreset().secretsCount;
-    const secrets = Array.from({ length: secretsCount }).map(() => getRandomBytes32());
-    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
-
-    const hashLock = secretsCount === 1
-        ? HashLock.forSingleFill(secrets[0])
-        : HashLock.forMultipleFills(secretHashes);
-
     try {
         const order = await sdk.placeOrder(quote, {
             walletAddress: process.env.WALLET_ADDRESS,
-            hashLock,
-            secretHashes,
+            hashLock: HashLock.forSingleFill(getRandomBytes32()), // Generate random secret
+            secretHashes: [],
         });
 
         console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
-
-        await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
-        🔹 **From:** ${srcChain} (${srcToken})  
-        🔹 **To:** ${dstChain} (${dstToken})  
-        🔹 **Amount:** ${amount}`);
+        return order.id;
     } catch (error) {
         console.error(`❌ Error executing Fusion+ swap:`, error);
+        await sendTelegramMessage(`🚨 **Fusion+ Swap Failed!** Manual intervention required.`);
+        return null;
     }
 }
 
@@ -523,7 +548,8 @@ async function sendErrorSummary() {
 
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
-    const nonce = await permit2Contract.methods.nonces(wallet.address).call(); // ✅ Fetch nonce
+    //const nonce = await permit2Contract.methods.nonces(wallet.address).call(); // ✅ Fetch nonce
+   const nonce = await permit2Contract.nonces(wallet.address);
 
     const domain = {
         name: "Permit2",
@@ -584,12 +610,13 @@ async function checkCircuitBreaker() {
 
 // 🚀 Fetch Swap Quote (Using the Exact 1inch API Format)
 // ✅ Fetch Swap Quote with Rate-Limiting & Null Handling
+
+
 async function fetchSwapQuote(chain, fromToken, toToken, amount) {
     const url = `${API_BASE_URL1}/${chain}/quote`;
     const config = {
         headers: { Authorization: `Bearer ${API_KEY}` },
-        params: {
-            src: fromToken,
+        params: { src: fromToken,
             dst: toToken,
             amount,
             complexityLevel: 2,
@@ -597,24 +624,27 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
             mainRouteParts: 10,
             includeTokensInfo: false,
             includeProtocols: true,
-            includeGas: true,
-        }
+            includeGas: true, }
     };
 
-    return await rateLimitedRequest(async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+       return await rateLimitedRequest(async () => {
         try {
             const response = await axios.get(url, config);
-            if (!response.data || !response.data.dstAmount) {
-                console.warn(`⚠️ Warning: Received invalid swap quote response for ${fromToken} -> ${toToken}`);
-                return null;
+            if (response.data?.dstAmount) {
+                return response.data.dstAmount;
             }
-            return response.data.dstAmount;
         } catch (error) {
-            console.error(`❌ Error fetching swap quote for ${fromToken} -> ${toToken}:`, error.message);
-            return null;
+            console.warn(`⚠️ Swap quote fetch attempt ${attempt} failed. Retrying...`);
+            await delay(2000 * attempt); // Exponential backoff
         }
-    });
+     });
+    }
+
+    console.error(`❌ Failed to fetch swap quote after 3 attempts.`);
+    return null;
 }
+
 
 // 🚀 Detect Arbitrage Opportunities
 async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
@@ -825,82 +855,129 @@ async function notifyMonitoringSystem(message) {
   }
 }
 
+async function fetchInitialSwapQuote(chain, usdcAmount) {
+    const quote = await fetchSwapQuote(
+        chain,
+        TOKENS[chain].USDC,
+        TOKENS[chain].WETH,
+        usdcAmount
+    );
+    if (!quote) {
+        console.error("❌ Failed to fetch initial swap quote");
+        return null;
+    }
+    return parseFloat(quote);
+}
+
+async function repayFlashLoan(chain, amount) {
+    console.log(`💰 Repaying Flash Loan on ${chain} with ${amount} USDC`);
+    await executeLoanRepayment(chain, amount);
+}
+
+async function sendUSDCBack(chain, amount) {
+    const minRequired = 100050; // Minimum repayment required
+    if (amount < minRequired) {
+        console.error(`❌ Insufficient USDC received. Expected ${minRequired}, got ${amount}`);
+        await sendTelegramMessage(`🚨 **Warning:** Received only ${amount} USDC. Manual intervention required!`);
+        return;
+    }
+
+    console.log(`🔄 Sending ${amount} USDC back to ${chain} for flash loan repayment`);
+    await executeFusionSwap(TOKENS[chain].USDC, TOKENS[chain].USDC, amount);
+}
+
+
+async function swapTokenForUSDC(chain, token, amount) {
+    const usdcAmount = await fetchSwapQuote(chain, token, TOKENS[chain].USDC, amount);
+    console.log(`✅ Swapping ${amount} ${token} → ${usdcAmount} USDC on ${chain}`);
+    return usdcAmount;
+}
+
+async function requestFlashLoan(targetChain, token, amount) {
+    const bufferAmount = amount * 1.005; // Add 0.5% buffer to avoid underfunding
+    console.log(`🚀 Requesting Flash Loan on ${targetChain} for ${bufferAmount.toFixed(4)} ${token}`);
+    await executeFlashLoan(
+        targetChain === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
+        token,
+        bufferAmount.toFixed(0) // Convert to whole number for better precision
+    );
+}
+
+
+async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
+    const fusionQuote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    if (!fusionQuote) {
+        console.error("❌ Failed to fetch Fusion+ quote");
+        return null;
+    }
+    const receivedAmount = parseFloat(fusionQuote.dstAmount) * 0.99; // Apply 1% slippage tolerance
+    return receivedAmount;
+}
+
+
 // 🚀 Execute Arbitrage Trade
 async function executeArbitrage() {
     console.log("🔍 Fetching latest prices...");
     const prices = await fetchPricesForBothChains();
-    if (!prices) {
-        console.log("❌ Failed to fetch prices. Exiting...");
-        return;
-    }
+    if (!prices) return console.log("❌ Failed to fetch prices. Exiting...");
 
     console.log("🔍 Detecting arbitrage opportunities...");
     const opportunities = await detectArbitrageOpportunities(prices.ARBITRUM, prices.POLYGON);
-    if (opportunities.length === 0) {
-        console.log("⚠️ No profitable arbitrage opportunities found.");
-        return;
-    }
+    if (opportunities.length === 0) return console.log("⚠️ No profitable arbitrage opportunities found.");
 
-    // Select the most profitable trade
+    // Select the best arbitrage trade
     const bestTrade = opportunities[0];
 
-    console.log(`🚀 Executing arbitrage trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
+    console.log(`🚀 Arbitrage Opportunity: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
     await sendTelegramTradeAlert(bestTrade);
 
     try {
-        // 🔹 Define provider & wallet for both networks
-        const providerBuy = new ethers.providers.JsonRpcProvider(
-            bestTrade.buyOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
+        // 1️⃣ Fetch Swap Quote for USDC → Token on the Buy Network
+        console.log(`🔄 Fetching swap quote on ${bestTrade.buyOn} for 100,000 USDC...`);
+        const dstAmount = await fetchInitialSwapQuote(bestTrade.buyOn, 100000);
+        if (!dstAmount) return console.log("❌ Failed to get initial swap quote");
+
+        // 2️⃣ Fetch Fusion+ Quote to Determine Received Amount on the Target Chain
+        console.log(`🔄 Fetching Fusion+ quote: Sending ${dstAmount} ${bestTrade.token} from ${bestTrade.buyOn} to ${bestTrade.sellOn}...`);
+        const receivedAmount = await fetchFusionQuote(
+            bestTrade.buyOn, 
+            bestTrade.sellOn, 
+            TOKENS[bestTrade.buyOn].WETH, 
+            TOKENS[bestTrade.sellOn].WETH, 
+            dstAmount
         );
-        const providerSell = new ethers.providers.JsonRpcProvider(
-            bestTrade.sellOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
-        );
+        if (!receivedAmount) return console.log("❌ Failed to get Fusion+ quote");
 
-        const walletBuy = new ethers.Wallet(process.env.PRIVATE_KEY, providerBuy);
-        const walletSell = new ethers.Wallet(process.env.PRIVATE_KEY, providerSell);
+        // 3️⃣ Request Flash Loan on the Target Chain Based on `receivedAmount`
+        console.log(`💰 Requesting Flash Loan on ${bestTrade.sellOn} for ${receivedAmount} ${bestTrade.token}...`);
+        await requestFlashLoan(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, receivedAmount);
 
-        // 🔹 Execute Buy Transaction (Flash Loan + Swap)
-        console.log(`🔹 Requesting flash loan & executing buy on ${bestTrade.buyOn}...`);
-        await executeSwap(
-            bestTrade.buyOn === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
-            TOKENS[bestTrade.buyOn].USDC,
-            TOKENS[bestTrade.buyOn][bestTrade.token],
-            bestTrade.buyAmount,
-            walletBuy
-        );
-        console.log(`✅ Buy executed successfully on ${bestTrade.buyOn}`);
+        // 4️⃣ Execute Fusion+ Cross-Chain Swap
+        console.log(`🚀 Executing Fusion+ Swap: ${dstAmount} ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
+        await executeFusionSwap(TOKENS[bestTrade.buyOn].WETH, TOKENS[bestTrade.sellOn].WETH, dstAmount);
 
-        // 🔹 Execute Sell Transaction (Swap & Repay Loan)
-        console.log(`🔹 Selling & repaying loan on ${bestTrade.sellOn}...`);
-        await executeSwap(
-            bestTrade.sellOn === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
-            TOKENS[bestTrade.sellOn][bestTrade.token],
-            TOKENS[bestTrade.sellOn].USDC,
-            bestTrade.sellAmount,
-            walletSell
-        );
-        console.log(`✅ Sell executed successfully on ${bestTrade.sellOn}`);
+        // 5️⃣ Swap Received Token for USDC on the Sell Network
+        console.log(`💵 Swapping received ${receivedAmount} ${bestTrade.token} on ${bestTrade.sellOn} → USDC...`);
+        const usdcReceived = await swapTokenForUSDC(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, receivedAmount);
 
-        console.log("🎉 Arbitrage trade completed successfully!");
+        // 6️⃣ Send USDC Back to the Initial Chain to Repay Flash Loan
+        const totalRepayment = 100050; // 100,000 + 50 USDC premium
+        console.log(`🔄 Sending ${usdcReceived} USDC back to ${bestTrade.buyOn} for flash loan repayment...`);
+        await sendUSDCBack(bestTrade.buyOn, usdcReceived);
 
-        // 🔹 Execute Cross-Chain Swap for Flash Loan Repayment
-        try {
-            console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
-            await executeFusionSwap(
-                TOKENS[bestTrade.sellOn].USDC, 
-                TOKENS[bestTrade.buyOn].USDC, 
-                bestTrade.sellAmount
-            );
-            console.log(`✅ Fusion+ Swap for Loan Repayment executed successfully!`);
-        } catch (error) {
-            console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
-            await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
-        }
+        // 7️⃣ Repay the Flash Loan
+        console.log(`💰 Repaying Flash Loan on ${bestTrade.buyOn} with ${totalRepayment} USDC...`);
+        await repayFlashLoan(bestTrade.buyOn, totalRepayment);
+
+        console.log("🎉 Arbitrage Trade Completed Successfully!");
+        await sendTelegramMessage("✅ Arbitrage Trade Completed Successfully!");
 
     } catch (error) {
         console.error("❌ Error executing arbitrage trade:", error);
+        await sendTelegramMessage(`🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.`);
     }
 }
+
 
 // 🚀 Start the Bot
 executeArbitrage();
