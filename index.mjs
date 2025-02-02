@@ -12,13 +12,37 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
+import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+import POLYGON_ABI from "./abis/PolygonSmartContract.json";
+import ARBITRUM_ABI from "./abis/ArbitrumSmartContract.json";
 
+const sdk = new SDK({
+  url: "https://api.1inch.dev/fusion-plus",
+  authKey: process.env.ONEINCH_API_KEY,
+});
 
 dotenv.config();
 const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
 const ERC20_ABI = [
     "function decimals() view returns (uint8)"
+];
+// Define contract addresses
+const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
+const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
+
+// Define providers and wallets for both networks
+const providerPolygon = new ethers.providers.JsonRpcProvider(process.env.POLYGON_RPC);
+const providerArbitrum = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC);
+
+const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
+const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
+
+// Load Smart Contracts for both networks
+const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
+const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
+const SMART_CONTRACT_ABI = [
+  // Add your contract ABI here
 ];
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
@@ -90,8 +114,7 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const providerA = new JsonRpcProvider("https://arb-mainnet.g.alchemy.com/v2/TNqLsUr-1r20DnYhBhHqghjNlcZpQYNw");
-//const redis = new Redis(process.env.REDIS_URL); // Redis for distributed caching
+//const providerA = new JsonRpcProvider("https://arb-mainnet.g.alchemy.com/v2/TNqLsUr-1r20DnYhBhHqghjNlcZpQYNw");
 const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
 const REDIS_HOST = process.env.REDIS_HOST || 'redis-14324.c232.us-east-1-2.ec2.redns.redis-cloud.com';
@@ -107,8 +130,9 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
-const API_BASE_URL = `https://api.1inch.dev/price/v1.1/42161`;
-const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0/42161";
+const nonce = await permit2Contract.methods.nonces(wallet.address).call();
+const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
+const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://humble-mindfulness-production.up.railway.app"; // Go service endpoint
@@ -117,36 +141,37 @@ const RETRY_LIMIT = 3;
 const RETRY_DELAY = 1000;
 const CACHE_DURATION = 5 * 60; // 5 minutes in seconds
 const MAX_HOPS = 3;
-const CAPITAL = new BigNumber(100000).shiftedBy(6); // $100,000 in USDC
-const MIN_PROFIT = new BigNumber(500).shiftedBy(6); // $500 profit threshold
 const TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN;
 const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 const queue = new PQueue({ concurrency: 1 });
-const HARDCODED_STABLE_ADDRESSES = [
-  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
-  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
-  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
-];
-
-const HARDCODED_STABLE_ADDRESSES_WITH_COMMA = [
-  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
-  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
-  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI
-  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
-];
-
-const TOKEN_DECIMALS = {
-    "0xaf88d065e77c8cc2239327c5edb3a432268e5831": 6,  // USDC
-    "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": 6,  // USDT
-    "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": 18, // DAI
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18, // WETH
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8,  // WBTC
+// Load Smart Contract
+const contract = new ethers.Contract(process.env.SMART_CONTRACT_ADDRESS, ABI, wallet);
+const NETWORKS = {
+    POLYGON: 137,
+    ARBITRUM: 42161
 };
+
+ const TOKENS = {
+    POLYGON: {
+        USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        USDT: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+        DAI: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
+        WETH: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
+        WBTC: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
+    },
+    ARBITRUM: {
+        USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+        DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+        WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
+    }
+};
+
+const PROFIT_THRESHOLD = 300; // Minimum $500 profit per trade
+const TRADE_SIZE_USDC = 100000; // $100,000 per trade
 
 // Initialize Permit2 contract instance
 const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
@@ -154,10 +179,6 @@ const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
 const app = express();
 app.use(express.json());
 
-
-// Add private key to Web3 wallet
-const account = web3.eth.accounts.privateKeyToAccount(PRIVATE_KEY);
-web3.eth.accounts.wallet.add(account);
 // State Variables
 let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
@@ -182,19 +203,15 @@ validateEnvVars([
   "INFURA_URL",
   "PRIVATE_KEY",
   "TELEGRAM_BOT_TOKEN",
-  "GO_BACKEND_URL",
   "REDIS_URL",
-  "MONITORING_SERVICE_URL",
-  "CHAIN_ID",
+  "ONEINCH_API_KEY",
+  "WALLET_ADDRESS",
+  "SMART_CONTRACT_ADDRESS",
+  "POLYGON_RPC",
+  "ARBITRUM_RPC",
 ]);
 
-// Helper function to construct 1inch API URLs
-/**
- * Generic function to make HTTP GET requests using Axios.
- * @param {string} endpoint - The API endpoint to call.
- * @param {object} params - Query parameters to include in the request.
- * @returns {Promise<object>} - The response data from the API.
- */
+
 async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
   try {
     const cachedData = await redisClient.get(key);
@@ -213,45 +230,11 @@ async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
   }
 }
 
-async function constructApiUrl(endpoint, params = {}) {
-  const baseToken1 = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"; // USDC
-  const amount1 = "100000000000"; // $100,000 in USDC
-
-  try {
-    // Fetch token prices
-    const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-    console.log("Token Prices Response:", JSON.stringify(tokenPrices, null, 2));
-
-    // Fetch liquidity data
-    const liquidityData = await fetchAllLiquidityData(
-      baseToken1,
-      amount1,
-      HARDCODED_STABLE_ADDRESSES_WITH_COMMA
-    );
-    console.log("Liquidity Data Response:", JSON.stringify(liquidityData, null, 2));
-
-    // Construct API response based on the endpoint and params
-    const apiResponse = {
-      endpoint,
-      params,
-      tokenPrices,
-      liquidityData,
-    };
-
-    return apiResponse;
-  } catch (error) {
-    console.error("Error constructing API URL:", error.message);
-    throw error;
-  }
-}
-
-
 // Utility Functions
 function log(message, level = 'info') {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
 }
-
 
 // Connect to Redis
 (async () => {
@@ -267,79 +250,6 @@ function log(message, level = 'info') {
 redisClient.on('error', (err) => {
   console.error('Redis connection error:', err);
 });
-
-async function fetchNonce() {
-  let nonce = null;
-
-  try {
-    if (!wallet.address) {
-      console.warn('Wallet address is not configured. Skipping nonce retrieval.');
-    } else {
-      nonce = await web3.eth.getTransactionCount(wallet.address, 'pending');
-      console.log(`Nonce fetched for wallet ${wallet.address}:`, nonce);
-    }
-  } catch (error) {
-    console.error(`Error fetching nonce for wallet ${wallet?.address || 'unknown address'}:`, error.message);
-    // Proceed without crashing
-  }
-
-  return nonce;
-}
-
-// Usage
-(async () => {
-  const nonce = await fetchNonce();
-  if (nonce !== null) {
-    console.log(`Using nonce: ${nonce}`);
-  } else {
-    console.log('Skipping operations that depend on nonce.');
-  }
-})();
-
-/**
- * Function to handle retry requests with 1 RPS throttling and exponential backoff.
- * @param {Function} fn - The function to execute (e.g., an API call).
- * @param {number} retries - The maximum number of retry attempts.
- * @param {number} delay - The base delay in milliseconds.
- * @returns {Promise<any>} - The result of the function call.
- */
-async function rateLimitedRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      // Throttle requests to maintain 1 RPS
-      const now = Date.now();
-      const timeSinceLastRequest = now - lastRequestTimestamp;
-
-      if (timeSinceLastRequest < delay) {
-        const waitTime = delay - timeSinceLastRequest;
-        console.log(`Throttling: Waiting ${waitTime}ms before next request...`);
-        await new Promise((resolve) => setTimeout(resolve, waitTime));
-      }
-
-      lastRequestTimestamp = Date.now(); // Update the timestamp for this request
-      return await fn(); // Execute the function
-    } catch (err) {
-      if (err.response?.status === 429) {
-        // Handle rate limit error
-        const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
-        console.warn(`Rate-limited. Retrying after ${retryAfter} seconds...`);
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
-      } else if (attempt === retries) {
-        // Throw error if max retries reached
-        console.error(`Request failed after ${retries} retries:`, err.message);
-        throw err;
-      } else {
-        // Exponential backoff for other errors
-        const backoff = delay * Math.pow(2, attempt - 1); // Exponential increase in delay
-        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms due to error: ${err.message}`);
-        await new Promise((resolve) => setTimeout(resolve, backoff));
-      }
-    }
-  }
-
-  throw new Error('Maximum retry attempts exceeded.');
-}
-
 
 async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -362,152 +272,6 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
     }
   }
   throw new Error('Maximum retry attempts exceeded.');
-}
-
-async function fetchAndCacheWithAverages(key, fetchFn, weight = 0.7) {
-    try {
-        // Use the rate-limited wrapper for the fetch function
-        const liveData = await rateLimitedRequest1(fetchFn);
-
-        const historicalData = await redisClient.get(key);
-        let averagedData;
-
-        if (historicalData) {
-            const parsedHistorical = JSON.parse(historicalData);
-
-            // Compute weighted averages
-            averagedData = Object.keys(liveData).reduce((acc, token) => {
-                acc[token] =
-                    liveData[token] * weight +
-                    (parsedHistorical[token] || 0) * (1 - weight);
-                return acc;
-            }, {});
-        } else {
-            // If no historical data exists, use live data as is
-            averagedData = liveData;
-        }
-
-        // Cache the averaged data in Redis with a 1-hour expiration
-        await redisClient.set(key, JSON.stringify(averagedData), 'EX', 3600);
-
-        console.log(`Averaged data cached under key: ${key}`);
-        return averagedData;
-    } catch (error) {
-        console.error(`Error in fetchAndCacheWithAverages: ${error.message}`);
-        throw error;
-    }
-}
-
-function calculateDynamicProfitThreshold(historicalProfits) {
-    if (historicalProfits.length === 0) return 0.02; // Default to 2%
-    const averageProfit = historicalProfits.reduce((sum, p) => sum + p, 0) / historicalProfits.length;
-    const volatility = Math.sqrt(
-        historicalProfits.reduce((sum, p) => sum + Math.pow(p - averageProfit, 2), 0) / historicalProfits.length
-    );
-    return averageProfit + volatility; // Profit = Mean + Volatility
-}
-
-
-async function cacheLiquidityData(baseToken, targetToken, liquidityData) {
-  const cacheKey = `liquidity:${baseToken}-${targetToken}`;
-  await redisClient.set(cacheKey, JSON.stringify(liquidityData), "EX", 300); // Cache for 5 minutes
-}
-
-async function getCachedLiquidityData(baseToken, targetToken) {
-  const cacheKey = `liquidity:${baseToken}-${targetToken}`;
-  const cachedData = await redisClient.get(cacheKey);
-  return cachedData ? JSON.parse(cachedData) : null;
-}
-
-async function validateTokenPrices(prices, tokens) {
-  const invalidTokens = tokens.filter((token) => !prices[token.toLowerCase()]);
-  if (invalidTokens.length > 0) {
-    throw new Error(`Invalid token prices for addresses: ${invalidTokens.join(", ")}`);
-  }
-}
-
-
-// Fetch Functions
-async function fetchGasPrice() {
-  const url = `https://api.blocknative.com/gasprices/blockprices`;
-  return cachedFetch('gasPrice', async () => {
-    try {
-      const { data } = await retryRequest(() =>
-        axios.get(url, { headers: { Authorization: `Bearer ${process.env.BLOCKNATIVE_API_KEY}` } })
-      );
-      const gasPriceGwei = data.blockPrices?.[0]?.baseFeePerGas;
-      return new BigNumber(web3.utils.toWei(gasPriceGwei.toString(), 'gwei'));
-    } catch (err) {
-      log(`Failed to fetch gas price: ${err.message}`, 'error');
-      addErrorToSummary(err, 'Gas Price Fetch');
-      throw err;
-    }
-  });
-}
-
-function extractTokensFromTransaction(tx) {
-  try {
-    // Define the ABI for the 1inch Aggregation Router
-    const AGGREGATION_ROUTER_ABI = [
-      "function swap(address executor, (address srcToken, address dstToken, address payable srcReceiver, address payable dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags) desc, bytes permit, bytes data)",
-      "function unoswap(address srcToken, uint256 amount, uint256 minReturn, bytes32[] pools)",
-      "function ethUnoswap(address srcToken, uint256 minReturn, bytes32[] pools)",
-      "function unoswapTo(address to, address srcToken, uint256 amount, uint256 minReturn, bytes32[] pools)",
-      "function ethUnoswapTo(address to, address srcToken, uint256 minReturn, bytes32[] pools)",
-      "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)",
-    ];
-
-    // Use ethers.js Interface to parse the ABI
-    const iface = new ethers.utils.Interface(AGGREGATION_ROUTER_ABI);
-
-    // Decode the transaction input data
-    const decodedData = iface.parseTransaction({ data: tx.data });
-
-    const tokenAddresses = [];
-
-    // Handle decoding based on the function name
-    switch (decodedData.name) {
-      case "swap": {
-        // Extract srcToken and dstToken from SwapDescription
-        const { srcToken, dstToken } = decodedData.args.desc;
-        tokenAddresses.push(srcToken, dstToken);
-        break;
-      }
-
-      case "unoswap":
-      case "ethUnoswap": {
-        // Extract the source token
-        const { srcToken } = decodedData.args;
-        tokenAddresses.push(srcToken);
-        break;
-      }
-
-      case "unoswapTo":
-      case "ethUnoswapTo": {
-        // Extract the source token
-        const { srcToken } = decodedData.args;
-        tokenAddresses.push(srcToken);
-        break;
-      }
-
-      case "swapExactTokensForTokens": {
-        // Extract tokens from the `path` array
-        const { path } = decodedData.args;
-        tokenAddresses.push(...path);
-        break;
-      }
-
-      default:
-        log(`Unhandled method in extractTokensFromTransaction: ${decodedData.name}`, "warn");
-    }
-
-    // Remove duplicate addresses and return them in lowercase
-    const uniqueTokens = [...new Set(tokenAddresses.map((address) => address.toLowerCase()))];
-    return uniqueTokens;
-  } catch (err) {
-    log(`Error extracting tokens from transaction: ${err.message}`, "error");
-    return []; // Return an empty array if extraction fails
-  }
 }
 
 // Function to cache and fetch data from Redis
@@ -533,339 +297,186 @@ function validateAddresses(addresses) {
   }
 }
 
-// Caching Helper
-async function cachedFetchPrices(tokenAddresses) {
-  const cacheKey = `prices:${tokenAddresses.join(",")}`;
-  const endpoint = tokenAddresses.join(",");
-
-  // Use the cache or fetch fresh data if expired
-  return cachedFetch(cacheKey, async () => {
-    try {
-      const data = await constructApiUrl(endpoint);
-      console.log("Fetched token prices from API:", data);
-      return data;
-    } catch (error) {
-      console.error("Error fetching token prices:", error.message);
-      throw error;
-    }
-  });
-}
-
 axios.interceptors.request.use((config) => {
   console.log("Axios Request Config:", JSON.stringify(config, null, 2));
   return config;
 });
 
-async function fetchTokenPrices(tokens) {
-  validateAddresses(tokens);
-
-  const tokenList = tokens.join(",").toLowerCase();
-  const cacheKey = `prices:${tokenList}`;
-
-  return  fetchAndCacheWithAverages(cacheKey, async () => {
-    const url = `${API_BASE_URL}/${tokenList}`;
-    const config = {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        Accept: "application/json",
-      },
-      params: { currency: "USD" },
-    };
-
+// Function to Fetch Fusion+ Quote
+async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     try {
-      const response = await axios.get(url, config);
-      const prices = response.data;
-
-      // Ensure token keys are lowercase and values are floats
-      return Object.fromEntries(
-        Object.entries(prices).map(([token, price]) => [token.toLowerCase(), parseFloat(price)])
-      );
-    } catch (error) {
-      console.error("Error fetching token prices:", error.response?.data || error.message);
-      throw error;
-    }
-  });
-}
-
-
-// Fetch liquidity data for a token pair using 1inch Swap API
-/**
- * Fetch liquidity data for a token pair using the 1inch API.
- * @param {string} fromToken - The address of the source token.
- * @param {string} toToken - The address of the destination token.
- * @param {string} amount - The amount to swap (in smallest units).
- * @returns {Promise<object>} - Liquidity data from the API.
- */
-async function fetchLiquidityData(fromToken, toToken, amount) {
-  const cacheKey = `liquidity:${fromToken}-${toToken}-${amount}`;
-  return fetchAndCacheWithAverages(cacheKey, async () => {
-    const url = `${API_BASE_URL1}/quote`;
-    const config = {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      params: {
-        src: fromToken,
-        dst: toToken,
-        amount,
-        complexityLevel: 2,
-        parts: 50,
-        mainRouteParts: 10,
-        includeTokensInfo: false,
-        includeProtocols: true,
-        includeGas: true,
-      },
-    };
-
-    try {
-      const response = await axios.get(url, config);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching liquidity for ${fromToken} -> ${toToken}:`, error.message);
-      throw error;
-    }
-  });
-}
-
-async function fetchAllLiquidityData(baseToken, amount, stableAddresses) {
-  console.log(`Fetching liquidity data for base token: ${baseToken}`);
-
-  const liquidity = []; // Array to hold all token pair data
-
-  for (const targetToken of stableAddresses) {
-    // Skip fetching for base token -> base token
-    if (targetToken.toLowerCase() === baseToken.toLowerCase()) continue;
-
-    try {
-      // Fetch liquidity data for the baseToken -> targetToken pair
-      const data = await rateLimitedRequest1(() =>
-        fetchLiquidityData(baseToken, targetToken, amount)
-      );
-
-      if (data) {
-        // Push the full liquidity data as returned by the API, without filtering
-        liquidity.push({
-          baseToken,               // Base token address (USDC)
-          targetToken,             // Target token address (e.g., WBTC)
-          dstAmount: data.dstAmount, // Destination amount
-          gas: data.gas,           // Gas required
-          protocols: data.protocols, // Full protocols information
+        const quote = await sdk.getQuote({
+            srcChainId: NetworkEnum[srcChain],
+            dstChainId: NetworkEnum[dstChain],
+            srcTokenAddress: srcToken,
+            dstTokenAddress: dstToken,
+            amount: amount.toString()
         });
 
-        console.log(`Liquidity data collected for ${baseToken} -> ${targetToken}`);
-      } else {
-        console.warn(`No liquidity data returned for ${baseToken} -> ${targetToken}`);
-      }
+        console.log(`✅ Fusion+ Quote: ${quote}`);
+        return quote;
     } catch (error) {
-      console.error(`Error fetching liquidity for ${baseToken} -> ${targetToken}:`, error.message);
+        console.error(`❌ Error fetching Fusion+ quote:`, error);
+        return null;
     }
-  }
-
-  console.log(`Total liquidity pairs fetched: ${liquidity.length}`);
-  return liquidity; // Return the full liquidity array
 }
 
+
+// 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
+async function fetchTokenPrices(network, tokens) {
+    const tokenList = tokens.join(",").toLowerCase();
+    const url = `${API_BASE_URL}/${network}/${tokenList}`;
+
+    const config = {
+        headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            Accept: "application/json",
+        },
+        params: { currency: "USD" },
+    };
+
+    try {
+        const response = await axios.get(url, config);
+        return Object.fromEntries(
+            Object.entries(response.data).map(([token, price]) => [token.toLowerCase(), parseFloat(price)])
+        );
+    } catch (error) {
+        console.error(`Error fetching prices for ${network}:`, error.response?.data || error.message);
+        return null;
+    }
+}
+
+async function executeFusionSwap(srcToken, dstToken, amount) {
+    console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
+
+    const srcChain = "ARBITRUM";
+    const dstChain = "POLYGON";
+
+    const quote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    if (!quote) {
+        console.error("❌ Failed to fetch Fusion+ quote.");
+        return;
+    }
+
+    const secretsCount = quote.getPreset().secretsCount;
+    const secrets = Array.from({ length: secretsCount }).map(() => getRandomBytes32());
+    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
+
+    const hashLock = secretsCount === 1
+        ? HashLock.forSingleFill(secrets[0])
+        : HashLock.forMultipleFills(secretHashes);
+
+    try {
+        const order = await sdk.placeOrder(quote, {
+            walletAddress: process.env.WALLET_ADDRESS,
+            hashLock,
+            secretHashes,
+        });
+
+        console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
+
+        await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
+        🔹 **From:** ${srcChain} (${srcToken})  
+        🔹 **To:** ${dstChain} (${dstToken})  
+        🔹 **Amount:** ${amount}`);
+    } catch (error) {
+        console.error(`❌ Error executing Fusion+ swap:`, error);
+    }
+}
+
+// Listen for SwapExecuted Event
+contract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
+    console.log(`🔥 Swap Completed: ${srcToken} → ${dstToken}, Amount: ${amount}`);
+    
+    // Execute cross-chain transfer via Fusion+
+    await executeFusionSwap(srcToken, dstToken, returnAmount);
+});
+
+
+// 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
+async function fetchPricesForBothChains() {
+    try {
+        const responses = await Promise.all(
+            Object.entries(NETWORKS).map(async ([name, network]) => {
+                return { name, data: await fetchTokenPrices(network, Object.values(TOKENS[name])) };
+            })
+        );
+
+        return Object.fromEntries(responses.map(({ name, data }) => [name, data]));
+    } catch (error) {
+        console.error("Error fetching prices:", error);
+        return null;
+    }
+}
 
 // Helper function for delay
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function rateLimitedRequest1(fn, retries = 3, delay = RETRY_DELAY) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const now = Date.now();
-      const timeSinceLastRequest = now - lastRequestTimestamp;
+// ✅ Rate-Limited API Request Function
+async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const now = Date.now();
+            const timeSinceLastRequest = now - lastRequestTimestamp;
 
-      if (timeSinceLastRequest < delay) {
-        const waitTime = delay - timeSinceLastRequest;
-        console.log(`Throttling: Waiting ${waitTime}ms before next request...`);
-        await new Promise((resolve) => setTimeout(resolve, waitTime));
-      }
+            if (timeSinceLastRequest < delay) {
+                const waitTime = delay - timeSinceLastRequest;
+                console.log(`⏳ Throttling API requests: Waiting ${waitTime}ms...`);
+                await new Promise((resolve) => setTimeout(resolve, waitTime));
+            }
 
-      lastRequestTimestamp = Date.now(); // Update timestamp
-      return await fn(); // Execute the function
-    } catch (err) {
-      if (err.response?.status === 429) {
-        const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
-        console.warn(`Rate-limited. Retrying after ${retryAfter} seconds...`);
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
-      } else if (attempt === retries) {
-        console.error(`Request failed after ${retries} retries:`, err.message);
-        throw err;
-      } else {
-        const backoff = delay * Math.pow(2, attempt - 1); // Exponential backoff
-        console.warn(`Retrying (${attempt}/${retries}) after ${backoff}ms due to error: ${err.message}`);
-        await new Promise((resolve) => setTimeout(resolve, backoff));
-      }
-    }
-  }
-
-  throw new Error("Maximum retry attempts exceeded.");
-}
-
-async function getAmountInBaseToken(baseToken, usdAmount, tokenPrices) {
-    const price = tokenPrices[baseToken.toLowerCase()];
-    if (!price) {
-        throw new Error(`Token price not found for baseToken: ${baseToken}`);
-    }
-    const baseTokenAmount = new BigNumber(usdAmount).dividedBy(price).toFixed(0);
-    console.log(`Equivalent of $${usdAmount} in ${baseToken}: ${baseTokenAmount}`);
-    return baseTokenAmount;
-}
-
-
-function normalizeTokenPrices(tokenPrices) {
-    return Object.fromEntries(
-        Object.entries(tokenPrices).map(([token, price]) => [token.toLowerCase(), price])
-    );
-}
-
-
-/**
- * Converts a token amount to its USD equivalent using token prices and decimals.
- * @param {string|number} amount - The token amount.
- * @param {string} tokenAddress - The token's address.
- * @param {Object} tokenPrices - Map of token addresses to their USD prices.
- * @returns {number} - USD equivalent value.
- */
-function convertToUsdEquivalent(dstAmount, targetToken, tokenPrices) {
-    const price = tokenPrices[targetToken];
-    if (!price) {
-        throw new Error(`Token price not found for targetToken: ${targetToken}`);
-    }
-    return new BigNumber(dstAmount).multipliedBy(price).toNumber();
-}
-
-async function getTokenDecimals(tokenAddress) {
-    try {
-        const contract = new ethers.Contract(tokenAddress, ERC20_ABI, providerA);
-        return await contract.decimals();
-    } catch (error) {
-        console.error(`Error fetching decimals for token ${tokenAddress}:`, error.message);
-        throw error; // Re-throw the error to propagate it
-    }
-}
-
-async function processLiquidityQuotes(rawQuotes) {
-    try {
-        console.log('Validating and normalizing liquidity quotes...');
-        let quotes = validateAndNormalizeLiquidityQuotes(rawQuotes);
-
-        console.log('Filtering quotes by dstAmount...');
-        quotes = filterByDstAmount(quotes);
-
-        console.log('Capping gas values...');
-        quotes = capGasValues(quotes);
-
-        console.log(`Processed ${quotes.length} valid liquidity quotes.`);
-        return quotes;
-    } catch (error) {
-        console.error('Error processing liquidity quotes:', error.message);
-        throw error;
-    }
-}
-
-function capGasValues(quotes, maxGas = 500000) {
-    return quotes.map((quote) => {
-        if (quote.gas > maxGas) {
-            console.warn(
-                `Capping gas value from ${quote.gas} to ${maxGas} for quote:`,
-                quote
-            );
-            quote.gas = maxGas;
+            lastRequestTimestamp = Date.now(); // Update timestamp
+            return await fn(); // Execute API request
+        } catch (err) {
+            if (err.response?.status === 429) {
+                const retryAfter = parseInt(err.response.headers["retry-after"], 10) || delay / 1000;
+                console.warn(`🚨 Rate-limited! Retrying in ${retryAfter} seconds...`);
+                await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+            } else if (attempt === retries) {
+                console.error(`❌ Request failed after ${retries} retries:`, err.message);
+                return null; // Return `null` instead of throwing to prevent crashes
+            } else {
+                const backoff = delay * Math.pow(2, attempt - 1); // Exponential backoff
+                console.warn(`🔄 Retrying (${attempt}/${retries}) after ${backoff}ms due to error: ${err.message}`);
+                await new Promise((resolve) => setTimeout(resolve, backoff));
+            }
         }
-        return quote;
+    }
+
+    return null; // Return `null` if all retry attempts fail
+}
+
+// 🚀 Telegram Notification
+async function sendTelegramTradeAlert(details) {
+//const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+const botTokenz = process.env.TELEGRAM_BOT_TOKEN;
+ const chatId1 = process.env.TELEGRAM_CHAT_ID;
+const urlx = `https://api.telegram.org/bot${botTokenz}/sendMessage`;
+    const message1 = `
+🚀 **Arbitrage Trade Executed** 🚀
+💰 **Buy Network:** ${details.buyOn}
+💵 **Token:** ${details.token}
+📉 **Buy Price:** $${details.buyPrice}
+
+📈 **Sell Network:** ${details.sellOn}
+💵 **Token:** ${details.token}
+📉 **Sell Price:** $${details.sellPrice}
+
+✅ **Profit:** $${details.profit}
+💰 **Trade Size:** $${TRADE_SIZE_USDC} USDC
+    `;
+    //await bot.telegram.sendMessage(chatId1, message);
+  try {
+    const response = await axios.post(urlx, {
+      chat_id: chatId1,
+      text: message1,
     });
-}
-
-function filterByDstAmount(quotes, tokenPrices, threshold=1000) {
-    return quotes.filter((quote) => {
-        const dstAmountInUsd = convertToUsdEquivalent(
-            quote.dstAmount,
-            quote.targetToken,
-            tokenPrices
-        );
-        return dstAmountInUsd >= threshold;
-    });
-}
-
-function validateAndNormalizeLiquidityQuotes(quotes) {
-    return quotes
-        .filter((quote) => {
-            // Validate required fields
-            if (
-                !quote.fromToken ||
-                !quote.toToken ||
-                !quote.liquidity ||
-                !quote.liquidity.dstAmount ||
-                !quote.liquidity.gas
-            ) {
-                console.warn('Skipping invalid liquidity quote:', quote);
-                return false;
-            }
-
-            // Ensure dstAmount is a valid integer
-            if (Math.floor(quote.liquidity.dstAmount) !== quote.liquidity.dstAmount) {
-                console.warn(
-                    `Skipping quote due to non-integer dstAmount: ${quote.liquidity.dstAmount}`
-                );
-                return false;
-            }
-
-            return true;
-        })
-        .map((quote) => ({
-            fromToken: quote.fromToken,
-            toToken: quote.toToken,
-            dstAmount: BigInt(Math.round(quote.liquidity.dstAmount)).toString(), // Round and normalize
-            gas: parseInt(quote.liquidity.gas, 10), // Ensure gas is an integer
-            protocols: quote.liquidity.protocols || [],
-        }));
-}
-
-/**
- * Calculate profit from a given liquidity quote.
- * @param {Object} liquidityQuote - The quote data.
- * @param {Number} dynamicProfitThreshold - The current profit threshold.
- * @param {Object} tokenPrices - Token prices in USD for accurate conversion.
- * @param {Number} slippageTolerance - Allowed slippage percentage (e.g., 0.01 for 1%).
- * @returns {Number} - The derived profit in USD.
- */
-function calculateProfit(liquidityQuote, dynamicProfitThreshold, tokenPrices, slippageTolerance = 0.01) {
-    const { dstAmount, gas, baseToken, targetToken, gasPrice } = liquidityQuote;
-
-    // Validate required fields
-    if (!dstAmount || !gas || !baseToken || !targetToken || !gasPrice) {
-        console.error("Invalid liquidity quote data:", liquidityQuote);
-        return 0;
-    }
-
-    // Convert destination amount to USD using target token price
-    const dstAmountUSD = parseFloat(dstAmount) * (tokenPrices[targetToken] || 0);
-    if (!dstAmountUSD) {
-        console.error(`Invalid target token price for ${targetToken}. Cannot calculate profit.`);
-        return 0;
-    }
-
-    // Calculate gas cost in USD
-    const gasCostUSD = parseFloat(gas) * parseFloat(gasPrice) * (tokenPrices[baseToken] || 0);
-    if (!gasCostUSD) {
-        console.error(`Invalid gas price or base token price for ${baseToken}. Cannot calculate gas cost.`);
-        return 0;
-    }
-
-    // Adjust for slippage tolerance
-    const adjustedDstAmountUSD = dstAmountUSD * (1 - slippageTolerance);
-
-    // Calculate net profit
-    const netProfitUSD = adjustedDstAmountUSD - gasCostUSD;
-
-    // Apply dynamic profit threshold
-    const profit = Math.max(netProfitUSD - dynamicProfitThreshold, 0);
-
-    console.log(`Calculated profit: ${profit.toFixed(6)} USD`);
-    console.log(`Details -> AdjustedDstAmountUSD: ${adjustedDstAmountUSD.toFixed(6)}, GasCostUSD: ${gasCostUSD.toFixed(6)}, DynamicThreshold: ${dynamicProfitThreshold.toFixed(6)}`);
-
-    return profit;
+    console.log('Telegram message sent:', response.data);
+  } catch (error) {
+    console.error('Failed to send Telegram message:', error.message);
+  }
 }
 
 // Error Handling and Notifications
@@ -880,47 +491,15 @@ async function sendTelegramMessage(message) {
       text: message,
     });
     console.log('Telegram message sent:', response.data);
+     console.log("✅ Telegram Message Sent!");
   } catch (error) {
     console.error('Failed to send Telegram message:', error.message);
   }
 }
 
-// Endpoint to receive profitable routes
-app.post('/notify-routes', async (req, res) => {
-    const { routes } = req.body;
-
-    if (!routes || routes.length === 0) {
-        return res.status(400).json({ message: "No routes provided." });
-    }
-
-    // Format the message for Telegram
-    const message = routes
-        .map((route, index) => {
-            return `Route ${index + 1}:\nPath: ${route.path.join(' ➡️ ')}\nProfit: ${(parseFloat(route.profit) / 1e18).toFixed(2)} USDC`;
-        })
-        .join('\n\n');
-
-    // Send the formatted message to Telegram
-    try {
-        await sendTelegramMessage(`Profitable Routes Found:\n\n${message}`);
-        console.log("Notification sent to Telegram.");
-        res.status(200).json({ message: "Notification sent successfully." });
-    } catch (error) {
-        console.error("Failed to send Telegram notification:", error.message);
-        res.status(500).json({ message: "Failed to send Telegram notification." });
-    }
-});
-
-// Start the Express server
-const PORT = process.env.PORT1 || 8080;
-app.listen(PORT, () => {
-    console.log(`Node.js server listening on port ${PORT}`);
-});
-
 async function handleCriticalError(error, context = '') {
   log(`Critical Error: ${error.message} ${context}`, 'error');
   addErrorToSummary(error, context);
-
   // Send immediate Telegram notification for unique errors
   const errorKey = `${error.message} | Context: ${context}`;
   if (!errorSummary.has(errorKey)) {
@@ -944,6 +523,8 @@ async function sendErrorSummary() {
 
 // Approving tokens using Permit2
 async function generatePermitSignature(token, spender, amount, deadline) {
+    const nonce = await permit2Contract.methods.nonces(wallet.address).call(); // ✅ Fetch nonce
+
     const domain = {
         name: "Permit2",
         version: "1",
@@ -953,7 +534,7 @@ async function generatePermitSignature(token, spender, amount, deadline) {
 
     const permitData = {
         permitted: { token, amount },
-        nonce: nonce, // Replace with actual nonce fetched from Permit2
+        nonce,
         deadline
     };
 
@@ -969,6 +550,7 @@ async function generatePermitSignature(token, spender, amount, deadline) {
     console.log("Signature:", signature);
     return { signature, permitData };
 }
+
 
 // Transferring tokens using Permit2
 async function executePermitTransferFrom(token, recipient, amount, signature) {
@@ -987,310 +569,205 @@ async function executePermitTransferFrom(token, recipient, amount, signature) {
     console.log("Transaction Confirmed!");
 }
 
-
 // Circuit-Breaker Logic
-function checkCircuitBreaker() {
+async function checkCircuitBreaker() {
   if (consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     log('Circuit breaker activated. Halting operations temporarily.', 'error');
     sendTelegramMessage('*Circuit Breaker Activated*: Too many consecutive failures.', true);
-    throw new Error('Circuit breaker activated');
+
+    // Wait 5 minutes before retrying
+    await new Promise((resolve) => setTimeout(resolve, 300000));
+    
+    consecutiveFailures = 0; // Reset failure count
   }
 }
 
-async function gatherMarketData() {
-    try {
-        console.log("[INFO] Starting market data gathering...");
-
-        // Validate HARDCODED_STABLE_ADDRESSES
-        if (!HARDCODED_STABLE_ADDRESSES || HARDCODED_STABLE_ADDRESSES.length === 0) {
-            throw new Error("HARDCODED_STABLE_ADDRESSES is not defined or empty.");
+// 🚀 Fetch Swap Quote (Using the Exact 1inch API Format)
+// ✅ Fetch Swap Quote with Rate-Limiting & Null Handling
+async function fetchSwapQuote(chain, fromToken, toToken, amount) {
+    const url = `${API_BASE_URL1}/${chain}/quote`;
+    const config = {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        params: {
+            src: fromToken,
+            dst: toToken,
+            amount,
+            complexityLevel: 2,
+            parts: 50,
+            mainRouteParts: 10,
+            includeTokensInfo: false,
+            includeProtocols: true,
+            includeGas: true,
         }
+    };
 
-        // Fetch and validate token decimals
-        const TOKEN_DECIMALS = {};
-        for (const token of HARDCODED_STABLE_ADDRESSES) {
-            try {
-                TOKEN_DECIMALS[token.toLowerCase()] = await getTokenDecimals(token);
-                console.log(`[DEBUG] Fetched decimals for ${token}: ${TOKEN_DECIMALS[token.toLowerCase()]}`);
-            } catch (error) {
-                console.error(`[ERROR] Failed to fetch decimals for ${token}:`, error.message);
-                throw error; // Critical error, stop execution
+    return await rateLimitedRequest(async () => {
+        try {
+            const response = await axios.get(url, config);
+            if (!response.data || !response.data.dstAmount) {
+                console.warn(`⚠️ Warning: Received invalid swap quote response for ${fromToken} -> ${toToken}`);
+                return null;
             }
+            return response.data.dstAmount;
+        } catch (error) {
+            console.error(`❌ Error fetching swap quote for ${fromToken} -> ${toToken}:`, error.message);
+            return null;
         }
+    });
+}
 
-        // Fetch and validate token prices
-        const tokenPrices = await fetchTokenPrices(HARDCODED_STABLE_ADDRESSES);
-        for (const [token, price] of Object.entries(tokenPrices)) {
-            if (typeof price !== "number" || price <= 0) {
-                throw new Error(`Invalid token price for ${token}: ${price}`);
-            }
-        }
-        console.log("[INFO] Token decimals and prices fetched successfully.");
+// 🚀 Detect Arbitrage Opportunities
+async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
+    let opportunities = [];
 
-        // Historical profits for dynamic threshold
-        let historicalProfits = await redisClient.lRange("profitHistory", 0, -1).catch(() => []);
-        if (!historicalProfits || historicalProfits.length === 0) {
-            console.log("[INFO] No historical profits found. Initializing defaults.");
-            historicalProfits = [10, 20, 50, 100, 150, 200, 300, 400, 500];
-        } else {
-            historicalProfits = historicalProfits.map(Number);
-        }
+    for (let token in TOKENS.POLYGON) {
+        let arbPrice = arbitrumPrices[TOKENS.ARBITRUM[token]];
+        let polyPrice = polygonPrices[TOKENS.POLYGON[token]];
+        if (!arbPrice || !polyPrice) continue; // Skip if price data is missing
 
-        const dynamicProfitThreshold = calculateDynamicProfitThreshold(historicalProfits);
-        console.log(`[INFO] Calculated dynamic profit threshold: ${dynamicProfitThreshold}`);
-
-        const usdAmount = 100000; // $100,000 as the base trading amount
-        const liquidityData = [];
-        let totalGas = 0;
-        let gasCount = 0;
-
-        // Fetch, process, and filter liquidity for each pair one at a time
-        for (const baseToken of HARDCODED_STABLE_ADDRESSES) {
-            const baseAmount = await getAmountInBaseToken(baseToken, usdAmount, tokenPrices);
-
-            for (const targetToken of HARDCODED_STABLE_ADDRESSES) {
-                if (baseToken.toLowerCase() === targetToken.toLowerCase()) continue;
-
+        // 🔹 Case 1: Buy on Polygon, Sell on Arbitrum
+        if (arbPrice > polyPrice) {
+            let profit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
+            if (profit >= PROFIT_THRESHOLD) {
                 try {
-                    console.log(`[INFO] Fetching liquidity for ${baseToken} -> ${targetToken}...`);
+                    let buyAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON.USDC, TOKENS.POLYGON[token], TRADE_SIZE_USDC);
+                    let sellAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM[token], TOKENS.ARBITRUM.USDC, buyAmount);
+                    if (sellAmount > TRADE_SIZE_USDC) { // Ensure profitable after swap fees
+                        const trade = {
+                            token, 
+                            buyOn: "Polygon", 
+                            sellOn: "Arbitrum", 
+                            profit, 
+                            buyAmount, 
+                            sellAmount 
+                        };
 
-                    // Fetch raw liquidity data for the pair
-                    const rawQuotes = await fetchLiquidityForAllPairs(baseToken, baseAmount);
-
-                    // Process, filter, and normalize quotes
-                    const processedQuotes = rawQuotes
-                        .map((quote) => ({
-                            ...quote,
-                            dstAmount: convertToUsdEquivalent(
-                                quote.dstAmount,
-                                targetToken,
-                                tokenPrices
-                            ),
-                        }))
-                        .filter((quote) => quote.dstAmount >= dynamicProfitThreshold);
-
-                    // Accumulate gas data
-                    const gasPrices = rawQuotes.map((quote) => quote.gas);
-                    totalGas += gasPrices.reduce((sum, gas) => sum + gas, 0);
-                    gasCount += gasPrices.length;
-
-                    // Add processed quotes to the final liquidity data
-                    liquidityData.push(...processedQuotes);
-
-                    console.log(`[INFO] Processed ${processedQuotes.length} valid quotes for ${baseToken} -> ${targetToken}`);
+                        opportunities.push(trade);
+                        
+                        // 🔹 Send Telegram Notification on Arbitrage Found
+                        await sendTelegramTradeAlert({
+                            title: "📢 Arbitrage Opportunity Found",
+                            message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
+                            🏦 Expected Profit: $${profit}
+                            🛒 Buy Amount: ${buyAmount} ${token} 
+                            💵 Sell Amount: ${sellAmount} USDC`
+                        });
+                    }
                 } catch (error) {
-                    console.error(
-                        `[ERROR] Failed to process liquidity for ${baseToken} -> ${targetToken}:`,
-                        error.message
-                    );
+                    console.error(`❌ Error fetching swap quote for ${token} (Polygon -> Arbitrum):`, error);
                 }
             }
         }
 
-        const averageGasPrice = gasCount > 0 ? totalGas / gasCount : 0;
+        // 🔹 Case 2: Buy on Arbitrum, Sell on Polygon
+        if (polyPrice > arbPrice) {
+            let profit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
+            if (profit >= PROFIT_THRESHOLD) {
+                try {
+                    let buyAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM.USDC, TOKENS.ARBITRUM[token], TRADE_SIZE_USDC);
+                    let sellAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON[token], TOKENS.POLYGON.USDC, buyAmount);
+                    if (sellAmount > TRADE_SIZE_USDC) { // Ensure profitable after swap fees
+                        const trade = {
+                            token, 
+                            buyOn: "Arbitrum", 
+                            sellOn: "Polygon", 
+                            profit, 
+                            buyAmount, 
+                            sellAmount 
+                        };
 
-        // Prepare the payload
-        const payload = {
-            chainId: CHAIN_ID,
-            startToken: HARDCODED_STABLE_ADDRESSES[0],
-            startAmount: new BigNumber(usdAmount)
-                .shiftedBy(TOKEN_DECIMALS[HARDCODED_STABLE_ADDRESSES[0].toLowerCase()])
-                .toFixed(0),
-            maxHops: MAX_HOPS,
-            profitThreshold: new BigNumber(dynamicProfitThreshold).toFixed(6),
-            tokenPrices,
-            liquidity: liquidityData,
-            gasPrice: averageGasPrice.toFixed(0),
-        };
+                        opportunities.push(trade);
 
-        console.log("[INFO] Sending market data payload to Go script:", JSON.stringify(payload, null, 2));
-        await sendMarketDataToGo(payload);
-
-        console.log("[INFO] Market data gathering and processing completed successfully.");
-    } catch (error) {
-        console.error("[ERROR] gatherMarketData failed:", error.message);
-        addErrorToSummary(error, "gatherMarketData");
+                        // 🔹 Send Telegram Notification on Arbitrage Found
+                        await sendTelegramTradeAlert({
+                            title: "📢 Arbitrage Opportunity Found",
+                            message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
+                            🏦 Expected Profit: $${profit}
+                            🛒 Buy Amount: ${buyAmount} ${token} 
+                            💵 Sell Amount: ${sellAmount} USDC`
+                        });
+                    }
+                } catch (error) {
+                    console.error(`❌ Error fetching swap quote for ${token} (Arbitrum -> Polygon):`, error);
+                }
+            }
+        }
     }
+
+    return opportunities.sort((a, b) => b.profit - a.profit);
 }
 
+// 🔹 Execute Arbitrage Trade via Smart Contracts
+async function executeSwap(trade) {
+    const { token, buyOn, sellOn, buyAmount, sellAmount } = trade;
 
-async function sendMarketDataToGo(marketData) {
-  try {
-    console.log("Sending market data to Go backend...");
-    console.log("Market data payload:", JSON.stringify(marketData, null, 2));
+    console.log(`⚡ Executing Arbitrage Trade ⚡`);
+    console.log(`BUY on ${buyOn}: ${buyAmount} of ${token}`);
+    console.log(`SELL on ${sellOn}: ${sellAmount} of ${token}`);
 
-    const response = await axios({
-      method: "POST",
-      url: `${process.env.GO_BACKEND_URL}/process-market-data`,
-      headers: { "Content-Type": "application/json" },
-      data: marketData, // Pass the data payload
+    // 🔹 Send Telegram Notification before Execution
+    await sendTelegramTradeAlert({
+        title: "🚀 Executing Arbitrage Trade",
+        message: `🔹 Buy on ${buyOn}: ${buyAmount} of ${token}
+        🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
-    console.log("Response from Go backend:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Error sending market data to Go backend:", error.message);
+    // 🔹 Dynamically Select the Correct Contract
+    const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
+    const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
-    if (error.response) {
-      console.error("Response status:", error.response.status);
-      console.error("Response data:", error.response.data);
-    }
-
-    throw error;
-  }
-}
-
-
-async function retryRequest3(requestFn, retries = 3, delay = 1000) {
-  let attempts = 0;
-
-  while (attempts < retries) {
     try {
-      return await requestFn();
+        // 🔹 1️⃣ Execute Buy on First Chain (Flash Loan + Swap)
+        console.log(`🔹 Requesting flash loan & executing buy on ${buyOn}...`);
+        const buyTx = await buyContract.executeFlashLoanAndSwap(
+            TOKENS[buyOn].USDC, 
+            TOKENS[buyOn][token], 
+            buyAmount
+        );
+        await buyTx.wait();
+        console.log(`✅ Buy Transaction Confirmed on ${buyOn}`);
+
+        // 🔹 2️⃣ Execute Sell on Second Chain (Swap + Repay Flash Loan)
+        console.log(`🔹 Selling & repaying loan on ${sellOn}...`);
+        const sellTx = await sellContract.executeSwapAndRepay(
+            TOKENS[sellOn][token], 
+            TOKENS[sellOn].USDC, 
+            sellAmount
+        );
+        await sellTx.wait();
+        console.log(`✅ Sell Transaction Confirmed on ${sellOn}`);
+
+        // 🔹 3️⃣ Execute Fusion+ Swap for Loan Repayment
+        try {
+            console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
+            await executeFusionSwap(TOKENS[sellOn].USDC, TOKENS[buyOn].USDC, sellAmount);
+        } catch (error) {
+            console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
+            await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
+        }
+
+        // 🔹 Send Telegram Notification on Successful Trade
+        await sendTelegramTradeAlert({
+            title: "✅ Arbitrage Trade Completed!",
+            message: `🏆 Successfully completed arbitrage trade!
+            ✅ Bought ${buyAmount} of ${token} on ${buyOn}
+            ✅ Sold ${sellAmount} of ${token} on ${sellOn}
+            💰 Profit: $${trade.profit}`
+        });
+
+        console.log("🎉 Arbitrage Trade Completed Successfully!");
+
     } catch (error) {
-      attempts++;
-
-      if (attempts >= retries) {
-        console.error(`Failed after ${retries} attempts:`, error.message);
-        if (error.response) {
-          console.error("Error response data:", error.response.data);
-        }
-        throw error;
-      }
-
-      console.warn(`Retrying request (${attempts}/${retries}) due to error: ${error.message}`);
-      await new Promise((resolve) => setTimeout(resolve, delay * attempts)); // Exponential backoff
+        console.error(`❌ Error executing arbitrage trade:`, error);
+        
+        // 🔹 Send Telegram Notification on Failure
+        await sendTelegramTradeAlert({
+            title: "❌ Arbitrage Trade Failed!",
+            message: `🚨 An error occurred during execution:
+            ❌ ${error.message}`
+        });
     }
-  }
 }
-
-
-// Integration with Go Backend
-async function executeRoute(route, amount) {
-  try {
-    log(`Executing route: ${route.join(' ➡️ ')} with amount: ${amount.toFixed()}`);
-    const response = await retryRequest(() =>
-      axios.post(`${process.env.GO_BACKEND_URL}/execute`, { route, amount: amount.toFixed() })
-    );
-    if (response.status !== 200) {
-      throw new Error(`Execution failed with status: ${response.status}`);
-    }
-    consecutiveFailures = 0; // Reset failures
-  } catch (err) {
-    consecutiveFailures++;
-    checkCircuitBreaker();
-    await handleCriticalError(err, `Route: ${route.join(' ➡️ ')}`);
-  }
-}
-
-// Main function
-async function processMarketData() {
-  try {
-     await gatherMarketData();
-  } catch (error) {
-    console.error("Error in processing market data:", error.message);
-    await sendTelegramMessage(`❌ Error in market data processing: ${error.message}`, true);
-  }
-}
-
-async function fetchLiquidityForAllPairs(baseToken, amount) {
-  try {
-    const liquidityData = await Promise.all(
-      HARDCODED_STABLE_ADDRESSES.map(async (targetToken) => {
-        if (targetToken !== baseToken) {
-          const data = await fetchLiquidityData(baseToken, targetToken, amount);
-          return {
-            fromToken: baseToken,
-            toToken: targetToken,
-            liquidity: data, // Replace with actual liquidity values
-          };
-        }
-        return null;
-      })
-    );
-
-    return liquidityData.filter((entry) => entry !== null);
-  } catch (error) {
-    log(`Error fetching liquidity data: ${error.message}`, 'error');
-    throw error;
-  }
-}
-
-// Mempool Monitoring and Live Data Retrieval
-async function monitorMempool(targetContracts) {
-  const web3 = new Web3(process.env.INFURA_WS_URL);
-
-  console.log('Starting block polling...');
-
-  web3.eth.subscribe('newBlockHeaders', async (error, blockHeader) => {
-    if (error) {
-      console.error(`Error subscribing to newBlockHeaders: ${error.message}`);
-      addErrorToSummary(error, 'Block Subscription');
-      return;
-    }
-
-    console.log(`New block received: ${blockHeader.number}`);
-
-    try {
-      // Fetch full block details
-      const block = await web3.eth.getBlock(blockHeader.number, true);
-
-      for (const tx of block.transactions) {
-        if (tx.to && targetContracts.includes(tx.to.toLowerCase())) {
-          console.log(`Transaction detected targeting monitored contract: ${tx.hash}`);
-
-          // Implement token extraction logic
-          const detectedTokens = extractTokensFromTransaction(tx);
-
-          // Filter tokens to relevant stable addresses
-          const relevantTokens = detectedTokens.filter((token) =>
-            HARDCODED_STABLE_ADDRESSES.includes(token.toLowerCase())
-          );
-
-          if (relevantTokens.length > 0) {
-            console.log(`Relevant tokens detected: ${relevantTokens.join(', ')}`);
-
-            // Fetch token prices
-            const tokenPrices = await fetchTokenPrices(relevantTokens);
-            console.log(`Fetched token prices: ${JSON.stringify(tokenPrices)}`);
-
-            // Call backend to evaluate transaction profitability
-            const response = await retryRequest(() =>
-              axios.post(`${process.env.INFURA_WS_URL}/evaluate`, { txHash: tx.hash, tokenPrices })
-            );
-
-            if (response.status === 200 && response.data.profit > 0) {
-              console.log(`Profitable transaction detected: ${tx.hash}`);
-              await executeRoute(response.data.route, response.data.amount);
-              await sendTelegramMessage(
-                `🚀 Profitable transaction executed from block polling!\nProfit: ${response.data.profit} USDT`
-              );
-            } else {
-              console.log(`Unprofitable transaction detected: ${tx.hash}`);
-            }
-          } else {
-            console.log(`No relevant tokens detected in transaction: ${tx.hash}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error(`Error processing block ${blockHeader.number}: ${err.message}`);
-      addErrorToSummary(err, `Block ${blockHeader.number}`);
-    }
-  });
-
-  // Handle WebSocket reconnections
-  web3.currentProvider.on('close', () => {
-    console.warn('WebSocket connection closed. Reconnecting...');
-    setTimeout(() => monitorMempool(targetContracts), 5000);
-  });
-
-  web3.currentProvider.on('error', (err) => {
-    console.error(`WebSocket error: ${err.message}`);
-    addErrorToSummary(err, 'WebSocket Error');
-  });
-}
-
 
 async function notifyMonitoringSystem(message) {
   const monitoringServiceUrl = process.env.MONITORING_SERVICE_URL;
@@ -1348,36 +825,82 @@ async function notifyMonitoringSystem(message) {
   }
 }
 
-// Main Function
-async function runArbitrageBot() {
-  log('Starting arbitrage bot...', 'info');
-
-  // Periodic market data processing
-  setInterval(async () => {
-    log('Running periodic market data processing...', 'info');
-    try {
-      await processMarketData();
-      log('Market data processed successfully.', 'info');
-    } catch (err) {
-      log(`Error in processing market data: ${err.message}`, 'error');
-      await handleCriticalError(err, 'Market Data Processing');
+// 🚀 Execute Arbitrage Trade
+async function executeArbitrage() {
+    console.log("🔍 Fetching latest prices...");
+    const prices = await fetchPricesForBothChains();
+    if (!prices) {
+        console.log("❌ Failed to fetch prices. Exiting...");
+        return;
     }
-  }, MARKET_DATA_INTERVAL_MS);
 
-  // Health check for Go backend
-  // cron.schedule('* * * * *', async () => {
-  //   try {
-  //     const response = await axios.get(`${GO_BACKEND_URL}/health`);
-  //     if (response.status !== 200) {
-  //       throw new Error('Go backend health check failed');
-  //     }
-  //     log('Go backend is healthy.', 'info');
-  //   } catch (err) {
-  //     log('Health check failed. Attempting recovery...', 'error');
-  //     await handleCriticalError(err, 'Health Check');
-  //   }
-  // });
+    console.log("🔍 Detecting arbitrage opportunities...");
+    const opportunities = await detectArbitrageOpportunities(prices.ARBITRUM, prices.POLYGON);
+    if (opportunities.length === 0) {
+        console.log("⚠️ No profitable arbitrage opportunities found.");
+        return;
+    }
+
+    // Select the most profitable trade
+    const bestTrade = opportunities[0];
+
+    console.log(`🚀 Executing arbitrage trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
+    await sendTelegramTradeAlert(bestTrade);
+
+    try {
+        // 🔹 Define provider & wallet for both networks
+        const providerBuy = new ethers.providers.JsonRpcProvider(
+            bestTrade.buyOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
+        );
+        const providerSell = new ethers.providers.JsonRpcProvider(
+            bestTrade.sellOn === "Polygon" ? process.env.POLYGON_RPC : process.env.ARBITRUM_RPC
+        );
+
+        const walletBuy = new ethers.Wallet(process.env.PRIVATE_KEY, providerBuy);
+        const walletSell = new ethers.Wallet(process.env.PRIVATE_KEY, providerSell);
+
+        // 🔹 Execute Buy Transaction (Flash Loan + Swap)
+        console.log(`🔹 Requesting flash loan & executing buy on ${bestTrade.buyOn}...`);
+        await executeSwap(
+            bestTrade.buyOn === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
+            TOKENS[bestTrade.buyOn].USDC,
+            TOKENS[bestTrade.buyOn][bestTrade.token],
+            bestTrade.buyAmount,
+            walletBuy
+        );
+        console.log(`✅ Buy executed successfully on ${bestTrade.buyOn}`);
+
+        // 🔹 Execute Sell Transaction (Swap & Repay Loan)
+        console.log(`🔹 Selling & repaying loan on ${bestTrade.sellOn}...`);
+        await executeSwap(
+            bestTrade.sellOn === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
+            TOKENS[bestTrade.sellOn][bestTrade.token],
+            TOKENS[bestTrade.sellOn].USDC,
+            bestTrade.sellAmount,
+            walletSell
+        );
+        console.log(`✅ Sell executed successfully on ${bestTrade.sellOn}`);
+
+        console.log("🎉 Arbitrage trade completed successfully!");
+
+        // 🔹 Execute Cross-Chain Swap for Flash Loan Repayment
+        try {
+            console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
+            await executeFusionSwap(
+                TOKENS[bestTrade.sellOn].USDC, 
+                TOKENS[bestTrade.buyOn].USDC, 
+                bestTrade.sellAmount
+            );
+            console.log(`✅ Fusion+ Swap for Loan Repayment executed successfully!`);
+        } catch (error) {
+            console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
+            await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
+        }
+
+    } catch (error) {
+        console.error("❌ Error executing arbitrage trade:", error);
+    }
 }
 
-// Start Bot
-runArbitrageBot();
+// 🚀 Start the Bot
+executeArbitrage();
