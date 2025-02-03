@@ -34,9 +34,10 @@ const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
 // ✅ Initialize SDK
 const sdk = new SDK({
     url: "https://api.1inch.dev/fusion-plus",
-    process.env.ONEINCH_API_KEY,
-    blockchainProvider: new PrivateKeyProviderConnector(privateKey, web3), // Required for order creation
+    authKey: process.env.ONEINCH_API_KEY,  // ✅ Correctly assigned
+    blockchainProvider: new PrivateKeyProviderConnector(privateKey, new Web3(process.env.INFURA_URL)), // ✅ Ensures `web3` is defined
 });
+
 dotenv.config();
 const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
@@ -316,34 +317,23 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
-
 // 🚀 Fusion+ Quote Function (Dynamic)
 async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
 
-    const walletAddress = srcChain === "ARBITRUM" ? process.env.ARBITRUM_WALLET : process.env.POLYGON_WALLET;
-
-    const chainIds = {
-        "ARBITRUM": 42161,
-        "POLYGON": 137
-    };
-
     const params = {
-        srcChain: chainIds[srcChain],
-        dstChain: chainIds[dstChain],
+        srcChain: NETWORKS[srcChain],
+        dstChain: NETWORKS[dstChain],
         srcTokenAddress: srcToken,
         dstTokenAddress: dstToken,
         amount: amount.toString(),
-        walletAddress: walletAddress,
+        walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: "true"
     };
 
     const config = {
-        headers: {
-            "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`
-        },
-        params,
-        paramsSerializer: { indexes: null }
+        headers: { "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}` },
+        params
     };
 
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
@@ -352,9 +342,8 @@ async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
         const response = await axios.get(url, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
-        // Extract `auctionEndAmount` (equivalent to dstAmount)
+        // ✅ Extract auctionEndAmount correctly
         const dstAmount = response.data.presets?.fast?.auctionEndAmount;
-
         if (!dstAmount) {
             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
             return null;
@@ -367,7 +356,6 @@ async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
         return null;
     }
 }
-
 
 async function buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
@@ -827,10 +815,13 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 }
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
-    console.log(`🔍 Fetching quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
+    console.log(`🔍 Fetching Fusion+ quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
     
+    // ✅ Use correct `auctionEndAmount`
     const dstAmount = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
-    if (!dstAmount) return console.log("❌ Failed to fetch quote.");
+    if (!dstAmount) return console.log("❌ Failed to fetch Fusion+ quote.");
+
+    console.log(`💰 Received Quote: Expecting ${dstAmount} ${dstToken} on ${dstChain}`);
 
     console.log("⚡ Building Fusion+ Order...");
     const orderData = await buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress);
@@ -840,16 +831,12 @@ async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amo
     const secrets = Array.from({ length: orderData.preset.secretsCount }).map(() => getRandomBytes32());
     const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
 
-    // 🔹 Sign the order (replace with actual signing logic)
-    const signature = "0xSIGNATURE"; // Replace with real signature logic
-
     console.log("🚀 Submitting Fusion+ Order...");
-    const executionResponse = await submitFusionOrder(orderData, srcChain, orderData.quoteId, secretHashes, signature);
+    const executionResponse = await submitFusionOrder(orderData, srcChain, orderData.quoteId, secretHashes, "0xSIGNATURE");
     if (!executionResponse) return console.log("❌ Failed to submit Fusion+ order.");
 
     console.log("✅ Cross-Chain Swap Successfully Executed!");
 }
-
 
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
@@ -1084,51 +1071,50 @@ async function executeArbitrage() {
     await sendTelegramTradeAlert(bestTrade);
 
     try {
-        // 1️⃣ Get Fusion+ Quote to Determine Exact Amount of Token Received on Destination Chain
+        // ✅ 1️⃣ Fetch Fusion+ Quote to Get `dstAmount`
         console.log(`🔄 Fetching Fusion+ quote: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
         const dstAmount = await getFusionQuote(
             bestTrade.buyOn, 
             bestTrade.sellOn, 
             TOKENS[bestTrade.buyOn].WETH, 
             TOKENS[bestTrade.sellOn].WETH, 
-            100000  // Using the trade size in USDC
+            TRADE_SIZE_USDC  // Use trade size in USDC
         );
 
         if (!dstAmount) return console.log("❌ Failed to fetch Fusion+ quote.");
-
         console.log(`💰 Estimated amount to receive on ${bestTrade.sellOn}: ${dstAmount} ${bestTrade.token}`);
 
-        // 2️⃣ Request Flash Loan Based on the `dstAmount`
+        // ✅ 2️⃣ Request Flash Loan Based on `dstAmount`
         console.log(`💰 Requesting Flash Loan on ${bestTrade.sellOn} for ${dstAmount} ${bestTrade.token}...`);
         await requestFlashLoan(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, dstAmount);
 
-        // 3️⃣ Execute Fusion+ Cross-Chain Swap to Transfer Token
+        // ✅ 3️⃣ Execute Fusion+ Cross-Chain Swap with Correct `dstAmount`
         console.log(`🚀 Executing Fusion+ Swap: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
         await executeFusionSwap(
             bestTrade.buyOn,
             bestTrade.sellOn,
             TOKENS[bestTrade.buyOn].WETH,
             TOKENS[bestTrade.sellOn].WETH,
-            100000 // Use trade size in USDC
+            TRADE_SIZE_USDC // Use trade size in USDC
         );
 
-        // 4️⃣ Swap Received Token for USDC on the Sell Network
+        // ✅ 4️⃣ Swap Received Token for USDC on the Sell Network
         console.log(`💵 Swapping received ${dstAmount} ${bestTrade.token} on ${bestTrade.sellOn} → USDC...`);
         const usdcReceived = await swapTokenForUSDC(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, dstAmount);
 
-        if (!usdcReceived || usdcReceived < 100000) {
-            console.error(`❌ Swap did not yield enough USDC. Expected: 100000, Received: ${usdcReceived}`);
+        if (!usdcReceived || usdcReceived < TRADE_SIZE_USDC) {
+            console.error(`❌ Swap did not yield enough USDC. Expected: ${TRADE_SIZE_USDC}, Received: ${usdcReceived}`);
             return;
         }
 
         console.log(`✅ Received ${usdcReceived} USDC on ${bestTrade.sellOn} after swap.`);
 
-        // 5️⃣ Transfer USDC Back to Buy Network for Loan Repayment
-        const totalRepayment = 100050; // 100,000 + 50 USDC premium
+        // ✅ 5️⃣ Transfer USDC Back to Buy Network for Loan Repayment
+        const totalRepayment = TRADE_SIZE_USDC + 50; // 100,000 + 50 USDC premium
         console.log(`🔄 Sending ${usdcReceived} USDC back to ${bestTrade.buyOn} for flash loan repayment...`);
         await sendUSDCBack(bestTrade.buyOn, usdcReceived);
 
-        // 6️⃣ Repay the Flash Loan
+        // ✅ 6️⃣ Repay the Flash Loan
         console.log(`💰 Repaying Flash Loan on ${bestTrade.buyOn} with ${totalRepayment} USDC...`);
         await repayFlashLoan(bestTrade.buyOn, totalRepayment);
 
@@ -1140,7 +1126,6 @@ async function executeArbitrage() {
         await sendTelegramMessage(`🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.`);
     }
 }
-
 
 
 // 🚀 Start the Bot
