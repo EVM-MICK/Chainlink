@@ -12,7 +12,7 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk/dist/esm/index.js";
+import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
 import fs from "fs";
 import path from "path";
 
