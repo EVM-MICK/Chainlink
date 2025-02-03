@@ -4,7 +4,7 @@
   "description": "An arbitrage bot finds profitable swap routes and executes flash loans.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.mjs"
+    "start": "node index.js"
   },
   "dependencies": {
     "dotenv": "^10.0.0",
