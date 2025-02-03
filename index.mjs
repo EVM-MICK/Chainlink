@@ -14,17 +14,26 @@ import { promisify } from "util";
 import pkg from "telegraf";
 import fs from "fs";
 import path from "path";
-import {
-    HashLock,
-    NetworkEnum,
-    OrderStatus,
-    PresetEnum,
-    PrivateKeyProviderConnector,
-    SDK
-} from "@1inch/cross-chain-sdk/dist/esm/index.js";  // Explicitly import ESM module
+// import {
+//     HashLock,
+//     NetworkEnum,
+//     OrderStatus,
+//     PresetEnum,
+//     PrivateKeyProviderConnector,
+//     SDK
+// } from "@1inch/cross-chain-sdk/dist/esm/index.js";  // Explicitly import ESM module
+import * as OneInchSDK from "@1inch/cross-chain-sdk";
 import { randomBytes } from "node:crypto";
 
 const privateKey = process.env.PRIVATE_KEY;
+const { 
+    HashLock, 
+    NetworkEnum, 
+    OrderStatus, 
+    PresetEnum, 
+    PrivateKeyProviderConnector, 
+    SDK 
+} = OneInchSDK;
 const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
 const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
