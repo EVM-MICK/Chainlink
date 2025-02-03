@@ -12,7 +12,7 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk/dist/esm/index.js";
 import fs from "fs";
 import path from "path";
 
@@ -474,30 +474,27 @@ async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🔄 Destination Chain: ${trade.sellOn} (${dstChain})`);
 
     // 🔹 Fetch Fusion+ Quote
-    const quote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
-    if (!quote) {
+    const quoteResponse = await fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    if (!quoteResponse) {
         console.error("❌ Failed to fetch Fusion+ quote.");
         return;
     }
 
-    // 🔹 Prepare Hash Lock for Fusion+ security
-    const secretsCount = quote.getPreset().secretsCount;
-    const secrets = Array.from({ length: secretsCount }).map(() => getRandomBytes32());
-    const secretHashes = secrets.map((x) => HashLock.hashSecret(x));
-
-    const hashLock = secretsCount === 1
-        ? HashLock.forSingleFill(secrets[0])
-        : HashLock.forMultipleFills(secretHashes);
+    console.log(`📡 Received Fusion+ Quote: ${JSON.stringify(quoteResponse)}`);
 
     try {
-        // 🔹 Place Fusion+ Order
-        const order = await sdk.placeOrder(quote, {
-            walletAddress: process.env.WALLET_ADDRESS,
-            hashLock,
-            secretHashes,
-        });
+        // 🔹 Execute Cross-Chain Swap using Fusion+
+        console.log(`🚀 Executing Cross-Chain Swap...`);
+        await executeCrossChainSwap(
+            srcChain, 
+            dstChain, 
+            srcToken, 
+            dstToken, 
+            amount, 
+            process.env.WALLET_ADDRESS
+        );
 
-        console.log(`✅ Fusion+ Swap Executed: Order ID - ${order.id}`);
+        console.log(`✅ Fusion+ Cross-Chain Swap Successfully Executed!`);
 
         // 🔹 Send Telegram Notification
         await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
@@ -509,6 +506,7 @@ async function executeFusionSwap(trade, srcToken, dstToken, amount) {
         await sendTelegramMessage(`🚨 **Error:** Fusion+ Swap Failed!\nTrade: ${trade.buyOn} → ${trade.sellOn}`);
     }
 }
+
 
 // Listen for SwapExecuted Event
 contract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
@@ -994,10 +992,12 @@ async function fetchInitialSwapQuote(chain, usdcAmount) {
     return parseFloat(quote);
 }
 
-async function repayFlashLoan(chain, amount) {
-    console.log(`💰 Repaying Flash Loan on ${chain} with ${amount} USDC`);
-    await executeLoanRepayment(chain, amount);
+async function repayFlashLoan(chain, loanAmount, premium) {
+    const totalRepayment = loanAmount + premium;
+    console.log(`💰 Repaying Flash Loan on ${chain} with ${totalRepayment} USDC...`);
+    await executeLoanRepayment(chain, totalRepayment);
 }
+
 
 async function sendUSDCBack(chain, amount) {
     const minRequired = 100050; // Minimum repayment required
@@ -1028,16 +1028,42 @@ async function requestFlashLoan(targetChain, token, amount) {
     );
 }
 
-
 async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     const fusionQuote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
     if (!fusionQuote) {
         console.error("❌ Failed to fetch Fusion+ quote");
         return null;
     }
-    const receivedAmount = parseFloat(fusionQuote.dstAmount) * 0.99; // Apply 1% slippage tolerance
-    return receivedAmount;
+
+    // Use different slippage based on volatility
+    const slippage = fusionQuote.volatile ? 0.98 : 0.99;
+
+    return {
+        receivedAmount: parseFloat(fusionQuote.dstAmount) * slippage,
+        quoteData: fusionQuote
+    };
 }
+
+async function signFusionOrder(orderData) {
+    const domain = {
+        name: "Fusion+",
+        version: "1",
+        chainId: orderData.srcChainId,
+        verifyingContract: "0x1InchFusionContractAddress"
+    };
+
+    const types = {
+        Order: [
+            { name: "makerAsset", type: "address" },
+            { name: "takerAsset", type: "address" },
+            { name: "makingAmount", type: "uint256" },
+            { name: "takingAmount", type: "uint256" }
+        ]
+    };
+
+    return await wallet._signTypedData(domain, types, orderData);
+}
+
 
 
 // 🚀 Execute Arbitrage Trade
