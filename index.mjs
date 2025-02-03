@@ -12,7 +12,7 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import { getRandomBytes32, HashLock, SDK, NetworkEnum } from "@1inch/cross-chain-sdk";
+import pkg from "@1inch/cross-chain-sdk";
 import fs from "fs";
 import path from "path";
 
@@ -21,19 +21,17 @@ const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
 const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
 const POLYGON_ABI = JSON.parse(fs.readFileSync(polygonAbiPath, "utf8"));
 const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
-
-
 const sdk = new SDK({
   url: "https://api.1inch.dev/fusion-plus",
   authKey: process.env.ONEINCH_API_KEY,
 });
-
 dotenv.config();
 const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
 const ERC20_ABI = [
     "function decimals() view returns (uint8)"
 ];
+const { getRandomBytes32, HashLock, SDK, NetworkEnum } = pkg;
 // Define contract addresses
 const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
