@@ -1,5 +1,5 @@
 {
-  "type": "module",
+  "type": "commonjs",
   "name": "arbitrage-bot",
   "description": "An arbitrage bot finds profitable swap routes and executes flash loans.",
   "main": "index.js",
