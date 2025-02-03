@@ -12,7 +12,7 @@ import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
 import cron from "node-cron";
 import { promisify } from "util";
 import pkg from "telegraf";
-import pkg from "@1inch/cross-chain-sdk";
+import inchSdkPkg from "@1inch/cross-chain-sdk";
 import fs from "fs";
 import path from "path";
 
@@ -31,7 +31,7 @@ const INFURA_URL = process.env.INFURA_URL;
 const ERC20_ABI = [
     "function decimals() view returns (uint8)"
 ];
-const { getRandomBytes32, HashLock, SDK, NetworkEnum } = pkg;
+const { getRandomBytes32, HashLock, SDK, NetworkEnum } = inchSdkPkg;
 // Define contract addresses
 const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
