@@ -15,14 +15,15 @@ import pkg from "telegraf";
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "node:crypto";
-import {  
+import { 
+   SDK, 
     HashLock,  
     NetworkEnum,  
     OrderStatus,  
     PresetEnum,  
-    PrivateKeyProviderConnector,  
-    SDK  
-} from '@1inch/cross-chain-sdk'
+    PrivateKeyProviderConnector,
+    QuoteParams
+} from "@1inch/cross-chain-sdk";
 
 const privateKey = process.env.PRIVATE_KEY;
 const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
