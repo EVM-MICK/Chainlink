@@ -14,15 +14,28 @@ import { promisify } from "util";
 import pkg from "telegraf";
 import fs from "fs";
 import path from "path";
-const { getRandomBytes32, HashLock, SDK, NetworkEnum } = await import("@1inch/cross-chain-sdk");
+import {
+    HashLock,
+    NetworkEnum,
+    OrderStatus,
+    PresetEnum,
+    PrivateKeyProviderConnector,
+    SDK
+} from "@1inch/cross-chain-sdk/dist/esm/index.js";  // Explicitly import ESM module
+import { randomBytes } from "node:crypto";
+
+const privateKey = process.env.PRIVATE_KEY;
 const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
 const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
 const POLYGON_ABI = JSON.parse(fs.readFileSync(polygonAbiPath, "utf8"));
 const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
+
+// ✅ Initialize SDK
 const sdk = new SDK({
-  url: "https://api.1inch.dev/fusion-plus",
-  authKey: process.env.ONEINCH_API_KEY,
+    url: "https://api.1inch.dev/fusion-plus",
+    process.env.ONEINCH_API_KEY,
+    blockchainProvider: new PrivateKeyProviderConnector(privateKey, web3), // Required for order creation
 });
 dotenv.config();
 const { Telegraf } = pkg;
@@ -161,21 +174,17 @@ const NETWORKS = {
  const TOKENS = {
     POLYGON: {
         USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-        USDT: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-        DAI: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
         WETH: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
         WBTC: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
     },
     ARBITRUM: {
         USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-        USDT: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-        DAI: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
         WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
         WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
     }
 };
 
-const PROFIT_THRESHOLD = 300; // Minimum $500 profit per trade
+const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
 const TRADE_SIZE_USDC = 100000; // $100,000 per trade
 
 // Initialize Permit2 contract instance
@@ -312,10 +321,8 @@ axios.interceptors.request.use((config) => {
 async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
 
-    // 🔹 Get Correct Wallet for Source Chain
     const walletAddress = srcChain === "ARBITRUM" ? process.env.ARBITRUM_WALLET : process.env.POLYGON_WALLET;
 
-    // 🔹 Convert Network Names to Chain IDs
     const chainIds = {
         "ARBITRUM": 42161,
         "POLYGON": 137
@@ -345,22 +352,24 @@ async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
         const response = await axios.get(url, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
-        if (!response.data.dstAmount) {
-            console.warn(`⚠️ Warning: Fusion+ API returned an unexpected response.`);
+        // Extract `auctionEndAmount` (equivalent to dstAmount)
+        const dstAmount = response.data.presets?.fast?.auctionEndAmount;
+
+        if (!dstAmount) {
+            console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
             return null;
         }
 
-        // 🔹 Apply 1% Slippage Tolerance
-        const receivedAmount = parseFloat(response.data.dstAmount) * 0.99;
-
-        return receivedAmount;
+        console.log(`🔹 Estimated Received Amount on ${dstChain}: ${dstAmount}`);
+        return dstAmount;
     } catch (error) {
         console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
         return null;
     }
 }
 
-async function buildFusionOrder(quoteResponse, srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
+
+async function buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
 
     const config = {
@@ -375,10 +384,10 @@ async function buildFusionOrder(quoteResponse, srcChain, dstChain, srcToken, dst
         "dstChain": dstChain,
         "srcTokenAddress": srcToken,
         "dstTokenAddress": dstToken,
-        "amount": amount.toString(),
+        "amount": dstAmount.toString(),  // Use retrieved dstAmount
         "walletAddress": walletAddress,
-        "fee": 0,  // Custom fee (e.g., 100 bps = 1%)
-        "preset": "fast", // Options: "fast", "medium", "slow", "custom"
+        "fee": 0,
+        "preset": "fast",
         "source": "BackendBot",
         "isPermit2": false,
         "permit": null,
@@ -423,8 +432,6 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
         return null;
     }
 }
-
-
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
 async function fetchTokenPrices(network, tokens) {
@@ -751,30 +758,28 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
         let polyPrice = polygonPrices[TOKENS.POLYGON[token]];
         if (!arbPrice || !polyPrice) continue; // Skip if price data is missing
 
-        // 🔹 Case 1: Buy on Polygon, Sell on Arbitrum
+        // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
         if (arbPrice > polyPrice) {
-            let profit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
-            if (profit >= PROFIT_THRESHOLD) {
+            let estimatedProfit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
+            
+            if (estimatedProfit >= PROFIT_THRESHOLD) {
                 try {
+                    console.log(`🔄 Fetching swap quote: Buy on Polygon → Sell on Arbitrum...`);
+                    
                     let buyAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON.USDC, TOKENS.POLYGON[token], TRADE_SIZE_USDC);
-                    let sellAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM[token], TOKENS.ARBITRUM.USDC, buyAmount);
-                    if (sellAmount > TRADE_SIZE_USDC) { // Ensure profitable after swap fees
-                        const trade = {
-                            token, 
-                            buyOn: "Polygon", 
-                            sellOn: "Arbitrum", 
-                            profit, 
-                            buyAmount, 
-                            sellAmount 
-                        };
+                    if (!buyAmount) continue; // Skip if quote fails
 
-                        opportunities.push(trade);
-                        
-                        // 🔹 Send Telegram Notification on Arbitrage Found
+                    let sellAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM[token], TOKENS.ARBITRUM.USDC, buyAmount);
+                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
+
+                    let actualProfit = sellAmount - TRADE_SIZE_USDC;
+                    if (actualProfit >= PROFIT_THRESHOLD) {
+                        opportunities.push({ token, buyOn: "Polygon", sellOn: "Arbitrum", profit: actualProfit, buyAmount, sellAmount });
+
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
                             message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
-                            🏦 Expected Profit: $${profit}
+                            🏦 Expected Profit: $${actualProfit}
                             🛒 Buy Amount: ${buyAmount} ${token} 
                             💵 Sell Amount: ${sellAmount} USDC`
                         });
@@ -785,30 +790,28 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
             }
         }
 
-        // 🔹 Case 2: Buy on Arbitrum, Sell on Polygon
+        // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
         if (polyPrice > arbPrice) {
-            let profit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
-            if (profit >= PROFIT_THRESHOLD) {
+            let estimatedProfit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
+            
+            if (estimatedProfit >= PROFIT_THRESHOLD) {
                 try {
+                    console.log(`🔄 Fetching swap quote: Buy on Arbitrum → Sell on Polygon...`);
+
                     let buyAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM.USDC, TOKENS.ARBITRUM[token], TRADE_SIZE_USDC);
+                    if (!buyAmount) continue; // Skip if quote fails
+
                     let sellAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON[token], TOKENS.POLYGON.USDC, buyAmount);
-                    if (sellAmount > TRADE_SIZE_USDC) { // Ensure profitable after swap fees
-                        const trade = {
-                            token, 
-                            buyOn: "Arbitrum", 
-                            sellOn: "Polygon", 
-                            profit, 
-                            buyAmount, 
-                            sellAmount 
-                        };
+                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
 
-                        opportunities.push(trade);
+                    let actualProfit = sellAmount - TRADE_SIZE_USDC;
+                    if (actualProfit >= PROFIT_THRESHOLD) {
+                        opportunities.push({ token, buyOn: "Arbitrum", sellOn: "Polygon", profit: actualProfit, buyAmount, sellAmount });
 
-                        // 🔹 Send Telegram Notification on Arbitrage Found
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
                             message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
-                            🏦 Expected Profit: $${profit}
+                            🏦 Expected Profit: $${actualProfit}
                             🛒 Buy Amount: ${buyAmount} ${token} 
                             💵 Sell Amount: ${sellAmount} USDC`
                         });
@@ -825,11 +828,12 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
     console.log(`🔍 Fetching quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
-    const quoteResponse = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount, walletAddress);
-    if (!quoteResponse) return console.log("❌ Failed to fetch quote.");
+    
+    const dstAmount = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    if (!dstAmount) return console.log("❌ Failed to fetch quote.");
 
     console.log("⚡ Building Fusion+ Order...");
-    const orderData = await buildFusionOrder(quoteResponse, srcChain, dstChain, srcToken, dstToken, amount, walletAddress);
+    const orderData = await buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress);
     if (!orderData) return console.log("❌ Failed to build Fusion+ order.");
 
     // 🔹 Generate Secret Hashes for Security
@@ -845,6 +849,7 @@ async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amo
 
     console.log("✅ Cross-Chain Swap Successfully Executed!");
 }
+
 
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
@@ -1062,7 +1067,6 @@ async function signFusionOrder(orderData) {
 }
 
 
-
 // 🚀 Execute Arbitrage Trade
 async function executeArbitrage() {
     console.log("🔍 Fetching latest prices...");
@@ -1080,40 +1084,51 @@ async function executeArbitrage() {
     await sendTelegramTradeAlert(bestTrade);
 
     try {
-        // 1️⃣ Fetch Swap Quote for USDC → Token on the Buy Network
-        console.log(`🔄 Fetching swap quote on ${bestTrade.buyOn} for 100,000 USDC...`);
-        const dstAmount = await fetchInitialSwapQuote(bestTrade.buyOn, 100000);
-        if (!dstAmount) return console.log("❌ Failed to get initial swap quote");
-
-        // 2️⃣ Fetch Fusion+ Quote to Determine Received Amount on the Target Chain
-        console.log(`🔄 Fetching Fusion+ quote: Sending ${dstAmount} ${bestTrade.token} from ${bestTrade.buyOn} to ${bestTrade.sellOn}...`);
-        const receivedAmount = await fetchFusionQuote(
+        // 1️⃣ Get Fusion+ Quote to Determine Exact Amount of Token Received on Destination Chain
+        console.log(`🔄 Fetching Fusion+ quote: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
+        const dstAmount = await getFusionQuote(
             bestTrade.buyOn, 
             bestTrade.sellOn, 
             TOKENS[bestTrade.buyOn].WETH, 
             TOKENS[bestTrade.sellOn].WETH, 
-            dstAmount
+            100000  // Using the trade size in USDC
         );
-        if (!receivedAmount) return console.log("❌ Failed to get Fusion+ quote");
 
-        // 3️⃣ Request Flash Loan on the Target Chain Based on `receivedAmount`
-        console.log(`💰 Requesting Flash Loan on ${bestTrade.sellOn} for ${receivedAmount} ${bestTrade.token}...`);
-        await requestFlashLoan(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, receivedAmount);
+        if (!dstAmount) return console.log("❌ Failed to fetch Fusion+ quote.");
 
-        // 4️⃣ Execute Fusion+ Cross-Chain Swap
-        console.log(`🚀 Executing Fusion+ Swap: ${dstAmount} ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
-        await executeFusionSwap(TOKENS[bestTrade.buyOn].WETH, TOKENS[bestTrade.sellOn].WETH, dstAmount);
+        console.log(`💰 Estimated amount to receive on ${bestTrade.sellOn}: ${dstAmount} ${bestTrade.token}`);
 
-        // 5️⃣ Swap Received Token for USDC on the Sell Network
-        console.log(`💵 Swapping received ${receivedAmount} ${bestTrade.token} on ${bestTrade.sellOn} → USDC...`);
-        const usdcReceived = await swapTokenForUSDC(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, receivedAmount);
+        // 2️⃣ Request Flash Loan Based on the `dstAmount`
+        console.log(`💰 Requesting Flash Loan on ${bestTrade.sellOn} for ${dstAmount} ${bestTrade.token}...`);
+        await requestFlashLoan(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, dstAmount);
 
-        // 6️⃣ Send USDC Back to the Initial Chain to Repay Flash Loan
+        // 3️⃣ Execute Fusion+ Cross-Chain Swap to Transfer Token
+        console.log(`🚀 Executing Fusion+ Swap: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
+        await executeFusionSwap(
+            bestTrade.buyOn,
+            bestTrade.sellOn,
+            TOKENS[bestTrade.buyOn].WETH,
+            TOKENS[bestTrade.sellOn].WETH,
+            100000 // Use trade size in USDC
+        );
+
+        // 4️⃣ Swap Received Token for USDC on the Sell Network
+        console.log(`💵 Swapping received ${dstAmount} ${bestTrade.token} on ${bestTrade.sellOn} → USDC...`);
+        const usdcReceived = await swapTokenForUSDC(bestTrade.sellOn, TOKENS[bestTrade.sellOn].WETH, dstAmount);
+
+        if (!usdcReceived || usdcReceived < 100000) {
+            console.error(`❌ Swap did not yield enough USDC. Expected: 100000, Received: ${usdcReceived}`);
+            return;
+        }
+
+        console.log(`✅ Received ${usdcReceived} USDC on ${bestTrade.sellOn} after swap.`);
+
+        // 5️⃣ Transfer USDC Back to Buy Network for Loan Repayment
         const totalRepayment = 100050; // 100,000 + 50 USDC premium
         console.log(`🔄 Sending ${usdcReceived} USDC back to ${bestTrade.buyOn} for flash loan repayment...`);
         await sendUSDCBack(bestTrade.buyOn, usdcReceived);
 
-        // 7️⃣ Repay the Flash Loan
+        // 6️⃣ Repay the Flash Loan
         console.log(`💰 Repaying Flash Loan on ${bestTrade.buyOn} with ${totalRepayment} USDC...`);
         await repayFlashLoan(bestTrade.buyOn, totalRepayment);
 
@@ -1125,6 +1140,7 @@ async function executeArbitrage() {
         await sendTelegramMessage(`🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.`);
     }
 }
+
 
 
 // 🚀 Start the Bot
