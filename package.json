@@ -1,7 +1,6 @@
 {
   "type": "module",
   "name": "arbitrage-bot",
-  "version": "1.0.0",
   "description": "An arbitrage bot finds profitable swap routes and executes flash loans.",
   "main": "index.js",
   "scripts": {
