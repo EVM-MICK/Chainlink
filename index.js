@@ -34,24 +34,30 @@ const {
 const privateKey = process.env.PRIVATE_KEY;
 // ✅ Ensure __dirname is defined in CommonJS
 //const __dirname = path.resolve();
+const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
+const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
+
 
 // ✅ Safely Read and Parse JSON Files
-function safeReadJSON(filePath) {
+function safeLoadJson(filePath) {
     try {
-        const content = fs.readFileSync(filePath, "utf8");
-        if (!content) {
-            throw new Error(`❌ Error: ${filePath} is empty.`);
-        }
-        return JSON.parse(content);
+        const fileContent = fs.readFileSync(filePath, "utf8");
+        if (!fileContent.trim()) throw new Error("File is empty");
+        return JSON.parse(fileContent);
     } catch (error) {
-        console.error(`❌ Error parsing ${filePath}:`, error.message);
-        process.exit(1); // Stop execution if critical files are missing
+        console.error(`❌ Error parsing ${filePath}: ${error.message}`);
+        return null;
     }
 }
 
 // ✅ Load Smart Contract ABIs
-const POLYGON_ABI = safeReadJSON(path.join(__dirname, "PolygonSmartContract.json"));
-const ARBITRUM_ABI = safeReadJSON(path.join(__dirname, "ArbitrumSmartContract.json"));
+const POLYGON_ABI = safeLoadJson(polygonAbiPath);
+const ARBITRUM_ABI = safeLoadJson(arbitrumAbiPath);
+if (!POLYGON_ABI || !ARBITRUM_ABI) {
+    console.error("🚨 Missing or invalid ABI files. Please check your JSON files.");
+    process.exit(1); // Stop execution to prevent errors later
+}
+
 // ✅ Initialize SDK
 const sdk = new SDK({
     url: "https://api.1inch.dev/fusion-plus",
