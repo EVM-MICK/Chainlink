@@ -32,12 +32,26 @@ const {
 // const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
-//const __dirname = path.resolve();
+// ✅ Ensure __dirname is defined in CommonJS
+const __dirname = path.resolve();
 
-// ✅ Load JSON ABIs
-const POLYGON_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "PolygonSmartContract.json"), "utf8"));
-const ARBITRUM_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "ArbitrumSmartContract.json"), "utf8"));
+// ✅ Safely Read and Parse JSON Files
+function safeReadJSON(filePath) {
+    try {
+        const content = fs.readFileSync(filePath, "utf8");
+        if (!content) {
+            throw new Error(`❌ Error: ${filePath} is empty.`);
+        }
+        return JSON.parse(content);
+    } catch (error) {
+        console.error(`❌ Error parsing ${filePath}:`, error.message);
+        process.exit(1); // Stop execution if critical files are missing
+    }
+}
 
+// ✅ Load Smart Contract ABIs
+const POLYGON_ABI = safeReadJSON(path.join(__dirname, "PolygonSmartContract.json"));
+const ARBITRUM_ABI = safeReadJSON(path.join(__dirname, "ArbitrumSmartContract.json"));
 // ✅ Initialize SDK
 const sdk = new SDK({
     url: "https://api.1inch.dev/fusion-plus",
@@ -64,6 +78,7 @@ const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
 
 // Load Smart Contracts for both networks
+const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
 const SMART_CONTRACT_ABI = [
@@ -329,26 +344,35 @@ async function cachedFetch(key, fetchFn) {
     try {
         const cachedData = await redisClient.get(key);
         if (cachedData) {
-            console.log(`📦 Cache hit for ${key}`);
-            return JSON.parse(cachedData);
+            try {
+                const parsedData = JSON.parse(cachedData);
+                return parsedData;
+            } catch (jsonError) {
+                console.error(`❌ Error parsing cached data for ${key}:`, jsonError.message);
+                await redisClient.del(key); // ✅ Delete corrupted cache entry
+            }
         }
 
         console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
-        
-        // ✅ Load `fetch` dynamically if not already loaded
+
+        // ✅ Ensure `fetch` is loaded dynamically
         if (!fetch) {
             fetch = (await import("node-fetch")).default;
         }
 
         const freshData = await fetchFn(fetch);
-        await redisClient.set(key, JSON.stringify(freshData), "EX", 60);
-        console.log(`✅ Cached data for ${key} for 60 seconds.`);
+        if (!freshData) {
+            throw new Error(`❌ Fetch function returned empty data for ${key}`);
+        }
+
+        await redisClient.setex(key, 60, JSON.stringify(freshData));
         return freshData;
     } catch (error) {
         console.error(`❌ Error in cachedFetch(${key}):`, error.message);
         throw error;
     }
 }
+
 
 // Helper function for validating Ethereum addresses
 function isValidAddress(address) {
@@ -363,9 +387,19 @@ function validateAddresses(addresses) {
 }
 
 axios.interceptors.request.use((config) => {
-  console.log("Axios Request Config:", JSON.stringify(config, null, 2));
-  return config;
+    if (DEBUG_MODE) {
+        // ✅ Mask Sensitive Data
+        const sanitizedConfig = { ...config };
+        if (sanitizedConfig.headers && sanitizedConfig.headers.Authorization) {
+            sanitizedConfig.headers.Authorization = "****MASKED****"; // Hide API Key
+        }
+
+        console.log("📡 Axios Request Config:", JSON.stringify(sanitizedConfig, null, 2));
+    }
+
+    return config;
 });
+
 
 // 🚀 Fusion+ Quote Function (Dynamic)
 async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
