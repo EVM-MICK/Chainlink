@@ -17,7 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
-const __dirname = path.resolve();
+
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -32,8 +32,7 @@ const {
 // const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
-// Get correct path using CommonJS __dirname
-
+const __dirname = path.resolve();
 
 // ✅ Load JSON ABIs
 const POLYGON_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "PolygonSmartContract.json"), "utf8"));
