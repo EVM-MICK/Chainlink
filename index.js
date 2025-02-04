@@ -33,7 +33,7 @@ const {
 
 const privateKey = process.env.PRIVATE_KEY;
 // ✅ Ensure __dirname is defined in CommonJS
-const __dirname = path.resolve();
+//const __dirname = path.resolve();
 
 // ✅ Safely Read and Parse JSON Files
 function safeReadJSON(filePath) {
