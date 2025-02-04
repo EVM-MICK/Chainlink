@@ -1,6 +1,6 @@
 const dotenv = require("dotenv");
 dotenv.config(); // ✅ Load environment variables early
-const fetch = require("node-fetch"); // Ensure you have node-fetch installed
+//const fetch = require("node-fetch"); // Ensure you have node-fetch installed
 const express = require("express");
 const axios = require("axios");
 const Web3 = require("web3");
@@ -202,6 +202,11 @@ const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
 const app = express();
 app.use(express.json());
 
+let fetch;
+(async () => {
+  fetch = (await import("node-fetch")).default;
+})();
+
 // State Variables
 let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
@@ -311,28 +316,24 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
   throw new Error('Maximum retry attempts exceeded.');
 }
 
-// Function to cache and fetch data from Redis
+
 // ✅ Corrected cachedFetch function
 async function cachedFetch(key, fetchFn) {
-    try {
-        const cachedData = await redisClient.get(key); // ✅ Await added
-        if (cachedData) {
-            console.log(`📦 Cache hit for ${key}`);
-            return JSON.parse(cachedData);
-        }
+  const cachedData = await redisClient.get(key);
+  if (cachedData) {
+    return JSON.parse(cachedData);
+  }
 
-        console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
-        const fetch = await getFetchModule(); // ✅ Load node-fetch dynamically
-        const freshData = await fetchFn(fetch);
+  // ✅ Ensure `fetch` is imported dynamically
+  if (!fetch) {
+    fetch = (await import("node-fetch")).default;
+  }
 
-        await redisClient.setex(key, REDIS_TTL, JSON.stringify(freshData)); // ✅ Await added
-        console.log(`✅ Cached data for ${key} for ${REDIS_TTL} seconds.`);
-        return freshData;
-    } catch (error) {
-        console.error(`❌ Error in cachedFetch(${key}):`, error.message);
-        throw error;
-    }
+  const freshData = await fetchFn();
+  await redisClient.set(key, JSON.stringify(freshData), "EX", 60);
+  return freshData;
 }
+
 
 
 // Helper function for validating Ethereum addresses
