@@ -15,17 +15,17 @@ import pkg from "telegraf";
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "node:crypto";
-// import { 
-//    SDK, 
-//     HashLock,  
-//     NetworkEnum,  
-//     OrderStatus,  
-//     PresetEnum,  
-//     PrivateKeyProviderConnector,
-//     QuoteParams
-// } from "@1inch/cross-chain-sdk";
+import { 
+   SDK, 
+    HashLock,  
+    NetworkEnum,  
+    OrderStatus,  
+    PresetEnum,  
+    PrivateKeyProviderConnector,
+    QuoteParams
+} from "@1inch/cross-chain-sdk";
 
-const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
+// const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
 const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
