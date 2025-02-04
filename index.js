@@ -155,8 +155,9 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
-//const nonce = await permit2Contract.methods.nonces(wallet.address).call();
-const nonce = await permit2Contract.nonces(wallet.address);
+
+//const nonce = await permit2Contract.nonces(wallet.address);
+
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0";
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
@@ -233,6 +234,17 @@ validateEnvVars([
   "ARBITRUM_RPC",
 ]);
 
+async function initialize() {
+    try {
+        // ✅ Wrap `await` inside an async function
+        const nonce = await permit2Contract.nonces(wallet.address);
+        console.log(`Nonce: ${nonce}`);
+
+        // Continue with your initialization logic here...
+    } catch (error) {
+        console.error("Error initializing script:", error);
+    }
+}
 
 async function fetchAndCache(key, fetchFn, duration = CACHE_DURATION) {
   try {
@@ -1078,6 +1090,8 @@ async function executeArbitrage() {
     await sendTelegramTradeAlert(bestTrade);
 
     try {
+         // ✅ Run the function
+     initialize();
         // ✅ 1️⃣ Fetch Fusion+ Quote to Get `dstAmount`
         console.log(`🔄 Fetching Fusion+ quote: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
         const dstAmount = await getFusionQuote(
