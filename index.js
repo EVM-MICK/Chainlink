@@ -1,4 +1,5 @@
 const dotenv = require("dotenv");
+dotenv.config(); // ✅ Load environment variables early
 const fetch = require("node-fetch"); // Ensure you have node-fetch installed
 const express = require("express");
 const axios = require("axios");
@@ -16,8 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
-const { promisify } = require("util");
-
+const __dirname = path.resolve();
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -33,12 +33,11 @@ const {
 
 const privateKey = process.env.PRIVATE_KEY;
 // Get correct path using CommonJS __dirname
-const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
-const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
 
-// Read and parse JSON files
-const POLYGON_ABI = JSON.parse(fs.readFileSync(polygonAbiPath, "utf8"));
-const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
+
+// ✅ Load JSON ABIs
+const POLYGON_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "PolygonSmartContract.json"), "utf8"));
+const ARBITRUM_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "ArbitrumSmartContract.json"), "utf8"));
 
 // ✅ Initialize SDK
 const sdk = new SDK({
@@ -238,17 +237,14 @@ validateEnvVars([
 
 // ✅ Use dynamic import() for node-fetch in CommonJS
 async function getFetchModule() {
-  const fetchModule = await import("node-fetch");
+  const fetchModule = await import("node-fetch"); // ✅ Use dynamic import
   return fetchModule.default;
 }
 
 async function initialize() {
     try {
-        // ✅ Wrap `await` inside an async function
-        const nonce = await permit2Contract.nonces(wallet.address);
+        const nonce = await permit2Contract.nonces(wallet.address); // ✅ Fix: Wrapped in async function
         console.log(`Nonce: ${nonce}`);
-
-        // Continue with your initialization logic here...
     } catch (error) {
         console.error("Error initializing script:", error);
     }
@@ -319,28 +315,26 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 // Function to cache and fetch data from Redis
 // ✅ Corrected cachedFetch function
 async function cachedFetch(key, fetchFn) {
-  try {
-    // ✅ Ensure Redis get() uses await correctly
-    const cachedData = await redis.get(key);
-    if (cachedData) {
-      console.log(`📦 Cache hit for ${key}`);
-      return JSON.parse(cachedData);
+    try {
+        const cachedData = await redisClient.get(key); // ✅ Await added
+        if (cachedData) {
+            console.log(`📦 Cache hit for ${key}`);
+            return JSON.parse(cachedData);
+        }
+
+        console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
+        const fetch = await getFetchModule(); // ✅ Load node-fetch dynamically
+        const freshData = await fetchFn(fetch);
+
+        await redisClient.setex(key, REDIS_TTL, JSON.stringify(freshData)); // ✅ Await added
+        console.log(`✅ Cached data for ${key} for ${REDIS_TTL} seconds.`);
+        return freshData;
+    } catch (error) {
+        console.error(`❌ Error in cachedFetch(${key}):`, error.message);
+        throw error;
     }
-
-    console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
-    const fetch = await getFetchModule(); // ✅ Load node-fetch dynamically
-    const freshData = await fetchFn(fetch); // Pass `fetch` to function
-
-    // ✅ Store data in Redis with TTL
-    await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
-    console.log(`✅ Cached data for ${key} for ${REDIS_TTL} seconds.`);
-    
-    return freshData;
-  } catch (error) {
-    console.error(`❌ Error in cachedFetch(${key}):`, error.message);
-    throw error;
-  }
 }
+
 
 // Helper function for validating Ethereum addresses
 function isValidAddress(address) {
