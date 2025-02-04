@@ -1,5 +1,8 @@
 {
-  "type": "commonjs",
+  "type": "module",
+  "exports": {
+    ".": "./dist/esm/index.js"
+  }
   "name": "arbitrage-bot",
   "description": "An arbitrage bot finds profitable swap routes and executes flash loans.",
   "main": "index.js",
