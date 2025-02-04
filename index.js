@@ -1,36 +1,40 @@
-import dotenv from "dotenv";
-import fetch from "node-fetch"; // Ensure you have node-fetch installed
-import express from "express";
-import axios from "axios";
-import Web3 from "web3";
-import { BigNumber } from "bignumber.js";
-import retry from "async-retry";
-import PQueue from "p-queue";
-import Redis from "ioredis";
-import { createClient } from "redis";
-import { ethers, Wallet, JsonRpcProvider, Contract } from "ethers";
-import cron from "node-cron";
-import { promisify } from "util";
-import pkg from "telegraf";
-import fs from "fs";
-import path from "path";
-import { randomBytes } from "node:crypto";
-import { 
+const dotenv = require("dotenv");
+const fetch = require("node-fetch"); // Ensure you have node-fetch installed
+const express = require("express");
+const axios = require("axios");
+const Web3 = require("web3");
+const BigNumber = require("bignumber.js");
+const retry = require("async-retry");
+const PQueue = require("p-queue");
+const Redis = require("ioredis");
+const { createClient } = require("redis");
+const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
+const cron = require("node-cron");
+const { promisify } = require("util");
+const pkg = require("telegraf");
+const fs = require("fs");
+const path = require("path");
+const { randomBytes } = require("crypto");
+
+// ✅ Fix 1inch SDK Import for CommonJS
+const { 
    SDK, 
-    HashLock,  
-    NetworkEnum,  
-    OrderStatus,  
-    PresetEnum,  
-    PrivateKeyProviderConnector,
-    QuoteParams
-} from "@1inch/cross-chain-sdk";
+   HashLock,  
+   NetworkEnum,  
+   OrderStatus,  
+   PresetEnum,  
+   PrivateKeyProviderConnector,
+   QuoteParams
+} = require("@1inch/cross-chain-sdk");
 
 // const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
-const __dirname = path.dirname(new URL(import.meta.url).pathname); // Get correct path
+// Get correct path using CommonJS __dirname
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
 const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
+
+// Read and parse JSON files
 const POLYGON_ABI = JSON.parse(fs.readFileSync(polygonAbiPath, "utf8"));
 const ARBITRUM_ABI = JSON.parse(fs.readFileSync(arbitrumAbiPath, "utf8"));
 
