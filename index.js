@@ -32,7 +32,7 @@ const {
 // const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
-const __dirname = path.resolve();
+//const __dirname = path.resolve();
 
 // ✅ Load JSON ABIs
 const POLYGON_ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "PolygonSmartContract.json"), "utf8"));
