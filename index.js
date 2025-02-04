@@ -6,7 +6,7 @@ const axios = require("axios");
 const Web3 = require("web3");
 const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
-const PQueue = require("p-queue");
+//const PQueue = require("p-queue");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
@@ -172,7 +172,6 @@ const TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN;
 const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
-const queue = new PQueue({ concurrency: 1 });
 // Load Smart Contract
 const contract = new ethers.Contract(process.env.SMART_CONTRACT_ADDRESS, ABI, wallet);
 const NETWORKS = {
@@ -219,6 +218,7 @@ let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
 const setAsync = redisClient.set.bind(redisClient);
 const getAsync = redisClient.get.bind(redisClient);
+const queue = new PQueue({ concurrency: 1 });
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
