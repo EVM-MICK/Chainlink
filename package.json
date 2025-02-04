@@ -1,13 +1,10 @@
 {
-  "type": "module",
-  "exports": {
-    ".": "./dist/esm/index.js"
-  },
+  "type": "commonjs",
   "name": "arbitrage-bot",
   "description": "An arbitrage bot finds profitable swap routes and executes flash loans.",
   "main": "index.js",
   "scripts": {
-    "start": "node --experimental-specifier-resolution=node index.mjs"
+    "start": "node index.js"
   },
   "dependencies": {
     "dotenv": "^10.0.0",
@@ -15,8 +12,7 @@
     "axios": "^1.4.0", 
     "web3": "^1.6.0",  
     "bignumber.js": "^9.0.0",
-    "@1inch/cross-chain-sdk": "latest",
-    "esm": "^3.2.25",
+    "@1inch/cross-chain-sdk": "^0.1.12",
     "@1inch/fusion-sdk":"^2.1.8",   
     "winston": "^3.3.3",
     "telegraf": "^3.38.0",
