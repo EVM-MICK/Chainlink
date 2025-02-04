@@ -207,6 +207,13 @@ let fetch;
   fetch = (await import("node-fetch")).default;
 })();
 
+let PQueue;
+(async () => {
+  const module = await import("p-queue");
+  PQueue = module.default;
+})();
+
+
 // State Variables
 let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
@@ -319,22 +326,29 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 
 // ✅ Corrected cachedFetch function
 async function cachedFetch(key, fetchFn) {
-  const cachedData = await redisClient.get(key);
-  if (cachedData) {
-    return JSON.parse(cachedData);
-  }
+    try {
+        const cachedData = await redisClient.get(key);
+        if (cachedData) {
+            console.log(`📦 Cache hit for ${key}`);
+            return JSON.parse(cachedData);
+        }
 
-  // ✅ Ensure `fetch` is imported dynamically
-  if (!fetch) {
-    fetch = (await import("node-fetch")).default;
-  }
+        console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
+        
+        // ✅ Load `fetch` dynamically if not already loaded
+        if (!fetch) {
+            fetch = (await import("node-fetch")).default;
+        }
 
-  const freshData = await fetchFn();
-  await redisClient.set(key, JSON.stringify(freshData), "EX", 60);
-  return freshData;
+        const freshData = await fetchFn(fetch);
+        await redisClient.set(key, JSON.stringify(freshData), "EX", 60);
+        console.log(`✅ Cached data for ${key} for 60 seconds.`);
+        return freshData;
+    } catch (error) {
+        console.error(`❌ Error in cachedFetch(${key}):`, error.message);
+        throw error;
+    }
 }
-
-
 
 // Helper function for validating Ethereum addresses
 function isValidAddress(address) {
