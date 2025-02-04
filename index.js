@@ -15,6 +15,8 @@ const pkg = require("telegraf");
 const fs = require("fs");
 const path = require("path");
 const { randomBytes } = require("crypto");
+const redis = require("redis"); // Ensure Redis client is properly initialized
+const { promisify } = require("util");
 
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
@@ -234,6 +236,12 @@ validateEnvVars([
   "ARBITRUM_RPC",
 ]);
 
+// ✅ Use dynamic import() for node-fetch in CommonJS
+async function getFetchModule() {
+  const fetchModule = await import("node-fetch");
+  return fetchModule.default;
+}
+
 async function initialize() {
     try {
         // ✅ Wrap `await` inside an async function
@@ -309,14 +317,29 @@ async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
 }
 
 // Function to cache and fetch data from Redis
+// ✅ Corrected cachedFetch function
 async function cachedFetch(key, fetchFn) {
-  const cachedData = await redis.get(key);
-  if (cachedData) {
-    return JSON.parse(cachedData);
+  try {
+    // ✅ Ensure Redis get() uses await correctly
+    const cachedData = await redis.get(key);
+    if (cachedData) {
+      console.log(`📦 Cache hit for ${key}`);
+      return JSON.parse(cachedData);
+    }
+
+    console.log(`❌ Cache miss for ${key}. Fetching fresh data...`);
+    const fetch = await getFetchModule(); // ✅ Load node-fetch dynamically
+    const freshData = await fetchFn(fetch); // Pass `fetch` to function
+
+    // ✅ Store data in Redis with TTL
+    await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
+    console.log(`✅ Cached data for ${key} for ${REDIS_TTL} seconds.`);
+    
+    return freshData;
+  } catch (error) {
+    console.error(`❌ Error in cachedFetch(${key}):`, error.message);
+    throw error;
   }
-  const freshData = await fetchFn();
-  await redis.setex(key, REDIS_TTL, JSON.stringify(freshData));
-  return freshData;
 }
 
 // Helper function for validating Ethereum addresses
