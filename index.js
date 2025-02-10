@@ -1,5 +1,7 @@
 const dotenv = require("dotenv");
-dotenv.config(); // ✅ Load environment variables early
+require("dotenv").config();
+
+//dotenv.config(); // ✅ Load environment variables early
 //const fetch = require("node-fetch"); // Ensure you have node-fetch installed
 const express = require("express");
 const axios = require("axios");
