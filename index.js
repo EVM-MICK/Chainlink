@@ -232,11 +232,6 @@ let fetch;
   fetch = (await import("node-fetch")).default;
 })();
 
-// let PQueue;
-// (async () => {
-//   const module = await import("p-queue");
-//   PQueue = module.default;
-// })();
 
 
 // State Variables
@@ -525,25 +520,37 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
 async function fetchTokenPrices(network, tokens) {
-    const tokenList = tokens.join(",").toLowerCase();
-    const url = `${API_BASE_URL}/${network}/${tokenList}`;
+    const tokenList = tokens.join(",").toLowerCase();  // Format the token list correctly
+    const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Make the API request URL
 
     const config = {
         headers: {
-            Authorization: `Bearer ${API_KEY}`,
-            Accept: "application/json",
+           "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`,  // Ensure API Key is passed
+            "Content-Type": "application/json"
         },
-        params: { currency: "USD" },
+        params: { currency: "USD" },  // Get the prices in USD
     };
 
     try {
+        // Fetch the prices from the API
         const response = await axios.get(url, config);
+
+        // Ensure the response contains valid data
+        if (!response.data) {
+            console.error(`❌ No price data returned for network ${network}`);
+            return null;
+        }
+
+        // Return the token prices as a formatted object
         return Object.fromEntries(
-            Object.entries(response.data).map(([token, price]) => [token.toLowerCase(), parseFloat(price)])
+            Object.entries(response.data).map(([token, price]) => [
+                token.toLowerCase(),
+                parseFloat(price),
+            ])
         );
     } catch (error) {
         console.error(`Error fetching prices for ${network}:`, error.response?.data || error.message);
-        return null;
+        return null;  // Return null if the request fails
     }
 }
 
@@ -621,16 +628,20 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
 async function fetchPricesForBothChains() {
     try {
+        // Fetch prices for both networks
         const responses = await Promise.all(
             Object.entries(NETWORKS).map(async ([name, network]) => {
-                return { name, data: await fetchTokenPrices(network, Object.values(TOKENS[name])) };
+                const tokens = Object.values(TOKENS[name]); // Get the token addresses for the network
+                const data = await fetchTokenPrices(network, tokens); // Fetch prices for tokens on this network
+                return { name, data };
             })
         );
 
+        // Return the data for both networks
         return Object.fromEntries(responses.map(({ name, data }) => [name, data]));
     } catch (error) {
         console.error("Error fetching prices:", error);
-        return null;
+        return null; // Return null in case of failure
     }
 }
 
@@ -1166,8 +1177,14 @@ async function signFusionOrder(orderData) {
 // 🚀 Execute Arbitrage Trade
 async function executeArbitrage() {
     console.log("🔍 Fetching latest prices...");
-    const prices = await fetchPricesForBothChains();
-    if (!prices) return console.log("❌ Failed to fetch prices. Exiting...");
+   const prices = await fetchPricesForBothChains();
+    if (!prices) {
+        console.error("❌ Failed to fetch prices. Exiting...");
+        return;
+    }
+
+    console.log("Prices for Polygon:", prices.POLYGON);
+    console.log("Prices for Arbitrum:", prices.ARBITRUM);
 
     console.log("🔍 Detecting arbitrage opportunities...");
     const opportunities = await detectArbitrageOpportunities(prices.ARBITRUM, prices.POLYGON);
