@@ -525,8 +525,7 @@ async function fetchTokenPrices(network, tokens) {
 
     const config = {
         headers: {
-           "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}`,  // Ensure API Key is passed
-            "Content-Type": "application/json"
+          "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr"
         },
         params: { currency: "USD" },  // Get the prices in USD
     };
@@ -628,22 +627,23 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
 async function fetchPricesForBothChains() {
     try {
-        // Fetch prices for both networks
+        // Fetch prices for both networks with their respective network IDs
         const responses = await Promise.all(
-            Object.entries(NETWORKS).map(async ([name, network]) => {
+            Object.entries(NETWORKS).map(async ([name, networkId]) => {
                 const tokens = Object.values(TOKENS[name]); // Get the token addresses for the network
-                const data = await fetchTokenPrices(network, tokens); // Fetch prices for tokens on this network
-                return { name, data };
+                const data = await fetchTokenPrices(networkId, tokens); // Pass network ID with token list
+                return { name, networkId, data }; // Include network ID in response
             })
         );
 
-        // Return the data for both networks
-        return Object.fromEntries(responses.map(({ name, data }) => [name, data]));
+        // Convert the responses into an object with network IDs included
+        return Object.fromEntries(responses.map(({ name, networkId, data }) => [name, { networkId, data }]));
     } catch (error) {
         console.error("Error fetching prices:", error);
         return null; // Return null in case of failure
     }
 }
+
 
 // Helper function for delay
 function delay(ms) {
@@ -861,10 +861,23 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
     let opportunities = [];
 
+    // Ensure the prices data is valid
+    if (!arbitrumPrices || !polygonPrices) {
+        console.error("❌ Invalid price data for either Arbitrum or Polygon. Exiting...");
+        return opportunities;  // Return an empty list if prices are invalid
+    }
+
+    // Iterate over the tokens
     for (let token in TOKENS.POLYGON) {
+        // Ensure that the token prices exist for both networks
         let arbPrice = arbitrumPrices[TOKENS.ARBITRUM[token]];
         let polyPrice = polygonPrices[TOKENS.POLYGON[token]];
-        if (!arbPrice || !polyPrice) continue; // Skip if price data is missing
+
+        // Skip if prices for the token are missing
+        if (!arbPrice || !polyPrice) {
+            console.log(`⚠️ Missing price data for token: ${token}`);
+            continue;  // Skip to the next token if price data is missing
+        }
 
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
         if (arbPrice > polyPrice) {
@@ -874,15 +887,32 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
                 try {
                     console.log(`🔄 Fetching swap quote: Buy on Polygon → Sell on Arbitrum...`);
                     
-                    let buyAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON.USDC, TOKENS.POLYGON[token], TRADE_SIZE_USDC);
+                    let buyAmount = await fetchSwapQuote(
+                        NETWORKS.POLYGON, // ✅ Pass network ID
+                        TOKENS.POLYGON.USDC, 
+                        TOKENS.POLYGON[token], 
+                        TRADE_SIZE_USDC
+                    );
                     if (!buyAmount) continue; // Skip if quote fails
 
-                    let sellAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM[token], TOKENS.ARBITRUM.USDC, buyAmount);
+                    let sellAmount = await fetchSwapQuote(
+                        NETWORKS.ARBITRUM, // ✅ Pass network ID
+                        TOKENS.ARBITRUM[token], 
+                        TOKENS.ARBITRUM.USDC, 
+                        buyAmount
+                    );
                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
 
                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
                     if (actualProfit >= PROFIT_THRESHOLD) {
-                        opportunities.push({ token, buyOn: "Polygon", sellOn: "Arbitrum", profit: actualProfit, buyAmount, sellAmount });
+                        opportunities.push({ 
+                            token, 
+                            buyOn: "Polygon", 
+                            sellOn: "Arbitrum", 
+                            profit: actualProfit, 
+                            buyAmount, 
+                            sellAmount 
+                        });
 
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
@@ -906,15 +936,32 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
                 try {
                     console.log(`🔄 Fetching swap quote: Buy on Arbitrum → Sell on Polygon...`);
 
-                    let buyAmount = await fetchSwapQuote(NETWORKS.ARBITRUM, TOKENS.ARBITRUM.USDC, TOKENS.ARBITRUM[token], TRADE_SIZE_USDC);
+                    let buyAmount = await fetchSwapQuote(
+                        NETWORKS.ARBITRUM, // ✅ Pass network ID
+                        TOKENS.ARBITRUM.USDC, 
+                        TOKENS.ARBITRUM[token], 
+                        TRADE_SIZE_USDC
+                    );
                     if (!buyAmount) continue; // Skip if quote fails
 
-                    let sellAmount = await fetchSwapQuote(NETWORKS.POLYGON, TOKENS.POLYGON[token], TOKENS.POLYGON.USDC, buyAmount);
+                    let sellAmount = await fetchSwapQuote(
+                        NETWORKS.POLYGON, // ✅ Pass network ID
+                        TOKENS.POLYGON[token], 
+                        TOKENS.POLYGON.USDC, 
+                        buyAmount
+                    );
                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
 
                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
                     if (actualProfit >= PROFIT_THRESHOLD) {
-                        opportunities.push({ token, buyOn: "Arbitrum", sellOn: "Polygon", profit: actualProfit, buyAmount, sellAmount });
+                        opportunities.push({ 
+                            token, 
+                            buyOn: "Arbitrum", 
+                            sellOn: "Polygon", 
+                            profit: actualProfit, 
+                            buyAmount, 
+                            sellAmount 
+                        });
 
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
@@ -931,8 +978,10 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
         }
     }
 
+    // Return sorted opportunities based on profit
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
+
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
     console.log(`🔍 Fetching Fusion+ quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
