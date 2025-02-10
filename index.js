@@ -9,7 +9,6 @@ const Web3 = require("web3");
 const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 //const PQueue = require("p-queue");
-const PQueue = await import('p-queue').then(module => module.default);
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
@@ -245,7 +244,7 @@ let consecutiveFailures = 0;
 let lastRequestTimestamp = 0; // Track the timestamp of the last API request
 const setAsync = redisClient.set.bind(redisClient);
 const getAsync = redisClient.get.bind(redisClient);
-const queue = new PQueue({ concurrency: 1 });
+//const queue = new PQueue({ concurrency: 1 });
 
 function addErrorToSummary(error, context = '') {
   const errorKey = `${error.message} | Context: ${context}`;
@@ -282,6 +281,12 @@ async function getFetchModule() {
 
 async function initialize() {
     try {
+        // Dynamically import p-queue
+  const { default: PQueue } = await import('p-queue');
+
+  // Now you can use PQueue as usual
+  const queue = new PQueue({ concurrency: 1 });
+
         const nonce = await permit2Contract.nonces(wallet.address); // ✅ Fix: Wrapped in async function
         console.log(`Nonce: ${nonce}`);
     } catch (error) {
