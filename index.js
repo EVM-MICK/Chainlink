@@ -74,7 +74,7 @@ const ERC20_ABI = [
     "function decimals() view returns (uint8)"
 ];
 
-// Define contract addresses
+// Define contract addresses 
 const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
 
@@ -198,7 +198,8 @@ const CIRCUIT_BREAKER_THRESHOLD = 5; // Max consecutive failures allowed
 const errorSummary = new Map();
 const ERROR_SUMMARY_INTERVAL = 2 * 60 * 1000; // 10 minutes
 // Load Smart Contract
-const contract = new ethers.Contract(process.env.SMART_CONTRACT_ADDRESS, ABI, wallet);
+//const contract = new ethers.Contract(process.env.POLYGON_CONTRACT_ADDRESS, ABI, wallet);
+//const contract1 = new ethers.Contract(process.env.ARBITRUM_SMART_CONTRACT, ABI, wallet);
 const NETWORKS = {
     POLYGON: 137,
     ARBITRUM: 42161
@@ -266,7 +267,8 @@ validateEnvVars([
   "REDIS_URL",
   "ONEINCH_API_KEY",
   "WALLET_ADDRESS",
-  "SMART_CONTRACT_ADDRESS",
+  "POLYGON_SMART_CONTRACT",
+  "ARBITRUM_SMART_CONTRACT",
   "POLYGON_RPC",
   "ARBITRUM_RPC",
 ]);
@@ -595,7 +597,14 @@ async function executeFusionSwap(trade, srcToken, dstToken, amount) {
 
 
 // Listen for SwapExecuted Event
-contract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
+arbitrumContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
+    console.log(`🔥 Swap Completed: ${srcToken} → ${dstToken}, Amount: ${amount}`);
+    
+    // Execute cross-chain transfer via Fusion+
+    await executeFusionSwap(srcToken, dstToken, returnAmount);
+});
+
+polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmount, timestamp) => {
     console.log(`🔥 Swap Completed: ${srcToken} → ${dstToken}, Amount: ${amount}`);
     
     // Execute cross-chain transfer via Fusion+
