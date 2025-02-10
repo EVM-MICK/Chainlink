@@ -9,6 +9,7 @@ const Web3 = require("web3");
 const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 //const PQueue = require("p-queue");
+const PQueue = require('p-queue').default
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
@@ -232,11 +233,11 @@ let fetch;
   fetch = (await import("node-fetch")).default;
 })();
 
-let PQueue;
-(async () => {
-  const module = await import("p-queue");
-  PQueue = module.default;
-})();
+// let PQueue;
+// (async () => {
+//   const module = await import("p-queue");
+//   PQueue = module.default;
+// })();
 
 
 // State Variables
