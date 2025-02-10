@@ -9,7 +9,7 @@ const Web3 = require("web3");
 const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 //const PQueue = require("p-queue");
-const PQueue = require('p-queue').default
+const PQueue = await import('p-queue').then(module => module.default);
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
