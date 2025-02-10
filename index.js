@@ -77,8 +77,10 @@ const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
 
 // Define providers and wallets for both networks
-const providerPolygon = new ethers.providers.JsonRpcProvider(process.env.POLYGON_RPC);
-const providerArbitrum = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC);
+//const providerPolygon = new ethers.providers.JsonRpcProvider(process.env.POLYGON_RPC);
+const providerPolygon = new ethers.JsonRpcProvider(process.env.POLYGON_RPC);
+//const providerArbitrum = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_RPC);
+const providerArbitrum = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC);
 
 const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
