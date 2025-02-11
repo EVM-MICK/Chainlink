@@ -631,20 +631,24 @@ async function fetchPricesForBothChains() {
     try {
         // Fetch prices for both networks with their respective network IDs
         const responses = await Promise.all(
-            Object.entries(NETWORKS).map(async ([name, networkId]) => {
-                const tokens = Object.values(TOKENS[name]); // Get the token addresses for the network
-                const data = await fetchTokenPrices(networkId, tokens); // Pass network ID with token list
-                return { name, networkId, data }; // Include network ID in response
+            Object.entries(NETWORKS).map(async ([networkName, networkId]) => {
+                const tokens = Object.values(TOKENS[networkName]); // Extract token addresses for the network
+                const prices = await fetchTokenPrices(networkId, tokens); // Fetch prices with network ID
+
+                return { networkName, networkId, prices }; // Include network ID in response
             })
         );
 
-        // Convert the responses into an object with network IDs included
-        return Object.fromEntries(responses.map(({ name, networkId, data }) => [name, { networkId, data }]));
+        // Convert the responses into an object with network IDs and price data
+        return Object.fromEntries(
+            responses.map(({ networkName, networkId, prices }) => [networkName, { networkId, prices }])
+        );
     } catch (error) {
-        console.error("Error fetching prices:", error);
+        console.error("❌ Error fetching prices:", error);
         return null; // Return null in case of failure
     }
 }
+
 
 
 // Helper function for delay
