@@ -529,7 +529,7 @@ async function fetchTokenPrices(network, tokens) {
         headers: {
           Authorization: `Bearer ${API_KEY}`
         },
-        params: { currency: "USD" },  // Get the prices in USD
+        params: { currency: "USD" }  // Get the prices in USD
     };
 
     try {
