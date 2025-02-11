@@ -522,7 +522,7 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 async function fetchTokenPrices(network, tokens) {
    // const tokenList = tokens.join(",").toLowerCase();  // Format the token list correctly
      // ✅ Extract token addresses and format them for API request
-    const tokenList = Object.values(tokens).join(",");
+    const tokenList = Object.values(tokens).join(",").toLowerCase();
     const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Make the API request URL
 
     const config = {
