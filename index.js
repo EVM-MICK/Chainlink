@@ -527,7 +527,7 @@ async function fetchTokenPrices(network, tokens) {
 
     const config = {
         headers: {
-          "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr"
+          Authorization: `Bearer ${API_KEY}`
         },
         params: { currency: "USD" },  // Get the prices in USD
     };
