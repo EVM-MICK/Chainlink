@@ -342,29 +342,28 @@ redisClient.on('error', (err) => {
   console.error('Redis connection error:', err);
 });
 
-async function retryRequest(fn, retries = RETRY_LIMIT, delay = RETRY_DELAY) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fn(); // Attempt the operation
-    } catch (err) {
-      // Check if the error is due to rate-limiting (429 Too Many Requests)
-      if (err.response?.status === 429) {
-        const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
-        log(`Rate-limited by API. Waiting for ${retryAfter} seconds before retrying...`, 'warn');
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
-      } else if (attempt === retries) {
-        throw err; // Rethrow the error after max retries
-      } else {
-        // Exponential backoff for other errors
-        const backoff = delay * Math.pow(2, attempt - 1); // Exponential increase in delay
-        log(`Retrying (${attempt}/${retries}) after ${backoff}ms: ${err.message}`, 'warn');
-        await new Promise((resolve) => setTimeout(resolve, backoff));
-      }
+async function retryRequest(fn, retries = 5, delay = 1000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            return await fn(); // ✅ Attempt request
+        } catch (err) {
+            if (err.response?.status === 429) {
+                // ✅ Handle rate limiting (Retry-After Header)
+                const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
+                console.warn(`[WARN] Rate-limited by API. Waiting for ${retryAfter} seconds before retrying...`);
+                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            } else if (attempt === retries) {
+                console.error("❌ Max retries reached. Request failed.");
+                throw err;
+            } else {
+                // ✅ Exponential Backoff for Other Errors
+                const backoff = delay * Math.pow(2, attempt - 1);
+                console.warn(`[WARN] Retrying (${attempt}/${retries}) after ${backoff}ms: ${err.message}`);
+                await new Promise(resolve => setTimeout(resolve, backoff));
+            }
+        }
     }
-  }
-  throw new Error('Maximum retry attempts exceeded.');
 }
-
 
 // ✅ Corrected cachedFetch function
 async function cachedFetch(key, fetchFn) {
@@ -533,41 +532,79 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 }
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
-async function fetchTokenPrices(network, tokens) {
-    // ✅ Extract only the token addresses from the array
+// async function fetchTokenPrices(network, tokens) {
+//     // ✅ Extract only the token addresses from the array
+//     const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
+//     const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Format API request URL
+
+//     const config = {
+//         headers: {
+//             Authorization: `Bearer ${API_KEY}`
+//         },
+//         params: { currency: "USD" }  // Request prices in USD
+//     };
+
+//     return await retryRequest(async () => {
+//         try {
+//             console.log(`📡 Fetching prices for network ${network}...`);
+//             const response = await axios.get(url, config);
+
+//             if (!response.data) {
+//                 console.error(`❌ No price data returned for network ${network}`);
+//                 return null;
+//             }
+
+//             console.log(`✅ Fetched prices for network ${network}`);
+//             // ✅ Convert response data to a structured format
+//             return Object.fromEntries(
+//                 Object.entries(response.data).map(([token, price]) => [
+//                     token.toLowerCase(),
+//                     parseFloat(price),
+//                 ])
+//             );
+//         } catch (error) {
+//             console.error(`❌ Error fetching prices for ${network}:`, error.response?.data || error.message);
+//             throw error;  // Ensure retry logic catches this
+//         }
+//     });
+// }
+
+async function fetchTokenPrices(networkId, tokens) {
     const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
-    const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Format API request URL
+    const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
     const config = {
         headers: {
-            Authorization: `Bearer ${API_KEY}`
+            Authorization: `Bearer ${API_KEY}`,
         },
-        params: { currency: "USD" }  // Request prices in USD
+        params: { currency: "USD" },
     };
 
-    return await retryRequest(async () => {
-        try {
-            console.log(`📡 Fetching prices for network ${network}...`);
-            const response = await axios.get(url, config);
+    try {
+        // ✅ Apply `retryRequest()` to handle rate limits
+        const response = await retryRequest(() => axios.get(url, config));
 
-            if (!response.data) {
-                console.error(`❌ No price data returned for network ${network}`);
-                return null;
-            }
+        if (!response.data || !response.data.prices) {
+            console.error(`❌ No valid price data returned for network ${networkId}`);
+            return { networkId, prices: {} }; // Return empty price data
+        }
 
-            console.log(`✅ Fetched prices for network ${network}`);
-            // ✅ Convert response data to a structured format
-            return Object.fromEntries(
+        console.log(`✅ Successfully fetched prices for network ${networkId}`);
+
+        // ✅ Convert API response into structured format
+        return {
+            networkId,
+            prices: Object.fromEntries(
                 Object.entries(response.data).map(([token, price]) => [
                     token.toLowerCase(),
                     parseFloat(price),
                 ])
-            );
-        } catch (error) {
-            console.error(`❌ Error fetching prices for ${network}:`, error.response?.data || error.message);
-            throw error;  // Ensure retry logic catches this
-        }
-    });
+            ),
+        };
+    } catch (error) {
+        console.error(`❌ Error fetching prices for ${networkId}:`, error.response?.data || error.message);
+        return { networkId, prices: {} }; // Return empty prices to avoid crashing
+    }
 }
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
@@ -644,28 +681,26 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
 async function fetchPricesForBothChains() {
     try {
-        // Fetch prices for both networks with rate limiting
-        const responses = await Promise.all(
-            Object.entries(NETWORKS).map(async ([networkName, networkId]) => {
-                return await retryRequest(async () => {
-                    const tokens = TOKENS[networkName]; // ✅ Extract token array
-                    const prices = await fetchTokenPrices(networkId, tokens); // ✅ Pass correct format
+        // ✅ Fetch prices for both networks
+        const responses = await Promise.all([
+            fetchTokenPrices(NETWORKS.POLYGON, TOKENS.POLYGON),
+            fetchTokenPrices(NETWORKS.ARBITRUM, TOKENS.ARBITRUM),
+        ]);
 
-                    return { networkName, networkId, prices }; // ✅ Include network ID
-                });
-            })
-        );
+        // ✅ Ensure price data is valid before continuing
+        const pricesByNetwork = {
+            POLYGON: responses.find(res => res.networkId === NETWORKS.POLYGON) || { networkId: NETWORKS.POLYGON, prices: {} },
+            ARBITRUM: responses.find(res => res.networkId === NETWORKS.ARBITRUM) || { networkId: NETWORKS.ARBITRUM, prices: {} },
+        };
 
-        // ✅ Convert results into an object format
-        return Object.fromEntries(
-            responses.map(({ networkName, networkId, prices }) => [networkName, { networkId, prices }])
-        );
+        console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
+
+        return pricesByNetwork;
     } catch (error) {
         console.error("❌ Error fetching prices for both chains:", error);
         return null;
     }
 }
-
 
 // Helper function for delay
 function delay(ms) {
