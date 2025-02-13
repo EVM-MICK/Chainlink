@@ -1010,10 +1010,10 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
     console.log("✅ Checking for arbitrage opportunities...");
 
-    // Iterate over the token list
+    // Iterate over each token in POLYGON (assuming same tokens exist in ARBITRUM)
     for (let token of TOKENS.POLYGON) {
         const tokenName = token.name;
-        const polygonTokenAddress = token.address.toLowerCase(); // ✅ Convert to lowercase for matching
+        const polygonTokenAddress = token.address.toLowerCase(); 
         const arbitrumTokenAddress = TOKENS.ARBITRUM.find(t => t.name === tokenName)?.address.toLowerCase();
 
         if (!polygonTokenAddress || !arbitrumTokenAddress) {
@@ -1021,9 +1021,9 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
             continue;
         }
 
-        // Ensure we correctly fetch prices using the token address
-        let polyPrice = polygonPrices[polygonTokenAddress] || null;
-        let arbPrice = arbitrumPrices[arbitrumTokenAddress] || null;
+        // Fetch prices using token addresses (as returned from the API)
+        let polyPrice = polygonPrices[polygonTokenAddress] ?? null;
+        let arbPrice = arbitrumPrices[arbitrumTokenAddress] ?? null;
 
         if (!polyPrice || !arbPrice) {
             console.warn(`⚠️ Missing price data for ${tokenName}. Polygon: $${polyPrice}, Arbitrum: $${arbPrice}`);
@@ -1129,6 +1129,7 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
+
 
 
 
