@@ -1002,7 +1002,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
     let opportunities = [];
 
     // Ensure both networks have valid price data
-    if (!pricesByNetwork.POLYGON || !pricesByNetwork.ARBITRUM) {
+    if (!pricesByNetwork.POLYGON?.prices || !pricesByNetwork.ARBITRUM?.prices) {
         console.error("❌ Invalid price data for either Arbitrum or Polygon. Exiting...");
         return opportunities;
     }
@@ -1013,7 +1013,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
     const polygonPrices = pricesByNetwork.POLYGON.prices;
     const arbitrumPrices = pricesByNetwork.ARBITRUM.prices;
 
-    // Iterate over each token in POLYGON (assuming same tokens exist in ARBITRUM)
+    // Iterate over tokens by address for precise matching
     for (let token of TOKENS.POLYGON) {
         const tokenName = token.name;
         const polygonTokenAddress = token.address.toLowerCase();
@@ -1024,7 +1024,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
             continue;
         }
 
-        // Fetch prices using token addresses from API response
+        // ✅ Fetch prices using token addresses (ensures proper mapping)
         let polyPrice = polygonPrices[polygonTokenAddress] ?? null;
         let arbPrice = arbitrumPrices[arbitrumTokenAddress] ?? null;
 
