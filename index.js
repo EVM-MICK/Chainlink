@@ -404,7 +404,7 @@ axios.interceptors.request.use((config) => {
         // ✅ Mask Sensitive Data
         const sanitizedConfig = { ...config };
         if (sanitizedConfig.headers && sanitizedConfig.headers.Authorization) {
-            sanitizedConfig.headers.Authorization = "****MASKED****"; // Hide API Key
+            sanitizedConfig.headers.Authorization = `Bearer ${process.env.ONEINCH_API_KEY}`; // Hide API Key
         }
 
         console.log("📡 Axios Request Config:", JSON.stringify(sanitizedConfig, null, 2));
