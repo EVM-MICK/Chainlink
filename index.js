@@ -572,7 +572,7 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 async function fetchTokenPrices(networkId, tokenAddresses) {
     if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
         console.error(`❌ No valid token addresses for network ${networkId}. Skipping request.`);
-        return { networkId, prices: null };
+        return { networkId, prices: {} };
     }
 
     // ✅ Ensure addresses are properly formatted in URL
@@ -580,14 +580,12 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
     const config = {
-        headers: {
-            Authorization: `Bearer ${API_KEY}`,
-        },
+        headers: { Authorization: `Bearer ${API_KEY}` },
         params: { currency: "USD" },
     };
 
     let retries = 5;
-    let delay = 1000;
+    let delay = 1000; // Start with a 1-second delay
     while (retries > 0) {
         try {
             console.log(`📡 Fetching prices for network ${networkId}...`);
@@ -599,7 +597,7 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
                 console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
                 retries--;
                 await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2;
+                delay *= 2; // Exponential backoff
                 continue;
             }
 
@@ -616,7 +614,7 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
         } catch (error) {
             if (error.response?.status === 429) {
                 console.warn(`🚨 Rate-limited by API. Waiting before retrying...`);
-                await new Promise(resolve => setTimeout(resolve, delay * 1.5));
+                await new Promise(resolve => setTimeout(resolve, delay * 1.5)); // Slightly increase wait time
             } else {
                 console.error(`❌ Error fetching prices for ${networkId}: ${error.message}`);
             }
@@ -628,7 +626,7 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
     }
 
     console.error(`❌ Failed to fetch valid price data for network ${networkId} after multiple retries.`);
-    return { networkId, prices: null };
+    return { networkId, prices: {} };
 }
 
 
@@ -712,29 +710,28 @@ async function fetchPricesForBothChains() {
         const polygonAddresses = TOKENS.POLYGON.map(t => t.address);
         const arbitrumAddresses = TOKENS.ARBITRUM.map(t => t.address);
 
-        // ✅ Ensure no empty values before sending requests
+        // ✅ Ensure token lists are not empty before making requests
         if (polygonAddresses.length === 0 || arbitrumAddresses.length === 0) {
             console.error("❌ No token addresses found. Aborting price fetch.");
             return null;
         }
 
-        const responses = await Promise.all([
-            fetchTokenPrices(NETWORKS.POLYGON, polygonAddresses),
-            fetchTokenPrices(NETWORKS.ARBITRUM, arbitrumAddresses),
-        ]);
+        // ✅ Fetch prices one at a time to respect 1RPS limit
+        const polygonPrices = await fetchTokenPrices(NETWORKS.POLYGON, polygonAddresses);
+        await new Promise(resolve => setTimeout(resolve, 1100)); // Respect 1RPS limit
+        const arbitrumPrices = await fetchTokenPrices(NETWORKS.ARBITRUM, arbitrumAddresses);
 
         // ✅ Ensure valid response structure
         const pricesByNetwork = {
-            POLYGON: responses.find(res => res?.networkId === NETWORKS.POLYGON) ?? { networkId: NETWORKS.POLYGON, prices: null },
-            ARBITRUM: responses.find(res => res?.networkId === NETWORKS.ARBITRUM) ?? { networkId: NETWORKS.ARBITRUM, prices: null },
+            POLYGON: polygonPrices ?? { networkId: NETWORKS.POLYGON, prices: {} },
+            ARBITRUM: arbitrumPrices ?? { networkId: NETWORKS.ARBITRUM, prices: {} },
         };
 
-        // ✅ Prevent unnecessary infinite retries
+        // ✅ If prices are empty, avoid infinite retries but retry once
         if (!pricesByNetwork.POLYGON.prices || !pricesByNetwork.ARBITRUM.prices) {
             console.warn("⚠️ Some price data is missing. Retrying one more time...");
             await new Promise(resolve => setTimeout(resolve, 1500)); // Small delay
-            const retryResponse = await fetchPricesForBothChains();
-            return retryResponse || pricesByNetwork; // Return retry result if available
+            return await fetchPricesForBothChains();
         }
 
         console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
