@@ -697,20 +697,27 @@ async function fetchPricesForBothChains() {
     try {
         console.log("🔍 Fetching latest prices...");
 
+        // ✅ Extract token addresses for each network
+        const polygonTokenAddresses = TOKENS.POLYGON.map(token => token.address);
+        const arbitrumTokenAddresses = TOKENS.ARBITRUM.map(token => token.address);
+
+        // ✅ Fetch prices for both networks concurrently
         const responses = await Promise.all([
-            fetchTokenPrices(NETWORKS.POLYGON, TOKENS.POLYGON),
-            fetchTokenPrices(NETWORKS.ARBITRUM, TOKENS.ARBITRUM),
+            fetchTokenPrices(NETWORKS.POLYGON, polygonTokenAddresses),
+            fetchTokenPrices(NETWORKS.ARBITRUM, arbitrumTokenAddresses),
         ]);
 
+        // ✅ Structure response data correctly
         const pricesByNetwork = {
-            POLYGON: responses.find(res => res.networkId === NETWORKS.POLYGON) || { networkId: NETWORKS.POLYGON, prices: {} },
-            ARBITRUM: responses.find(res => res.networkId === NETWORKS.ARBITRUM) || { networkId: NETWORKS.ARBITRUM, prices: {} },
+            POLYGON: responses.find(res => res?.networkId === NETWORKS.POLYGON) || { networkId: NETWORKS.POLYGON, prices: {} },
+            ARBITRUM: responses.find(res => res?.networkId === NETWORKS.ARBITRUM) || { networkId: NETWORKS.ARBITRUM, prices: {} },
         };
 
-        // ✅ Check if either response is empty and retry fetching
+        // ✅ Check for missing price data and retry if necessary
         if (Object.keys(pricesByNetwork.POLYGON.prices).length === 0 || Object.keys(pricesByNetwork.ARBITRUM.prices).length === 0) {
             console.warn("⚠️ Some price data is missing. Retrying...");
-            return await fetchPricesForBothChains(); // ✅ Re-run function until we get data
+            await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Add small delay before retrying
+            return await fetchPricesForBothChains(); // ✅ Re-run function recursively
         }
 
         console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
