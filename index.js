@@ -569,13 +569,14 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 //     });
 // }
 
-async function fetchTokenPrices(networkId, tokens) {
-    if (!tokens || tokens.length === 0) {
-        console.error(`❌ No tokens provided for network ${networkId}. Skipping request.`);
-        return { networkId, prices: null }; // Return null for missing price data
+async function fetchTokenPrices(networkId, tokenAddresses) {
+    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
+        console.error(`❌ No valid token addresses for network ${networkId}. Skipping request.`);
+        return { networkId, prices: null };
     }
 
-    const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
+    // ✅ Ensure addresses are properly formatted in URL
+    const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.toLowerCase()).join(",");
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
     const config = {
@@ -586,7 +587,7 @@ async function fetchTokenPrices(networkId, tokens) {
     };
 
     let retries = 5;
-    let delay = 1000; // Start with 1s delay
+    let delay = 1000;
     while (retries > 0) {
         try {
             console.log(`📡 Fetching prices for network ${networkId}...`);
@@ -594,12 +595,11 @@ async function fetchTokenPrices(networkId, tokens) {
             const response = await axios.get(url, config);
             const responseData = response.data;
 
-            // ✅ Validate response structure and check for missing data
-            if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
+            if (!responseData?.prices || Object.keys(responseData.prices).length === 0) {
                 console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
                 retries--;
                 await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2; // Exponential backoff
+                delay *= 2;
                 continue;
             }
 
@@ -623,14 +623,13 @@ async function fetchTokenPrices(networkId, tokens) {
 
             retries--;
             await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; // Exponential backoff
+            delay *= 2;
         }
     }
 
     console.error(`❌ Failed to fetch valid price data for network ${networkId} after multiple retries.`);
-    return { networkId, prices: null }; // ✅ Use `null` instead of `{}` for consistency
+    return { networkId, prices: null };
 }
-
 
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
@@ -709,27 +708,33 @@ async function fetchPricesForBothChains() {
     try {
         console.log("🔍 Fetching latest prices...");
 
-        // ✅ Extract token addresses for each network
-        const polygonTokenAddresses = TOKENS.POLYGON.map(token => token.address);
-        const arbitrumTokenAddresses = TOKENS.ARBITRUM.map(token => token.address);
+        // ✅ Extract token addresses properly
+        const polygonAddresses = TOKENS.POLYGON.map(t => t.address);
+        const arbitrumAddresses = TOKENS.ARBITRUM.map(t => t.address);
 
-        // ✅ Fetch prices for both networks concurrently
+        // ✅ Ensure no empty values before sending requests
+        if (polygonAddresses.length === 0 || arbitrumAddresses.length === 0) {
+            console.error("❌ No token addresses found. Aborting price fetch.");
+            return null;
+        }
+
         const responses = await Promise.all([
-            fetchTokenPrices(NETWORKS.POLYGON, polygonTokenAddresses),
-            fetchTokenPrices(NETWORKS.ARBITRUM, arbitrumTokenAddresses),
+            fetchTokenPrices(NETWORKS.POLYGON, polygonAddresses),
+            fetchTokenPrices(NETWORKS.ARBITRUM, arbitrumAddresses),
         ]);
 
-        // ✅ Structure response data correctly
+        // ✅ Ensure valid response structure
         const pricesByNetwork = {
-            POLYGON: responses.find(res => res?.networkId === NETWORKS.POLYGON) || { networkId: NETWORKS.POLYGON, prices: {} },
-            ARBITRUM: responses.find(res => res?.networkId === NETWORKS.ARBITRUM) || { networkId: NETWORKS.ARBITRUM, prices: {} },
+            POLYGON: responses.find(res => res?.networkId === NETWORKS.POLYGON) ?? { networkId: NETWORKS.POLYGON, prices: null },
+            ARBITRUM: responses.find(res => res?.networkId === NETWORKS.ARBITRUM) ?? { networkId: NETWORKS.ARBITRUM, prices: null },
         };
 
-        // ✅ Check for missing price data and retry if necessary
-        if (Object.keys(pricesByNetwork.POLYGON.prices).length === 0 || Object.keys(pricesByNetwork.ARBITRUM.prices).length === 0) {
-            console.warn("⚠️ Some price data is missing. Retrying...");
-            await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Add small delay before retrying
-            return await fetchPricesForBothChains(); // ✅ Re-run function recursively
+        // ✅ Prevent unnecessary infinite retries
+        if (!pricesByNetwork.POLYGON.prices || !pricesByNetwork.ARBITRUM.prices) {
+            console.warn("⚠️ Some price data is missing. Retrying one more time...");
+            await new Promise(resolve => setTimeout(resolve, 1500)); // Small delay
+            const retryResponse = await fetchPricesForBothChains();
+            return retryResponse || pricesByNetwork; // Return retry result if available
         }
 
         console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
