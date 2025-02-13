@@ -575,8 +575,9 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
         return { networkId, prices: {} };
     }
 
-    // ✅ Ensure addresses are properly formatted in URL
-    const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.toLowerCase()).join(",");
+    // ✅ Ensure addresses are properly formatted in URL const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
+    //const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.toLowerCase()).join(",");
+   const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.address).join(",").toLowerCase();
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
     const config = {
