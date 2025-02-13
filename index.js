@@ -205,18 +205,33 @@ const NETWORKS = {
     ARBITRUM: 42161
 };
 
- const TOKENS = {
-    POLYGON: {
-        USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-        WETH: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
-        WBTC: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
-    },
-    ARBITRUM: {
-        USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-        WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-        WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
-    }
+//  const TOKENS = {
+//     POLYGON: {
+//         USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+//         WETH: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
+//         WBTC: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
+//     },
+//     ARBITRUM: {
+//         USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+//         WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+//         WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
+//     }
+// };
+
+const TOKENS = {
+    POLYGON: [
+        { name: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
+        { name: "WETH", address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619" },
+        { name: "WBTC", address: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6" }
+    ],
+    ARBITRUM: [
+        { name: "USDC", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
+        { name: "WETH", address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1" },
+        { name: "WBTC", address: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f" }
+    ]
 };
+
+
 
 const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
 const TRADE_SIZE_USDC = 100000; // $100,000 per trade
@@ -885,72 +900,200 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 
 
 // 🚀 Detect Arbitrage Opportunities
+// async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
+//     let opportunities = [];
+
+//     // Ensure the prices data is valid
+//     if (!arbitrumPrices || !polygonPrices) {
+//         console.error("❌ Invalid price data for either Arbitrum or Polygon. Exiting...");
+//         return opportunities;  // Return an empty list if prices are invalid
+//     }
+
+//     // Iterate over the tokens
+//     for (let token in TOKENS.POLYGON) {
+//         // Ensure that the token prices exist for both networks
+//         let arbPrice = arbitrumPrices[TOKENS.ARBITRUM[token]];
+//         let polyPrice = polygonPrices[TOKENS.POLYGON[token]];
+
+//         // Skip if prices for the token are missing
+//         if (!arbPrice || !polyPrice) {
+//             console.log(`⚠️ Missing price data for token: ${token}`);
+//             continue;  // Skip to the next token if price data is missing
+//         }
+
+//         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
+//         if (arbPrice > polyPrice) {
+//             let estimatedProfit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
+            
+//             if (estimatedProfit >= PROFIT_THRESHOLD) {
+//                 try {
+//                     console.log(`🔄 Fetching swap quote: Buy on Polygon → Sell on Arbitrum...`);
+                    
+//                     let buyAmount = await fetchSwapQuote(
+//                         NETWORKS.POLYGON, // ✅ Pass network ID
+//                         TOKENS.POLYGON.USDC, 
+//                         TOKENS.POLYGON[token], 
+//                         TRADE_SIZE_USDC
+//                     );
+//                     if (!buyAmount) continue; // Skip if quote fails
+
+//                     let sellAmount = await fetchSwapQuote(
+//                         NETWORKS.ARBITRUM, // ✅ Pass network ID
+//                         TOKENS.ARBITRUM[token], 
+//                         TOKENS.ARBITRUM.USDC, 
+//                         buyAmount
+//                     );
+//                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
+
+//                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
+//                     if (actualProfit >= PROFIT_THRESHOLD) {
+//                         opportunities.push({ 
+//                             token, 
+//                             buyOn: "Polygon", 
+//                             sellOn: "Arbitrum", 
+//                             profit: actualProfit, 
+//                             buyAmount, 
+//                             sellAmount 
+//                         });
+
+//                         await sendTelegramTradeAlert({
+//                             title: "📢 Arbitrage Opportunity Found",
+//                             message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
+//                             🏦 Expected Profit: $${actualProfit}
+//                             🛒 Buy Amount: ${buyAmount} ${token} 
+//                             💵 Sell Amount: ${sellAmount} USDC`
+//                         });
+//                     }
+//                 } catch (error) {
+//                     console.error(`❌ Error fetching swap quote for ${token} (Polygon -> Arbitrum):`, error);
+//                 }
+//             }
+//         }
+
+//         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
+//         if (polyPrice > arbPrice) {
+//             let estimatedProfit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
+            
+//             if (estimatedProfit >= PROFIT_THRESHOLD) {
+//                 try {
+//                     console.log(`🔄 Fetching swap quote: Buy on Arbitrum → Sell on Polygon...`);
+
+//                     let buyAmount = await fetchSwapQuote(
+//                         NETWORKS.ARBITRUM, // ✅ Pass network ID
+//                         TOKENS.ARBITRUM.USDC, 
+//                         TOKENS.ARBITRUM[token], 
+//                         TRADE_SIZE_USDC
+//                     );
+//                     if (!buyAmount) continue; // Skip if quote fails
+
+//                     let sellAmount = await fetchSwapQuote(
+//                         NETWORKS.POLYGON, // ✅ Pass network ID
+//                         TOKENS.POLYGON[token], 
+//                         TOKENS.POLYGON.USDC, 
+//                         buyAmount
+//                     );
+//                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
+
+//                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
+//                     if (actualProfit >= PROFIT_THRESHOLD) {
+//                         opportunities.push({ 
+//                             token, 
+//                             buyOn: "Arbitrum", 
+//                             sellOn: "Polygon", 
+//                             profit: actualProfit, 
+//                             buyAmount, 
+//                             sellAmount 
+//                         });
+
+//                         await sendTelegramTradeAlert({
+//                             title: "📢 Arbitrage Opportunity Found",
+//                             message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
+//                             🏦 Expected Profit: $${actualProfit}
+//                             🛒 Buy Amount: ${buyAmount} ${token} 
+//                             💵 Sell Amount: ${sellAmount} USDC`
+//                         });
+//                     }
+//                 } catch (error) {
+//                     console.error(`❌ Error fetching swap quote for ${token} (Arbitrum -> Polygon):`, error);
+//                 }
+//             }
+//         }
+//     }
+
+//     // Return sorted opportunities based on profit
+//     return opportunities.sort((a, b) => b.profit - a.profit);
+// }
+
 async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
     let opportunities = [];
 
-    // Ensure the prices data is valid
     if (!arbitrumPrices || !polygonPrices) {
-        console.error("❌ Invalid price data for either Arbitrum or Polygon. Exiting...");
-        return opportunities;  // Return an empty list if prices are invalid
+        console.error("❌ Invalid price data for Arbitrum or Polygon. Exiting...");
+        return opportunities;
     }
 
-    // Iterate over the tokens
-    for (let token in TOKENS.POLYGON) {
-        // Ensure that the token prices exist for both networks
-        let arbPrice = arbitrumPrices[TOKENS.ARBITRUM[token]];
-        let polyPrice = polygonPrices[TOKENS.POLYGON[token]];
+    console.log("✅ Checking for arbitrage opportunities...");
 
-        // Skip if prices for the token are missing
-        if (!arbPrice || !polyPrice) {
-            console.log(`⚠️ Missing price data for token: ${token}`);
-            continue;  // Skip to the next token if price data is missing
+    for (let polygonToken of TOKENS.POLYGON) {
+        const { name: tokenName, address: polygonAddress } = polygonToken;
+        const arbitrumToken = TOKENS.ARBITRUM.find(t => t.name === tokenName);
+
+        if (!arbitrumToken) {
+            console.warn(`⚠️ Skipping ${tokenName}: No matching address on both networks`);
+            continue;
         }
+
+        const { address: arbitrumAddress } = arbitrumToken;
+
+        let polyPrice = polygonPrices[polygonAddress] || null;
+        let arbPrice = arbitrumPrices[arbitrumAddress] || null;
+
+        if (!polyPrice || !arbPrice) {
+            console.warn(`⚠️ Missing price data for ${tokenName}. Polygon: $${polyPrice}, Arbitrum: $${arbPrice}`);
+            continue;
+        }
+
+        console.log(`🔹 ${tokenName} Prices → Polygon: $${polyPrice}, Arbitrum: $${arbPrice}`);
 
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
         if (arbPrice > polyPrice) {
             let estimatedProfit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
-            
             if (estimatedProfit >= PROFIT_THRESHOLD) {
                 try {
-                    console.log(`🔄 Fetching swap quote: Buy on Polygon → Sell on Arbitrum...`);
-                    
+                    console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
+
                     let buyAmount = await fetchSwapQuote(
-                        NETWORKS.POLYGON, // ✅ Pass network ID
-                        TOKENS.POLYGON.USDC, 
-                        TOKENS.POLYGON[token], 
+                        NETWORKS.POLYGON,
+                        TOKENS.POLYGON.find(t => t.name === "USDC").address,
+                        polygonAddress,
                         TRADE_SIZE_USDC
                     );
-                    if (!buyAmount) continue; // Skip if quote fails
+                    if (!buyAmount) continue;
 
                     let sellAmount = await fetchSwapQuote(
-                        NETWORKS.ARBITRUM, // ✅ Pass network ID
-                        TOKENS.ARBITRUM[token], 
-                        TOKENS.ARBITRUM.USDC, 
+                        NETWORKS.ARBITRUM,
+                        arbitrumAddress,
+                        TOKENS.ARBITRUM.find(t => t.name === "USDC").address,
                         buyAmount
                     );
-                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
+                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue;
 
                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
                     if (actualProfit >= PROFIT_THRESHOLD) {
-                        opportunities.push({ 
-                            token, 
-                            buyOn: "Polygon", 
-                            sellOn: "Arbitrum", 
-                            profit: actualProfit, 
-                            buyAmount, 
-                            sellAmount 
-                        });
+                        opportunities.push({ token: tokenName, buyOn: "Polygon", sellOn: "Arbitrum", profit: actualProfit, buyAmount, sellAmount });
+
+                        console.log(`✅ Arbitrage Found: Buy ${tokenName} on Polygon @ $${polyPrice} → Sell on Arbitrum @ $${arbPrice} | Profit: $${actualProfit}`);
 
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
                             message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
                             🏦 Expected Profit: $${actualProfit}
-                            🛒 Buy Amount: ${buyAmount} ${token} 
+                            🛒 Buy Amount: ${buyAmount} ${tokenName} 
                             💵 Sell Amount: ${sellAmount} USDC`
                         });
                     }
                 } catch (error) {
-                    console.error(`❌ Error fetching swap quote for ${token} (Polygon -> Arbitrum):`, error);
+                    console.error(`❌ Error fetching swap quote for ${tokenName} (Polygon → Arbitrum):`, error);
                 }
             }
         }
@@ -958,54 +1101,47 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
         if (polyPrice > arbPrice) {
             let estimatedProfit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
-            
             if (estimatedProfit >= PROFIT_THRESHOLD) {
                 try {
-                    console.log(`🔄 Fetching swap quote: Buy on Arbitrum → Sell on Polygon...`);
+                    console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
 
                     let buyAmount = await fetchSwapQuote(
-                        NETWORKS.ARBITRUM, // ✅ Pass network ID
-                        TOKENS.ARBITRUM.USDC, 
-                        TOKENS.ARBITRUM[token], 
+                        NETWORKS.ARBITRUM,
+                        TOKENS.ARBITRUM.find(t => t.name === "USDC").address,
+                        arbitrumAddress,
                         TRADE_SIZE_USDC
                     );
-                    if (!buyAmount) continue; // Skip if quote fails
+                    if (!buyAmount) continue;
 
                     let sellAmount = await fetchSwapQuote(
-                        NETWORKS.POLYGON, // ✅ Pass network ID
-                        TOKENS.POLYGON[token], 
-                        TOKENS.POLYGON.USDC, 
+                        NETWORKS.POLYGON,
+                        polygonAddress,
+                        TOKENS.POLYGON.find(t => t.name === "USDC").address,
                         buyAmount
                     );
-                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue; // Ensure profitable after swap fees
+                    if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue;
 
                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
                     if (actualProfit >= PROFIT_THRESHOLD) {
-                        opportunities.push({ 
-                            token, 
-                            buyOn: "Arbitrum", 
-                            sellOn: "Polygon", 
-                            profit: actualProfit, 
-                            buyAmount, 
-                            sellAmount 
-                        });
+                        opportunities.push({ token: tokenName, buyOn: "Arbitrum", sellOn: "Polygon", profit: actualProfit, buyAmount, sellAmount });
+
+                        console.log(`✅ Arbitrage Found: Buy ${tokenName} on Arbitrum @ $${arbPrice} → Sell on Polygon @ $${polyPrice} | Profit: $${actualProfit}`);
 
                         await sendTelegramTradeAlert({
                             title: "📢 Arbitrage Opportunity Found",
                             message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
                             🏦 Expected Profit: $${actualProfit}
-                            🛒 Buy Amount: ${buyAmount} ${token} 
+                            🛒 Buy Amount: ${buyAmount} ${tokenName} 
                             💵 Sell Amount: ${sellAmount} USDC`
                         });
                     }
                 } catch (error) {
-                    console.error(`❌ Error fetching swap quote for ${token} (Arbitrum -> Polygon):`, error);
+                    console.error(`❌ Error fetching swap quote for ${tokenName} (Arbitrum → Polygon):`, error);
                 }
             }
         }
     }
 
-    // Return sorted opportunities based on profit
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
 
