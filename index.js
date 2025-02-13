@@ -575,9 +575,8 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
         return { networkId, prices: {} };
     }
 
-    // ✅ Ensure addresses are properly formatted in URL const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
+    // ✅ Ensure addresses are properly formatted in URL
     const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.toLowerCase()).join(",");
-   //const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.address).join(",").toLowerCase();
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
     const config = {
@@ -594,7 +593,8 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
             const response = await axios.get(url, config);
             const responseData = response.data;
 
-            if (!responseData?.prices || Object.keys(responseData.prices).length === 0) {
+            // ✅ Ensure response data contains valid prices
+            if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
                 console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
                 retries--;
                 await new Promise(resolve => setTimeout(resolve, delay));
@@ -603,15 +603,16 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
             }
 
             console.log(`✅ Successfully fetched prices for network ${networkId}`);
-            return {
-                networkId,
-                prices: Object.fromEntries(
-                    Object.entries(responseData.prices).map(([token, price]) => [
-                        token.toLowerCase(),
-                        parseFloat(price),
-                    ])
-                ),
-            };
+
+            // ✅ Extract token addresses and corresponding prices
+            const prices = {};
+            for (const [tokenAddress, price] of Object.entries(responseData.prices)) {
+                if (price && !isNaN(price)) {
+                    prices[tokenAddress.toLowerCase()] = parseFloat(price);
+                }
+            }
+
+            return { networkId, prices };
         } catch (error) {
             if (error.response?.status === 429) {
                 console.warn(`🚨 Rate-limited by API. Waiting before retrying...`);
@@ -629,7 +630,6 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
     console.error(`❌ Failed to fetch valid price data for network ${networkId} after multiple retries.`);
     return { networkId, prices: {} };
 }
-
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
