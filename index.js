@@ -520,29 +520,25 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
 async function fetchTokenPrices(network, tokens) {
-   // const tokenList = tokens.join(",").toLowerCase();  // Format the token list correctly
-     // ✅ Extract token addresses and format them for API request
-    const tokenList = Object.values(tokens).join(",").toLowerCase();
-    const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Make the API request URL
+    const tokenList = Object.values(tokens).join(",").toLowerCase(); // Format token list
+    const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Construct API request URL
 
     const config = {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`
-        },
-        params: { currency: "USD" }  // Get the prices in USD
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        params: { currency: "USD" }  // Ensure prices are fetched in USD
     };
 
     try {
-        // Fetch the prices from the API
-        const response = await axios.get(url, config);
+        // ✅ Use retryRequest to handle rate limits
+        const response = await retryRequest(() => axios.get(url, config));
 
-        // Ensure the response contains valid data
+        // Ensure valid data is returned
         if (!response.data) {
             console.error(`❌ No price data returned for network ${network}`);
             return null;
         }
 
-        // Return the token prices as a formatted object
+        // ✅ Convert response to structured token prices object
         return Object.fromEntries(
             Object.entries(response.data).map(([token, price]) => [
                 token.toLowerCase(),
@@ -550,11 +546,10 @@ async function fetchTokenPrices(network, tokens) {
             ])
         );
     } catch (error) {
-        console.error(`Error fetching prices for ${network}:`, error.response?.data || error.message);
+        console.error(`❌ Error fetching prices for ${network}:`, error.response?.data || error.message);
         return null;  // Return null if the request fails
     }
 }
-
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
@@ -628,25 +623,50 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 
 
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
+// async function fetchPricesForBothChains() {
+//     try {
+//         // Fetch prices for both networks with their respective network IDs
+//         const responses = await Promise.all(
+//             Object.entries(NETWORKS).map(async ([networkName, networkId]) => {
+//                 const tokens = Object.values(TOKENS[networkName]); // Extract token addresses for the network
+//                 const prices = await fetchTokenPrices(networkId, tokens); // Fetch prices with network ID
+
+//                 return { networkName, networkId, prices }; // Include network ID in response
+//             })
+//         );
+
+//         // Convert the responses into an object with network IDs and price data
+//         return Object.fromEntries(
+//             responses.map(({ networkName, networkId, prices }) => [networkName, { networkId, prices }])
+//         );
+//     } catch (error) {
+//         console.error("❌ Error fetching prices:", error);
+//         return null; // Return null in case of failure
+//     }
+// }
+
 async function fetchPricesForBothChains() {
     try {
-        // Fetch prices for both networks with their respective network IDs
-        const responses = await Promise.all(
-            Object.entries(NETWORKS).map(async ([networkName, networkId]) => {
-                const tokens = Object.values(TOKENS[networkName]); // Extract token addresses for the network
-                const prices = await fetchTokenPrices(networkId, tokens); // Fetch prices with network ID
+        // ✅ Fetch prices sequentially with a delay to respect 1RPS limit
+        const results = {};
+        for (const [networkName, networkId] of Object.entries(NETWORKS)) {
+            console.log(`📡 Fetching prices for ${networkName} (ID: ${networkId})...`);
 
-                return { networkName, networkId, prices }; // Include network ID in response
-            })
-        );
+            const tokens = TOKENS[networkName]; // Extract token addresses
+            const prices = await fetchTokenPrices(networkId, tokens); // Fetch prices
 
-        // Convert the responses into an object with network IDs and price data
-        return Object.fromEntries(
-            responses.map(({ networkName, networkId, prices }) => [networkName, { networkId, prices }])
-        );
+            results[networkName] = { networkId, prices };
+
+            console.log(`✅ Fetched prices for ${networkName}:`, prices);
+
+            // ✅ Respect 1 request per second (1RPS)
+            await new Promise((resolve) => setTimeout(resolve, 1000));  
+        }
+
+        return results;
     } catch (error) {
         console.error("❌ Error fetching prices:", error);
-        return null; // Return null in case of failure
+        return null; // Return null if there is a failure
     }
 }
 
