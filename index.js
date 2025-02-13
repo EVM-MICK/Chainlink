@@ -592,26 +592,26 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
 
             const response = await axios.get(url, config);
             const responseData = response.data;
-            console.log(responseData);
-            // ✅ Ensure response data contains valid prices
-            // if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
-            //     console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
-            //     retries--;
-            //     await new Promise(resolve => setTimeout(resolve, delay));
-            //     delay *= 2; // Exponential backoff
-            //     continue;
-            // }
 
-            console.log(`✅ Successfully fetched prices for network ${networkId}`);
+            console.log(`✅ Raw API Response:`, responseData);
 
-            // ✅ Extract token addresses and corresponding prices
+            // ✅ Extract token addresses and corresponding prices directly from responseData
             const prices = {};
-            for (const [tokenAddress, price] of Object.entries(responseData.prices)) {
+            for (const [tokenAddress, price] of Object.entries(responseData)) {
                 if (price && !isNaN(price)) {
                     prices[tokenAddress.toLowerCase()] = parseFloat(price);
                 }
             }
 
+            if (Object.keys(prices).length === 0) {
+                console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
+                retries--;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff
+                continue;
+            }
+
+            console.log(`✅ Successfully fetched prices for network ${networkId}`);
             return { networkId, prices };
         } catch (error) {
             if (error.response?.status === 429) {
