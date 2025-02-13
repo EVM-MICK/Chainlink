@@ -533,38 +533,6 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 }
 
 // 🚀 Fetch Token Prices (API-DOCUMENTED FORMAT)
-// async function fetchTokenPrices(network, tokens) {
-//     const tokenList = Object.values(tokens).join(",").toLowerCase(); // Format token list
-//     const url = `${API_BASE_URL}/${network}/${tokenList}`;  // Construct API request URL
-
-//     const config = {
-//         headers: { Authorization: `Bearer ${API_KEY}` },
-//         params: { currency: "USD" }  // Ensure prices are fetched in USD
-//     };
-
-//     try {
-//         // ✅ Use retryRequest to handle rate limits
-//         const response = await retryRequest(() => axios.get(url, config));
-
-//         // Ensure valid data is returned
-//         if (!response.data) {
-//             console.error(`❌ No price data returned for network ${network}`);
-//             return null;
-//         }
-
-//         // ✅ Convert response to structured token prices object
-//         return Object.fromEntries(
-//             Object.entries(response.data).map(([token, price]) => [
-//                 token.toLowerCase(),
-//                 parseFloat(price),
-//             ])
-//         );
-//     } catch (error) {
-//         console.error(`❌ Error fetching prices for ${network}:`, error.response?.data || error.message);
-//         return null;  // Return null if the request fails
-//     }
-// }
-
 async function fetchTokenPrices(network, tokens) {
     // ✅ Extract only the token addresses from the array
     const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
@@ -577,28 +545,30 @@ async function fetchTokenPrices(network, tokens) {
         params: { currency: "USD" }  // Request prices in USD
     };
 
-    try {
-        // Fetch the prices from the API
-        const response = await axios.get(url, config);
+    return await retryRequest(async () => {
+        try {
+            console.log(`📡 Fetching prices for network ${network}...`);
+            const response = await axios.get(url, config);
 
-        if (!response.data) {
-            console.error(`❌ No price data returned for network ${network}`);
-            return null;
+            if (!response.data) {
+                console.error(`❌ No price data returned for network ${network}`);
+                return null;
+            }
+
+            console.log(`✅ Fetched prices for network ${network}`);
+            // ✅ Convert response data to a structured format
+            return Object.fromEntries(
+                Object.entries(response.data).map(([token, price]) => [
+                    token.toLowerCase(),
+                    parseFloat(price),
+                ])
+            );
+        } catch (error) {
+            console.error(`❌ Error fetching prices for ${network}:`, error.response?.data || error.message);
+            throw error;  // Ensure retry logic catches this
         }
-
-        // ✅ Convert response data to a structured format
-        return Object.fromEntries(
-            Object.entries(response.data).map(([token, price]) => [
-                token.toLowerCase(),
-                parseFloat(price),
-            ])
-        );
-    } catch (error) {
-        console.error(`Error fetching prices for ${network}:`, error.response?.data || error.message);
-        return null;
-    }
+    });
 }
-
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
@@ -672,49 +642,26 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 
 
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
-// async function fetchPricesForBothChains() {
-//     try {
-//         // ✅ Fetch prices sequentially with a delay to respect 1RPS limit
-//         const results = {};
-//         for (const [networkName, networkId] of Object.entries(NETWORKS)) {
-//             console.log(`📡 Fetching prices for ${networkName} (ID: ${networkId})...`);
-
-//             const tokens = TOKENS[networkName]; // Extract token addresses
-//             const prices = await fetchTokenPrices(networkId, tokens); // Fetch prices
-
-//             results[networkName] = { networkId, prices };
-
-//             console.log(`✅ Fetched prices for ${networkName}:`, prices);
-
-//             // ✅ Respect 1 request per second (1RPS)
-//             await new Promise((resolve) => setTimeout(resolve, 1000));  
-//         }
-
-//         return results;
-//     } catch (error) {
-//         console.error("❌ Error fetching prices:", error);
-//         return null; // Return null if there is a failure
-//     }
-// }
-
 async function fetchPricesForBothChains() {
     try {
-        // Fetch prices for both networks
+        // Fetch prices for both networks with rate limiting
         const responses = await Promise.all(
             Object.entries(NETWORKS).map(async ([networkName, networkId]) => {
-                const tokens = TOKENS[networkName]; // ✅ Extract tokens array
-                const prices = await fetchTokenPrices(networkId, tokens); // ✅ Pass correct format
+                return await retryRequest(async () => {
+                    const tokens = TOKENS[networkName]; // ✅ Extract token array
+                    const prices = await fetchTokenPrices(networkId, tokens); // ✅ Pass correct format
 
-                return { networkName, networkId, prices }; // ✅ Include network ID
+                    return { networkName, networkId, prices }; // ✅ Include network ID
+                });
             })
         );
 
-        // ✅ Convert results to an object format
+        // ✅ Convert results into an object format
         return Object.fromEntries(
             responses.map(({ networkName, networkId, prices }) => [networkName, { networkId, prices }])
         );
     } catch (error) {
-        console.error("❌ Error fetching prices:", error);
+        console.error("❌ Error fetching prices for both chains:", error);
         return null;
     }
 }
