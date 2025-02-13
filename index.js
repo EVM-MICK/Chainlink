@@ -570,6 +570,11 @@ async function submitFusionOrder(orderData, srcChainId, quoteId, secretHashes, s
 // }
 
 async function fetchTokenPrices(networkId, tokens) {
+    if (!tokens || tokens.length === 0) {
+        console.error(`❌ No tokens provided for network ${networkId}. Skipping request.`);
+        return { networkId, prices: null }; // Return null for missing price data
+    }
+
     const tokenList = tokens.map(t => t.address).join(",").toLowerCase();
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
 
@@ -581,16 +586,20 @@ async function fetchTokenPrices(networkId, tokens) {
     };
 
     let retries = 5;
+    let delay = 1000; // Start with 1s delay
     while (retries > 0) {
         try {
             console.log(`📡 Fetching prices for network ${networkId}...`);
 
             const response = await axios.get(url, config);
+            const responseData = response.data;
 
-            if (!response.data || !response.data.prices || Object.keys(response.data.prices).length === 0) {
-                console.warn(`❌ No valid price data returned for network ${networkId}. Retrying...`);
+            // ✅ Validate response structure and check for missing data
+            if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
+                console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
                 retries--;
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff
                 continue;
             }
 
@@ -598,7 +607,7 @@ async function fetchTokenPrices(networkId, tokens) {
             return {
                 networkId,
                 prices: Object.fromEntries(
-                    Object.entries(response.data.prices).map(([token, price]) => [
+                    Object.entries(responseData.prices).map(([token, price]) => [
                         token.toLowerCase(),
                         parseFloat(price),
                     ])
@@ -606,19 +615,22 @@ async function fetchTokenPrices(networkId, tokens) {
             };
         } catch (error) {
             if (error.response?.status === 429) {
-                console.warn(`[WARN] Rate-limited by API. Waiting before retrying...`);
-                await new Promise(resolve => setTimeout(resolve, 1500)); // Wait longer before retrying
+                console.warn(`🚨 Rate-limited by API. Waiting before retrying...`);
+                await new Promise(resolve => setTimeout(resolve, delay * 1.5));
             } else {
-                console.error(`❌ Error fetching prices for ${networkId}:`, error.message);
-                retries--;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                console.error(`❌ Error fetching prices for ${networkId}: ${error.message}`);
             }
+
+            retries--;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // Exponential backoff
         }
     }
 
     console.error(`❌ Failed to fetch valid price data for network ${networkId} after multiple retries.`);
-    return { networkId, prices: {} }; // Return empty object to avoid crashes
+    return { networkId, prices: null }; // ✅ Use `null` instead of `{}` for consistency
 }
+
 
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
