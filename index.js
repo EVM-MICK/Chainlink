@@ -998,21 +998,25 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 
 //     return opportunities.sort((a, b) => b.profit - a.profit);
 // }
-async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
+async function detectArbitrageOpportunities(pricesByNetwork) {
     let opportunities = [];
 
-    // Ensure price data is valid
-    if (!arbitrumPrices || !polygonPrices) {
+    // Ensure both networks have valid price data
+    if (!pricesByNetwork.POLYGON || !pricesByNetwork.ARBITRUM) {
         console.error("❌ Invalid price data for either Arbitrum or Polygon. Exiting...");
         return opportunities;
     }
 
     console.log("✅ Checking for arbitrage opportunities...");
 
+    // Extract prices using network IDs
+    const polygonPrices = pricesByNetwork.POLYGON.prices;
+    const arbitrumPrices = pricesByNetwork.ARBITRUM.prices;
+
     // Iterate over each token in POLYGON (assuming same tokens exist in ARBITRUM)
     for (let token of TOKENS.POLYGON) {
         const tokenName = token.name;
-        const polygonTokenAddress = token.address.toLowerCase(); 
+        const polygonTokenAddress = token.address.toLowerCase();
         const arbitrumTokenAddress = TOKENS.ARBITRUM.find(t => t.name === tokenName)?.address.toLowerCase();
 
         if (!polygonTokenAddress || !arbitrumTokenAddress) {
@@ -1020,7 +1024,7 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
             continue;
         }
 
-        // Fetch prices using token addresses (as returned from the API)
+        // Fetch prices using token addresses from API response
         let polyPrice = polygonPrices[polygonTokenAddress] ?? null;
         let arbPrice = arbitrumPrices[arbitrumTokenAddress] ?? null;
 
@@ -1128,7 +1132,6 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
-
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
     console.log(`🔍 Fetching Fusion+ quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
