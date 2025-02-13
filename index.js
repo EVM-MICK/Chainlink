@@ -592,15 +592,15 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
 
             const response = await axios.get(url, config);
             const responseData = response.data;
-
+            console.log(responseData);
             // ✅ Ensure response data contains valid prices
-            if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
-                console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
-                retries--;
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2; // Exponential backoff
-                continue;
-            }
+            // if (!responseData || !responseData.prices || Object.keys(responseData.prices).length === 0) {
+            //     console.warn(`⚠️ No valid price data received for network ${networkId}. Retrying...`);
+            //     retries--;
+            //     await new Promise(resolve => setTimeout(resolve, delay));
+            //     delay *= 2; // Exponential backoff
+            //     continue;
+            // }
 
             console.log(`✅ Successfully fetched prices for network ${networkId}`);
 
