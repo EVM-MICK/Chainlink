@@ -998,7 +998,6 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 
 //     return opportunities.sort((a, b) => b.profit - a.profit);
 // }
-
 async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
     let opportunities = [];
 
@@ -1129,8 +1128,6 @@ async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
 
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
-
-
 
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
