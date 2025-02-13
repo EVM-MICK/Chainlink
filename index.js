@@ -580,32 +580,46 @@ async function fetchTokenPrices(networkId, tokens) {
         params: { currency: "USD" },
     };
 
-    try {
-        // ✅ Apply `retryRequest()` to handle rate limits
-        const response = await retryRequest(() => axios.get(url, config));
+    let retries = 5;
+    while (retries > 0) {
+        try {
+            console.log(`📡 Fetching prices for network ${networkId}...`);
 
-        if (!response.data || !response.data.prices) {
-            console.error(`❌ No valid price data returned for network ${networkId}`);
-            return { networkId, prices: {} }; // Return empty price data
+            const response = await axios.get(url, config);
+
+            if (!response.data || !response.data.prices || Object.keys(response.data.prices).length === 0) {
+                console.warn(`❌ No valid price data returned for network ${networkId}. Retrying...`);
+                retries--;
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retrying
+                continue;
+            }
+
+            console.log(`✅ Successfully fetched prices for network ${networkId}`);
+            return {
+                networkId,
+                prices: Object.fromEntries(
+                    Object.entries(response.data.prices).map(([token, price]) => [
+                        token.toLowerCase(),
+                        parseFloat(price),
+                    ])
+                ),
+            };
+        } catch (error) {
+            if (error.response?.status === 429) {
+                console.warn(`[WARN] Rate-limited by API. Waiting before retrying...`);
+                await new Promise(resolve => setTimeout(resolve, 1500)); // Wait longer before retrying
+            } else {
+                console.error(`❌ Error fetching prices for ${networkId}:`, error.message);
+                retries--;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
-
-        console.log(`✅ Successfully fetched prices for network ${networkId}`);
-
-        // ✅ Convert API response into structured format
-        return {
-            networkId,
-            prices: Object.fromEntries(
-                Object.entries(response.data).map(([token, price]) => [
-                    token.toLowerCase(),
-                    parseFloat(price),
-                ])
-            ),
-        };
-    } catch (error) {
-        console.error(`❌ Error fetching prices for ${networkId}:`, error.response?.data || error.message);
-        return { networkId, prices: {} }; // Return empty prices to avoid crashing
     }
+
+    console.error(`❌ Failed to fetch valid price data for network ${networkId} after multiple retries.`);
+    return { networkId, prices: {} }; // Return empty object to avoid crashes
 }
+
 
 async function executeFusionSwap(trade, srcToken, dstToken, amount) {
     console.log(`🚀 Executing Fusion+ Swap: ${srcToken} → ${dstToken}, Amount: ${amount}`);
@@ -681,20 +695,25 @@ polygonContract.on("SwapExecuted", async (srcToken, dstToken, amount, returnAmou
 // 🚀 Fetch Prices for Both Chains (Using fetchTokenPrices)
 async function fetchPricesForBothChains() {
     try {
-        // ✅ Fetch prices for both networks
+        console.log("🔍 Fetching latest prices...");
+
         const responses = await Promise.all([
             fetchTokenPrices(NETWORKS.POLYGON, TOKENS.POLYGON),
             fetchTokenPrices(NETWORKS.ARBITRUM, TOKENS.ARBITRUM),
         ]);
 
-        // ✅ Ensure price data is valid before continuing
         const pricesByNetwork = {
             POLYGON: responses.find(res => res.networkId === NETWORKS.POLYGON) || { networkId: NETWORKS.POLYGON, prices: {} },
             ARBITRUM: responses.find(res => res.networkId === NETWORKS.ARBITRUM) || { networkId: NETWORKS.ARBITRUM, prices: {} },
         };
 
-        console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
+        // ✅ Check if either response is empty and retry fetching
+        if (Object.keys(pricesByNetwork.POLYGON.prices).length === 0 || Object.keys(pricesByNetwork.ARBITRUM.prices).length === 0) {
+            console.warn("⚠️ Some price data is missing. Retrying...");
+            return await fetchPricesForBothChains(); // ✅ Re-run function until we get data
+        }
 
+        console.log("✅ Successfully fetched prices:", JSON.stringify(pricesByNetwork, null, 2));
         return pricesByNetwork;
     } catch (error) {
         console.error("❌ Error fetching prices for both chains:", error);
