@@ -784,59 +784,53 @@ async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
 
 // 🚀 Telegram Notification
 async function sendTelegramTradeAlert(details) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-  // ✅ Validate the details object
-  if (!details || typeof details !== "object") {
-    console.error("❌ Invalid trade details. Cannot send Telegram alert.");
-    return;
-  }
+    // ✅ Validate the details object
+    if (!details || typeof details !== "object") {
+        console.error("❌ Invalid trade details. Cannot send Telegram alert.");
+        return;
+    }
 
-  // ✅ Validate all required fields before proceeding
-  const { buyOn, token, buyPrice, sellOn, sellPrice, profit } = details;
+    // ✅ Extract trade details
+    const { buyOn, token, buyAmount, sellOn, sellAmount, profit } = details;
 
-  if (!buyOn || !token || !buyPrice || !sellOn || !sellPrice || profit === undefined) {
-    console.warn("⚠️ Incomplete trade details detected. Some values may be missing.");
-  }
+    // ✅ Ensure values are correctly formatted
+    const formattedBuyAmount = buyAmount !== undefined ? Number(buyAmount).toFixed(2) : "N/A";
+    const formattedSellAmount = sellAmount !== undefined ? Number(sellAmount).toFixed(2) : "N/A";
+    const formattedProfit = profit !== undefined ? Number(profit).toFixed(2) : "N/A";
 
-  // ✅ Ensure profit is a valid number with two decimal places
-  const formattedProfit = profit !== undefined ? Number(profit).toFixed(2) : "N/A";
-
-  // ✅ Ensure trade size is valid
-  const tradeSize = typeof TRADE_SIZE_USDC !== "undefined" ? TRADE_SIZE_USDC : "N/A";
-
-  // ✅ Construct a clean, well-formatted message
-  const message = `
-🚀 **Arbitrage Trade Executed** 🚀
+    // ✅ Construct a clean, well-formatted message
+    const message = `
+🚀 **Arbitrage Trade Alert** 🚀
 💰 **Buy Network:** ${buyOn || "Unknown"}
-💵 **Token:** ${token || "Unknown"}
-📉 **Buy Price:** $${buyPrice !== undefined ? buyPrice : "N/A"}
+📌 **Token:** ${token || "Unknown"}
+💵 **Buy Amount:** $${formattedBuyAmount}
 
 📈 **Sell Network:** ${sellOn || "Unknown"}
-💵 **Token:** ${token || "Unknown"}
-📉 **Sell Price:** $${sellPrice !== undefined ? sellPrice : "N/A"}
+💵 **Sell Amount:** $${formattedSellAmount}
 
 ✅ **Profit:** $${formattedProfit}
-💰 **Trade Size:** $${tradeSize} USDC
-  `;
+    `;
 
-  if (!botToken || !chatId) {
-    console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
-    return;
-  }
+    if (!botToken || !chatId) {
+        console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
+        return;
+    }
 
-  try {
-    const response = await axios.post(url, {
-      chat_id: chatId,
-      text: message,
-    });
-    console.log("✅ Telegram trade alert sent:", response.data);
-  } catch (error) {
-    console.error("❌ Failed to send Telegram trade alert:", error.message);
-  }
+    try {
+        const response = await axios.post(url, {
+            chat_id: chatId,
+            text: message,
+        });
+        console.log("✅ Telegram trade alert sent:", response.data);
+    } catch (error) {
+        console.error("❌ Failed to send Telegram trade alert:", error.message);
+    }
 }
+
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
