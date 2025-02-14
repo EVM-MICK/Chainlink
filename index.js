@@ -1541,27 +1541,44 @@ async function executeArbitrage() {
         // ✅ Select the most profitable trade
         const bestTrade = opportunities[0];
 
+        if (!bestTrade || !bestTrade.buyOn || !bestTrade.sellOn || !bestTrade.token || !bestTrade.buyAmount || !bestTrade.sellAmount || !bestTrade.profit) {
+            console.error("❌ Invalid bestTrade data. Skipping Telegram alert.");
+            continue;
+        }
+
         console.log(`🚀 Arbitrage Opportunity: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
         
         // ✅ Send trade alert to Telegram
         await sendTelegramTradeAlert(bestTrade);
 
         try {
-            const buyNetwork = bestTrade.buyOn;
+           const buyNetwork = bestTrade.buyOn;
             const sellNetwork = bestTrade.sellOn;
             const token = bestTrade.token;
 
-            // ✅ Validate token data before proceeding
-            const buyToken = TOKENS[buyNetwork]?.find(t => t.name === token);
-            const sellToken = TOKENS[sellNetwork]?.find(t => t.name === token);
-            const buyUSDC = TOKENS[buyNetwork]?.find(t => t.name === "USDC");
-            const sellUSDC = TOKENS[sellNetwork]?.find(t => t.name === "USDC");
+            // ✅ Debugging before validation
+            console.log(`🔄 Debugging trade details before validation:`);
+            console.log(`➡️ Buy Network: ${buyNetwork}`);
+            console.log(`➡️ Sell Network: ${sellNetwork}`);
+            console.log(`➡️ Token: ${token}`);
 
+            // ✅ Validate token list
+            if (!TOKENS[buyNetwork] || !TOKENS[sellNetwork]) {
+                console.error(`❌ Missing TOKENS data for ${buyNetwork} or ${sellNetwork}. Skipping trade.`);
+                continue;
+            }
+
+            // ✅ Fetch token details
+            const buyToken = TOKENS[buyNetwork].find(t => t.name === token);
+            const sellToken = TOKENS[sellNetwork].find(t => t.name === token);
+            const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
+            const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
+
+            // ✅ Validate token data
             if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
                 console.error("❌ Missing token or USDC data. Skipping trade.");
                 continue;
             }
-
             console.log("🔄 Fetching live swap quotes...");
 
             // ✅ Fetch live buy quote
