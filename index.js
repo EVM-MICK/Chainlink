@@ -1540,9 +1540,9 @@ async function executeArbitrage() {
             await sendTelegramTradeAlert(bestTrade);
 
             try {
-                const buyNetwork = bestTrade.buyOn.toLowerCase();
-                const sellNetwork = bestTrade.sellOn.toLowerCase();
-                const token = bestTrade.token.toLowerCase();
+                const buyNetwork = bestTrade.buyOn.toUpperCase();
+                const sellNetwork = bestTrade.sellOn.toUpperCase();
+                const token = bestTrade.token.toUpperCase();
 
                 console.log(`🔄 Debugging trade details before validation:`);
                 console.log(`➡️ Buy Network: ${buyNetwork}`);
