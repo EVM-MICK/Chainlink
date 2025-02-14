@@ -1123,22 +1123,29 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
 
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
         if (arbPrice > polyPrice) {
-            let buyAmount = 100000 / usdcPolygonPrice; // Convert $100,000 to USDC on Polygon
-            let tokensBought = buyAmount / polyPrice; // Amount of Token received
-            let sellAmount = tokensBought * arbPrice; // Convert Token to USDC on Arbitrum
-            let finalUSDC = sellAmount * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
+            let buyAmountUSDC = 100000 / usdcPolygonPrice; // Convert $100,000 to USDC on Polygon
+            let tokensBought = buyAmountUSDC / polyPrice; // Amount of Token received
+            let sellAmountUSDC = tokensBought * arbPrice; // Convert Token to USDC on Arbitrum
+            let finalUSDC = sellAmountUSDC * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
 
             let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
             let finalProfit = finalUSDC - totalCost;
 
+            console.log(`🔄 [DEBUG] Buy on Polygon (${polyPrice}), Sell on Arbitrum (${arbPrice})`);
+            console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
+            console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
+            console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
+            console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
+            console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
+
             if (finalProfit >= 200) {
-                console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
+                console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
 
                 opportunities.push({
                     token: tokenName,
                     buyOn: "Polygon",
                     sellOn: "Arbitrum",
-                    buyAmount,
+                    buyAmount: buyAmountUSDC,
                     sellAmount: finalUSDC,
                     profit: finalProfit,
                 });
@@ -1147,30 +1154,37 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
                     title: "📢 Arbitrage Opportunity Found",
                     message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
                     🏦 Expected Profit: $${finalProfit}
-                    🛒 Buy Amount: ${buyAmount} USDC
-                    💵 Sell Amount: ${finalUSDC} USDC`
+                    🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
+                    💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
                 });
             }
         }
 
         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
         if (polyPrice > arbPrice) {
-            let buyAmount = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
-            let tokensBought = buyAmount / arbPrice; // Amount of Token received
-            let sellAmount = tokensBought * polyPrice; // Convert Token to USDC on Polygon
-            let finalUSDC = sellAmount * usdcPolygonPrice; // Convert to USDC using Polygon's price
+            let buyAmountUSDC = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
+            let tokensBought = buyAmountUSDC / arbPrice; // Amount of Token received
+            let sellAmountUSDC = tokensBought * polyPrice; // Convert Token to USDC on Polygon
+            let finalUSDC = sellAmountUSDC * usdcPolygonPrice; // Convert to USDC using Polygon's price
 
             let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
             let finalProfit = finalUSDC - totalCost;
 
+            console.log(`🔄 [DEBUG] Buy on Arbitrum (${arbPrice}), Sell on Polygon (${polyPrice})`);
+            console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
+            console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
+            console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
+            console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
+            console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
+
             if (finalProfit >= 200) {
-                console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
+                console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
 
                 opportunities.push({
                     token: tokenName,
                     buyOn: "Arbitrum",
                     sellOn: "Polygon",
-                    buyAmount,
+                    buyAmount: buyAmountUSDC,
                     sellAmount: finalUSDC,
                     profit: finalProfit,
                 });
@@ -1179,8 +1193,8 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
                     title: "📢 Arbitrage Opportunity Found",
                     message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
                     🏦 Expected Profit: $${finalProfit}
-                    🛒 Buy Amount: ${buyAmount} USDC
-                    💵 Sell Amount: ${finalUSDC} USDC`
+                    🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
+                    💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
                 });
             }
         }
