@@ -1213,7 +1213,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         const tokensBoughtPoly = buyAmountPoly / polygonTokenPrice;
         const sellAmountArb = tokensBoughtPoly * arbitrumTokenPrice;
         const finalUSDCArb = sellAmountArb / usdcArbitrumPrice;
-        const networkFeePoly = buyAmountPoly * 0.002; // 0.2% fee
+        const networkFeePoly = buyAmountPoly * 0.0002 * 0.0005; // 0.02% fee and lashloan fee
         const profitPolyToArb = finalUSDCArb - buyAmountPoly - networkFeePoly;
 
         console.log(`🔄 [DEBUG] Buy on Polygon → Sell on Arbitrum`);
@@ -1247,7 +1247,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         const tokensBoughtArb = buyAmountArb / arbitrumTokenPrice;
         const sellAmountPoly = tokensBoughtArb * polygonTokenPrice;
         const finalUSDCPly = sellAmountPoly / usdcPolygonPrice;
-        const networkFeeArb = buyAmountArb * 0.002; // 0.2% fee
+        const networkFeeArb = buyAmountArb * 0.0002 * 0.0005; // 0.02% fee and lashloan fee
         const profitArbToPoly = finalUSDCPly - buyAmountArb - networkFeeArb;
 
         console.log(`🔄 [DEBUG] Buy on Arbitrum → Sell on Polygon`);
