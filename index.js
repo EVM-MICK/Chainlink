@@ -205,19 +205,6 @@ const NETWORKS = {
     ARBITRUM: 42161
 };
 
-//  const TOKENS = {
-//     POLYGON: {
-//         USDC: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-//         WETH: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
-//         WBTC: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6"
-//     },
-//     ARBITRUM: {
-//         USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-//         WETH: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-//         WBTC: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
-//     }
-// };
-
 const TOKENS = {
     POLYGON: [
         { name: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
@@ -1272,6 +1259,8 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
     }
 
     return opportunities.sort((a, b) => b.profit - a.profit);
+   console.log("✅ Detected Arbitrage Opportunities:", opportunities);
+
 }
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
@@ -1538,152 +1527,157 @@ async function executeArbitrage() {
             continue;
         }
 
-        // ✅ Select the most profitable trade
-        const bestTrade = opportunities[0];
-
-        if (!bestTrade || !bestTrade.buyOn || !bestTrade.sellOn || !bestTrade.token || !bestTrade.buyAmount || !bestTrade.sellAmount || !bestTrade.profit) {
-            console.error("❌ Invalid bestTrade data. Skipping Telegram alert.");
-            continue;
-        }
-
-        console.log(`🚀 Arbitrage Opportunity: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
-        
-        // ✅ Send trade alert to Telegram
-        await sendTelegramTradeAlert(bestTrade);
-
-        try {
-           const buyNetwork = bestTrade.buyOn;
-            const sellNetwork = bestTrade.sellOn;
-            const token = bestTrade.token;
-
-            // ✅ Debugging before validation
-            console.log(`🔄 Debugging trade details before validation:`);
-            console.log(`➡️ Buy Network: ${buyNetwork}`);
-            console.log(`➡️ Sell Network: ${sellNetwork}`);
-            console.log(`➡️ Token: ${token}`);
-
-            // ✅ Validate token list
-            if (!TOKENS[buyNetwork] || !TOKENS[sellNetwork]) {
-                console.error(`❌ Missing TOKENS data for ${buyNetwork} or ${sellNetwork}. Skipping trade.`);
+        // ✅ Execute each trade opportunity found
+        for (const bestTrade of opportunities) {
+            if (!bestTrade || !bestTrade.buyOn || !bestTrade.sellOn || !bestTrade.token || !bestTrade.buyAmount || !bestTrade.sellAmount || !bestTrade.profit) {
+                console.error("❌ Invalid trade data. Skipping.");
                 continue;
             }
 
-            // ✅ Fetch token details
-            const buyToken = TOKENS[buyNetwork].find(t => t.name === token);
-            const sellToken = TOKENS[sellNetwork].find(t => t.name === token);
-            const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
-            const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
+            console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
-            // ✅ Validate token data
-            if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
-                console.error("❌ Missing token or USDC data. Skipping trade.");
-                continue;
-            }
-            console.log("🔄 Fetching live swap quotes...");
+            // ✅ Send trade alert to Telegram
+            await sendTelegramTradeAlert(bestTrade);
 
-            // ✅ Fetch live buy quote
-            const liveBuyAmount = await fetchSwapQuote(
-                buyNetwork,
-                buyUSDC.address,
-                buyToken.address,
-                bestTrade.buyAmount
-            );
+            try {
+                const buyNetwork = bestTrade.buyOn..toLowerCase()();
+                const sellNetwork = bestTrade.sellOn..toLowerCase()();
+                const token = bestTrade.token..toLowerCase()();
 
-            if (!liveBuyAmount) {
-                console.error("❌ Failed to fetch live buy swap quote. Retrying...");
-                continue;
-            }
+                console.log(`🔄 Debugging trade details before validation:`);
+                console.log(`➡️ Buy Network: ${buyNetwork}`);
+                console.log(`➡️ Sell Network: ${sellNetwork}`);
+                console.log(`➡️ Token: ${token}`);
 
-            console.log(`💰 Live Buy Amount: ${liveBuyAmount} ${token}`);
+                // ✅ Validate token list
+                if (!TOKENS[buyNetwork] || !TOKENS[sellNetwork]) {
+                    console.error(`❌ Missing TOKENS data for ${buyNetwork} or ${sellNetwork}. Skipping trade.`);
+                    continue;
+                }
 
-            // ✅ Fetch live sell quote based on real buy amount
-            const liveSellAmount = await fetchSwapQuote(
-                sellNetwork,
-                sellToken.address,
-                sellUSDC.address,
-                liveBuyAmount
-            );
+                console.log(`Available tokens on ${buyNetwork}:`, TOKENS[buyNetwork]);
+                console.log(`Available tokens on ${sellNetwork}:`, TOKENS[sellNetwork]);
 
-            if (!liveSellAmount || liveSellAmount <= bestTrade.buyAmount) {
-                console.error("❌ Live trade resulted in insufficient USDC. Retrying...");
-                continue;
-            }
+                // ✅ Fetch token details
+                const buyToken = TOKENS[buyNetwork].find(t => t.name.toUpperCase() === token);
+                const sellToken = TOKENS[sellNetwork].find(t => t.name.toUpperCase() === token);
+                const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
+                const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
 
-            console.log(`💰 Live Sell Amount: ${liveSellAmount} USDC`);
+                console.log(`USDC on ${buyNetwork}:`, buyUSDC);
+                console.log(`USDC on ${sellNetwork}:`, sellUSDC);
 
-            // ✅ Request Flash Loan Based on Live Quote
-            console.log(`💰 Requesting Flash Loan on ${buyNetwork} for ${bestTrade.buyAmount} USDC...`);
-            const flashLoanSuccess = await requestFlashLoan(buyNetwork, buyUSDC.address, bestTrade.buyAmount);
-            if (!flashLoanSuccess) {
-                console.error("❌ Flash Loan request failed. Retrying...");
-                continue;
-            }
+                if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
+                    console.error("❌ Missing token or USDC data. Retrying...");
+                    await delay(5000);
+                    continue;
+                }
 
-            // ✅ Execute Buy Swap & Sell Swap SIMULTANEOUSLY
-            console.log(`🚀 Executing Buy & Sell Swap simultaneously...`);
-            const [buySwapSuccess, sellSwapSuccess] = await Promise.all([
-                executeSwap(buyNetwork, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
-                executeSwap(sellNetwork, sellToken.address, sellUSDC.address, liveBuyAmount)
-            ]);
-
-            if (!buySwapSuccess || !sellSwapSuccess) {
-                console.error("❌ One or both swaps failed. Retrying...");
-                continue;
-            }
-
-            console.log(`✅ Buy Swap & Sell Swap executed.`);
-
-            // ✅ Execute Cross-Chain Swap & Loan Repayment SIMULTANEOUSLY
-            console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment simultaneously...`);
-            const [crossSwapSuccess, loanRepaymentSuccess] = await Promise.all([
-                executeFusionSwap(
+                console.log("🔄 Fetching live swap quotes...");
+                
+                // ✅ Fetch live buy quote
+                const liveBuyAmount = await fetchSwapQuote(
                     buyNetwork,
-                    sellNetwork,
+                    buyUSDC.address,
                     buyToken.address,
+                    bestTrade.buyAmount
+                );
+
+                if (!liveBuyAmount) {
+                    console.error("❌ Failed to fetch live buy swap quote. Retrying...");
+                    continue;
+                }
+
+                console.log(`💰 Live Buy Amount: ${liveBuyAmount} ${token}`);
+
+                // ✅ Fetch live sell quote based on real buy amount
+                const liveSellAmount = await fetchSwapQuote(
+                    sellNetwork,
                     sellToken.address,
+                    sellUSDC.address,
                     liveBuyAmount
-                ),
-                repayFlashLoan(buyNetwork, bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005)) // 0.05% Loan Fee
-            ]);
+                );
 
-            if (!crossSwapSuccess || !loanRepaymentSuccess) {
-                console.error("❌ Cross-Chain Swap or Loan Repayment failed. Retrying...");
-                continue;
+                if (!liveSellAmount || liveSellAmount <= bestTrade.buyAmount) {
+                    console.error("❌ Live trade resulted in insufficient USDC. Retrying...");
+                    continue;
+                }
+
+                console.log(`💰 Live Sell Amount: ${liveSellAmount} USDC`);
+
+                // ✅ Request Flash Loan Based on Live Quote
+                console.log(`💰 Requesting Flash Loan on ${buyNetwork} for ${bestTrade.buyAmount} USDC...`);
+                const flashLoanSuccess = await requestFlashLoan(buyNetwork, buyUSDC.address, bestTrade.buyAmount);
+                if (!flashLoanSuccess) {
+                    console.error("❌ Flash Loan request failed. Retrying...");
+                    continue;
+                }
+
+                // ✅ Execute Buy Swap & Sell Swap SIMULTANEOUSLY
+                console.log(`🚀 Executing Buy & Sell Swap simultaneously...`);
+                const [buySwapSuccess, sellSwapSuccess] = await Promise.all([
+                    executeSwap(buyNetwork, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
+                    executeSwap(sellNetwork, sellToken.address, sellUSDC.address, liveBuyAmount)
+                ]);
+
+                if (!buySwapSuccess || !sellSwapSuccess) {
+                    console.error("❌ One or both swaps failed. Retrying...");
+                    continue;
+                }
+
+                console.log(`✅ Buy Swap & Sell Swap executed.`);
+
+                // ✅ Execute Cross-Chain Swap & Loan Repayment SIMULTANEOUSLY
+                console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment simultaneously...`);
+                const [crossSwapSuccess, loanRepaymentSuccess] = await Promise.all([
+                    executeFusionSwap(
+                        buyNetwork,
+                        sellNetwork,
+                        buyToken.address,
+                        sellToken.address,
+                        liveBuyAmount
+                    ),
+                    repayFlashLoan(buyNetwork, bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005)) // 0.05% Loan Fee
+                ]);
+
+                if (!crossSwapSuccess || !loanRepaymentSuccess) {
+                    console.error("❌ Cross-Chain Swap or Loan Repayment failed. Retrying...");
+                    continue;
+                }
+
+                console.log(`✅ Cross-Chain Swap & Loan Repayment executed.`);
+
+                // ✅ Transfer USDC Back for Flash Loan Repayment
+                const finalUSDC = await executeSwap(sellNetwork, sellToken.address, sellUSDC.address, liveBuyAmount);
+                if (!finalUSDC || finalUSDC < bestTrade.buyAmount) {
+                    console.error(`❌ Trade did not yield enough USDC. Expected: ${bestTrade.buyAmount}, Received: ${finalUSDC}`);
+                    await delay(5000);
+                    continue;
+                }
+
+                console.log(`✅ Final USDC Received on ${sellNetwork}: ${finalUSDC}`);
+
+                // ✅ Transfer USDC back
+                console.log(`🔄 Sending ${finalUSDC} USDC back to ${buyNetwork} for final loan repayment...`);
+                const usdcTransferSuccess = await sendUSDCBack(buyNetwork, finalUSDC);
+                if (!usdcTransferSuccess) {
+                    console.error("❌ USDC Transfer for Loan Repayment failed. Retrying...");
+                    continue;
+                }
+
+                console.log("🎉 Arbitrage Trade Completed Successfully!");
+                await sendTelegramMessage("✅ Arbitrage Trade Completed Successfully!");
+
+            } catch (error) {
+                console.error("❌ Error executing arbitrage trade:", error);
+                await sendTelegramMessage("🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.");
             }
-
-            console.log(`✅ Cross-Chain Swap & Loan Repayment executed.`);
-
-            // ✅ Transfer USDC Back for Flash Loan Repayment
-            const finalUSDC = await executeSwap(sellNetwork, sellToken.address, sellUSDC.address, liveBuyAmount);
-            if (!finalUSDC || finalUSDC < bestTrade.buyAmount) {
-                console.error(`❌ Trade did not yield enough USDC. Expected: ${bestTrade.buyAmount}, Received: ${finalUSDC}`);
-                await delay(5000);
-                continue;
-            }
-
-            console.log(`✅ Final USDC Received on ${sellNetwork}: ${finalUSDC}`);
-
-            // ✅ Transfer USDC back
-            console.log(`🔄 Sending ${finalUSDC} USDC back to ${buyNetwork} for final loan repayment...`);
-            const usdcTransferSuccess = await sendUSDCBack(buyNetwork, finalUSDC);
-            if (!usdcTransferSuccess) {
-                console.error("❌ USDC Transfer for Loan Repayment failed. Retrying...");
-                continue;
-            }
-
-            console.log("🎉 Arbitrage Trade Completed Successfully!");
-            await sendTelegramMessage("✅ Arbitrage Trade Completed Successfully!");
-
-        } catch (error) {
-            console.error("❌ Error executing arbitrage trade:", error);
-            await sendTelegramMessage("🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.");
         }
 
         // ✅ Wait before next arbitrage detection to prevent excessive API calls
         await delay(1000); // 1-second delay to respect 1inch API 1 RPS limit
     }
 }
-
 
 // async function executeArbitrage() {
 //     console.log("🔍 Starting continuous arbitrage detection...");
