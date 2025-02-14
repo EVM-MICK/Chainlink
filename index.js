@@ -1142,8 +1142,8 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
         let buyAmountPoly = 100000 / usdcPolygonPrice;  // Convert $100,000 to USDC on Polygon
         let tokensBoughtPoly = buyAmountPoly / polyPrice; // Amount of Token received
-        let sellAmountArb = tokensBoughtPoly * arbPrice; // Convert Token to USDC on Arbitrum
-        let finalUSDCArb = sellAmountArb * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
+        let sellAmountArb = tokensBoughtPoly * usdcArbitrumPrice; // Convert Token to USDC on Arbitrum
+        let finalUSDCArb = sellAmountArb; // Convert to USDC using Arbitrum's price
         let loanFee1 = buyAmountPoly * 0.0005; // 0.05% loan fee = 50 USDC
         let profitPolyToArb = finalUSDCArb - buyAmountPoly - loanFee1; // Profit after subtracting capital and fees
 
@@ -1176,8 +1176,8 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
         let buyAmountArb = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
         let tokensBoughtArb = buyAmountArb / arbPrice; // Amount of Token received
-        let sellAmountPoly = tokensBoughtArb * polyPrice; // Convert Token to USDC on Polygon
-        let finalUSDCPly = sellAmountPoly * usdcPolygonPrice; // Convert to USDC using Polygon's price
+        let sellAmountPoly = tokensBoughtArb * usdcPolygonPrice; // Convert Token to USDC on Polygon
+        let finalUSDCPly = sellAmountPoly; // Convert to USDC using Polygon's price
         let loanFee2 = buyAmountPoly * 0.0005; // 0.05% loan fee = 50 USDC
         let profitArbToPoly = finalUSDCPly - buyAmountArb - loanFee2; // Profit after subtracting capital and fees
 
