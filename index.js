@@ -954,29 +954,45 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 
 
 // 🚀 Detect Arbitrage Opportunities
-// async function detectArbitrageOpportunities(arbitrumPrices, polygonPrices) {
+// async function detectArbitrageOpportunities(pricesByNetwork) {
 //     let opportunities = [];
 
-//     if (!arbitrumPrices || !polygonPrices) {
-//         console.error("❌ Invalid price data for Arbitrum or Polygon. Exiting...");
+//     // ✅ Ensure valid price data exists
+//     if (!pricesByNetwork?.POLYGON?.prices || !pricesByNetwork?.ARBITRUM?.prices) {
+//         console.error("❌ No valid price data. Skipping arbitrage detection...");
+//         return opportunities;
+//     }
+
+//     const polygonPrices = pricesByNetwork.POLYGON.prices;
+//     const arbitrumPrices = pricesByNetwork.ARBITRUM.prices;
+
+//     if (Object.keys(polygonPrices).length === 0 || Object.keys(arbitrumPrices).length === 0) {
+//         console.warn("⚠️ One or both networks have empty price data. Skipping arbitrage detection...");
 //         return opportunities;
 //     }
 
 //     console.log("✅ Checking for arbitrage opportunities...");
 
-//     for (let polygonToken of TOKENS.POLYGON) {
-//         const { name: tokenName, address: polygonAddress } = polygonToken;
-//         const arbitrumToken = TOKENS.ARBITRUM.find(t => t.name === tokenName);
+//     const usdcPolygonPrice = polygonPrices[TOKENS.POLYGON.find(t => t.name === "USDC").address.toLowerCase()];
+//     const usdcArbitrumPrice = arbitrumPrices[TOKENS.ARBITRUM.find(t => t.name === "USDC").address.toLowerCase()];
 
-//         if (!arbitrumToken) {
+//     if (!usdcPolygonPrice || !usdcArbitrumPrice) {
+//         console.error("❌ USDC price missing on one or both networks. Cannot compute trade sizes.");
+//         return opportunities;
+//     }
+
+//     for (let token of TOKENS.POLYGON) {
+//         const tokenName = token.name;
+//         const polygonTokenAddress = token.address.toLowerCase();
+//         const arbitrumTokenAddress = TOKENS.ARBITRUM.find(t => t.name === tokenName)?.address.toLowerCase();
+
+//         if (!polygonTokenAddress || !arbitrumTokenAddress) {
 //             console.warn(`⚠️ Skipping ${tokenName}: No matching address on both networks`);
 //             continue;
 //         }
 
-//         const { address: arbitrumAddress } = arbitrumToken;
-
-//         let polyPrice = polygonPrices[polygonAddress] || null;
-//         let arbPrice = arbitrumPrices[arbitrumAddress] || null;
+//         let polyPrice = polygonPrices[polygonTokenAddress] ?? null;
+//         let arbPrice = arbitrumPrices[arbitrumTokenAddress] ?? null;
 
 //         if (!polyPrice || !arbPrice) {
 //             console.warn(`⚠️ Missing price data for ${tokenName}. Polygon: $${polyPrice}, Arbitrum: $${arbPrice}`);
@@ -987,93 +1003,86 @@ async function fetchSwapQuote(chain, fromToken, toToken, amount) {
 
 //         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
 //         if (arbPrice > polyPrice) {
-//             let estimatedProfit = ((TRADE_SIZE_USDC / polyPrice) * arbPrice) - TRADE_SIZE_USDC;
-//             if (estimatedProfit >= PROFIT_THRESHOLD) {
-//                 try {
-//                     console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
+//             let buyAmountUSDC = 100000 / usdcPolygonPrice; // Convert $100,000 to USDC on Polygon
+//             let tokensBought = buyAmountUSDC / polyPrice; // Amount of Token received
+//             let sellAmountUSDC = tokensBought * arbPrice; // Convert Token to USDC on Arbitrum
+//             let finalUSDC = sellAmountUSDC * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
 
-//                     let buyAmount = await fetchSwapQuote(
-//                         NETWORKS.POLYGON,
-//                         TOKENS.POLYGON.find(t => t.name === "USDC").address,
-//                         polygonAddress,
-//                         TRADE_SIZE_USDC
-//                     );
-//                     if (!buyAmount) continue;
+//             let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
+//             let finalProfit = finalUSDC - totalCost;
 
-//                     let sellAmount = await fetchSwapQuote(
-//                         NETWORKS.ARBITRUM,
-//                         arbitrumAddress,
-//                         TOKENS.ARBITRUM.find(t => t.name === "USDC").address,
-//                         buyAmount
-//                     );
-//                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue;
+//             console.log(`🔄 [DEBUG] Buy on Polygon (${polyPrice}), Sell on Arbitrum (${arbPrice})`);
+//             console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
+//             console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
+//             console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
+//             console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
+//             console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
 
-//                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
-//                     if (actualProfit >= PROFIT_THRESHOLD) {
-//                         opportunities.push({ token: tokenName, buyOn: "Polygon", sellOn: "Arbitrum", profit: actualProfit, buyAmount, sellAmount });
+//             if (finalProfit >= 200) {
+//                 console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
 
-//                         console.log(`✅ Arbitrage Found: Buy ${tokenName} on Polygon @ $${polyPrice} → Sell on Arbitrum @ $${arbPrice} | Profit: $${actualProfit}`);
+//                 opportunities.push({
+//                     token: tokenName,
+//                     buyOn: "Polygon",
+//                     sellOn: "Arbitrum",
+//                     buyAmount: buyAmountUSDC,
+//                     sellAmount: finalUSDC,
+//                     profit: finalProfit,
+//                 });
 
-//                         await sendTelegramTradeAlert({
-//                             title: "📢 Arbitrage Opportunity Found",
-//                             message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
-//                             🏦 Expected Profit: $${actualProfit}
-//                             🛒 Buy Amount: ${buyAmount} ${tokenName} 
-//                             💵 Sell Amount: ${sellAmount} USDC`
-//                         });
-//                     }
-//                 } catch (error) {
-//                     console.error(`❌ Error fetching swap quote for ${tokenName} (Polygon → Arbitrum):`, error);
-//                 }
+//                 await sendTelegramTradeAlert({
+//                     title: "📢 Arbitrage Opportunity Found",
+//                     message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
+//                     🏦 Expected Profit: $${finalProfit}
+//                     🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
+//                     💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
+//                 });
 //             }
 //         }
 
 //         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
 //         if (polyPrice > arbPrice) {
-//             let estimatedProfit = ((TRADE_SIZE_USDC / arbPrice) * polyPrice) - TRADE_SIZE_USDC;
-//             if (estimatedProfit >= PROFIT_THRESHOLD) {
-//                 try {
-//                     console.log(`🔄 Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
+//             let buyAmountUSDC = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
+//             let tokensBought = buyAmountUSDC / arbPrice; // Amount of Token received
+//             let sellAmountUSDC = tokensBought * polyPrice; // Convert Token to USDC on Polygon
+//             let finalUSDC = sellAmountUSDC * usdcPolygonPrice; // Convert to USDC using Polygon's price
 
-//                     let buyAmount = await fetchSwapQuote(
-//                         NETWORKS.ARBITRUM,
-//                         TOKENS.ARBITRUM.find(t => t.name === "USDC").address,
-//                         arbitrumAddress,
-//                         TRADE_SIZE_USDC
-//                     );
-//                     if (!buyAmount) continue;
+//             let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
+//             let finalProfit = finalUSDC - totalCost;
 
-//                     let sellAmount = await fetchSwapQuote(
-//                         NETWORKS.POLYGON,
-//                         polygonAddress,
-//                         TOKENS.POLYGON.find(t => t.name === "USDC").address,
-//                         buyAmount
-//                     );
-//                     if (!sellAmount || sellAmount <= TRADE_SIZE_USDC) continue;
+//             console.log(`🔄 [DEBUG] Buy on Arbitrum (${arbPrice}), Sell on Polygon (${polyPrice})`);
+//             console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
+//             console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
+//             console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
+//             console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
+//             console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
 
-//                     let actualProfit = sellAmount - TRADE_SIZE_USDC;
-//                     if (actualProfit >= PROFIT_THRESHOLD) {
-//                         opportunities.push({ token: tokenName, buyOn: "Arbitrum", sellOn: "Polygon", profit: actualProfit, buyAmount, sellAmount });
+//             if (finalProfit >= 200) {
+//                 console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
 
-//                         console.log(`✅ Arbitrage Found: Buy ${tokenName} on Arbitrum @ $${arbPrice} → Sell on Polygon @ $${polyPrice} | Profit: $${actualProfit}`);
+//                 opportunities.push({
+//                     token: tokenName,
+//                     buyOn: "Arbitrum",
+//                     sellOn: "Polygon",
+//                     buyAmount: buyAmountUSDC,
+//                     sellAmount: finalUSDC,
+//                     profit: finalProfit,
+//                 });
 
-//                         await sendTelegramTradeAlert({
-//                             title: "📢 Arbitrage Opportunity Found",
-//                             message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
-//                             🏦 Expected Profit: $${actualProfit}
-//                             🛒 Buy Amount: ${buyAmount} ${tokenName} 
-//                             💵 Sell Amount: ${sellAmount} USDC`
-//                         });
-//                     }
-//                 } catch (error) {
-//                     console.error(`❌ Error fetching swap quote for ${tokenName} (Arbitrum → Polygon):`, error);
-//                 }
+//                 await sendTelegramTradeAlert({
+//                     title: "📢 Arbitrage Opportunity Found",
+//                     message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
+//                     🏦 Expected Profit: $${finalProfit}
+//                     🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
+//                     💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
+//                 });
 //             }
 //         }
 //     }
 
 //     return opportunities.sort((a, b) => b.profit - a.profit);
 // }
+
 async function detectArbitrageOpportunities(pricesByNetwork) {
     let opportunities = [];
 
@@ -1093,6 +1102,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
 
     console.log("✅ Checking for arbitrage opportunities...");
 
+    // Extract USDC price from both networks
     const usdcPolygonPrice = polygonPrices[TOKENS.POLYGON.find(t => t.name === "USDC").address.toLowerCase()];
     const usdcArbitrumPrice = arbitrumPrices[TOKENS.ARBITRUM.find(t => t.name === "USDC").address.toLowerCase()];
 
@@ -1122,86 +1132,77 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         console.log(`🔹 ${tokenName} Prices → Polygon: $${polyPrice}, Arbitrum: $${arbPrice}`);
 
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
-        if (arbPrice > polyPrice) {
-            let buyAmountUSDC = 100000 / usdcPolygonPrice; // Convert $100,000 to USDC on Polygon
-            let tokensBought = buyAmountUSDC / polyPrice; // Amount of Token received
-            let sellAmountUSDC = tokensBought * arbPrice; // Convert Token to USDC on Arbitrum
-            let finalUSDC = sellAmountUSDC * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
+        let buyAmountPoly = 100000 / usdcPolygonPrice; // Convert $100,000 to USDC on Polygon
+        let tokensBoughtPoly = buyAmountPoly / polyPrice; // Amount of Token received
+        let sellAmountPoly = tokensBoughtPoly * arbPrice; // Convert Token to USDC on Arbitrum
+        let finalUSDCPoly = sellAmountPoly * usdcArbitrumPrice; // Convert to USDC using Arbitrum's price
+        let totalCostPoly = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
+        let finalProfitPoly = finalUSDCPoly - totalCostPoly;
 
-            let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
-            let finalProfit = finalUSDC - totalCost;
+        console.log(`🔄 [DEBUG] Buy on Polygon (${polyPrice}), Sell on Arbitrum (${arbPrice})`);
+        console.log(`💰 Buy Amount: ${buyAmountPoly.toFixed(2)} USDC`);
+        console.log(`🛒 Tokens Bought: ${tokensBoughtPoly.toFixed(6)} ${tokenName}`);
+        console.log(`💵 Sell Amount: ${sellAmountPoly.toFixed(2)} USDC`);
+        console.log(`💵 Final USDC Output: ${finalUSDCPoly.toFixed(2)} USDC`);
+        console.log(`💰 Profit: ${finalProfitPoly.toFixed(2)} USDC (Threshold: $200)`);
 
-            console.log(`🔄 [DEBUG] Buy on Polygon (${polyPrice}), Sell on Arbitrum (${arbPrice})`);
-            console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
-            console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
-            console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
-            console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
-            console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
+        if (finalProfitPoly >= 100) {
+            opportunities.push({
+                token: tokenName,
+                buyOn: "Polygon",
+                sellOn: "Arbitrum",
+                buyAmount: buyAmountPoly,
+                sellAmount: finalUSDCPoly,
+                profit: finalProfitPoly,
+            });
 
-            if (finalProfit >= 200) {
-                console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Polygon → Sell on Arbitrum`);
-
-                opportunities.push({
-                    token: tokenName,
-                    buyOn: "Polygon",
-                    sellOn: "Arbitrum",
-                    buyAmount: buyAmountUSDC,
-                    sellAmount: finalUSDC,
-                    profit: finalProfit,
-                });
-
-                await sendTelegramTradeAlert({
-                    title: "📢 Arbitrage Opportunity Found",
-                    message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
-                    🏦 Expected Profit: $${finalProfit}
-                    🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
-                    💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
-                });
-            }
+            await sendTelegramTradeAlert({
+                title: "📢 Arbitrage Opportunity Found",
+                message: `💰 Buy on Polygon: $${polyPrice} | Sell on Arbitrum: $${arbPrice}
+                🏦 Expected Profit: $${finalProfitPoly}
+                🛒 Buy Amount: ${buyAmountPoly.toFixed(2)} USDC
+                💵 Sell Amount: ${finalUSDCPoly.toFixed(2)} USDC`
+            });
         }
 
         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
-        if (polyPrice > arbPrice) {
-            let buyAmountUSDC = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
-            let tokensBought = buyAmountUSDC / arbPrice; // Amount of Token received
-            let sellAmountUSDC = tokensBought * polyPrice; // Convert Token to USDC on Polygon
-            let finalUSDC = sellAmountUSDC * usdcPolygonPrice; // Convert to USDC using Polygon's price
+        let buyAmountArb = 100000 / usdcArbitrumPrice; // Convert $100,000 to USDC on Arbitrum
+        let tokensBoughtArb = buyAmountArb / arbPrice; // Amount of Token received
+        let sellAmountArb = tokensBoughtArb * polyPrice; // Convert Token to USDC on Polygon
+        let finalUSDCArb = sellAmountArb * usdcPolygonPrice; // Convert to USDC using Polygon's price
+        let totalCostArb = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
+        let finalProfitArb = finalUSDCArb - totalCostArb;
 
-            let totalCost = 100000 + (100000 * 0.005); // $100,000 + 0.5% Flash Loan Fee
-            let finalProfit = finalUSDC - totalCost;
+        console.log(`🔄 [DEBUG] Buy on Arbitrum (${arbPrice}), Sell on Polygon (${polyPrice})`);
+        console.log(`💰 Buy Amount: ${buyAmountArb.toFixed(2)} USDC`);
+        console.log(`🛒 Tokens Bought: ${tokensBoughtArb.toFixed(6)} ${tokenName}`);
+        console.log(`💵 Sell Amount: ${sellAmountArb.toFixed(2)} USDC`);
+        console.log(`💵 Final USDC Output: ${finalUSDCArb.toFixed(2)} USDC`);
+        console.log(`💰 Profit: ${finalProfitArb.toFixed(2)} USDC (Threshold: $200)`);
 
-            console.log(`🔄 [DEBUG] Buy on Arbitrum (${arbPrice}), Sell on Polygon (${polyPrice})`);
-            console.log(`💰 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC`);
-            console.log(`🛒 Tokens Bought: ${tokensBought.toFixed(6)} ${tokenName}`);
-            console.log(`💵 Sell Amount: ${sellAmountUSDC.toFixed(2)} USDC`);
-            console.log(`💵 Final USDC Output: ${finalUSDC.toFixed(2)} USDC`);
-            console.log(`💰 Profit: ${finalProfit.toFixed(2)} USDC (Threshold: $200)`);
+        if (finalProfitArb >= 100) {
+            opportunities.push({
+                token: tokenName,
+                buyOn: "Arbitrum",
+                sellOn: "Polygon",
+                buyAmount: buyAmountArb,
+                sellAmount: finalUSDCArb,
+                profit: finalProfitArb,
+            });
 
-            if (finalProfit >= 200) {
-                console.log(`✅ Arbitrage Opportunity: Buy ${tokenName} on Arbitrum → Sell on Polygon`);
-
-                opportunities.push({
-                    token: tokenName,
-                    buyOn: "Arbitrum",
-                    sellOn: "Polygon",
-                    buyAmount: buyAmountUSDC,
-                    sellAmount: finalUSDC,
-                    profit: finalProfit,
-                });
-
-                await sendTelegramTradeAlert({
-                    title: "📢 Arbitrage Opportunity Found",
-                    message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
-                    🏦 Expected Profit: $${finalProfit}
-                    🛒 Buy Amount: ${buyAmountUSDC.toFixed(2)} USDC
-                    💵 Sell Amount: ${finalUSDC.toFixed(2)} USDC`
-                });
-            }
+            await sendTelegramTradeAlert({
+                title: "📢 Arbitrage Opportunity Found",
+                message: `💰 Buy on Arbitrum: $${arbPrice} | Sell on Polygon: $${polyPrice}
+                🏦 Expected Profit: $${finalProfitArb}
+                🛒 Buy Amount: ${buyAmountArb.toFixed(2)} USDC
+                💵 Sell Amount: ${finalUSDCArb.toFixed(2)} USDC`
+            });
         }
     }
 
     return opportunities.sort((a, b) => b.profit - a.profit);
 }
+
 
 async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amount, walletAddress) {
     console.log(`🔍 Fetching Fusion+ quote for ${amount} ${srcToken} from ${srcChain} to ${dstChain}...`);
@@ -1558,60 +1559,84 @@ async function executeArbitrage() {
     await sendTelegramTradeAlert(bestTrade);
 
     try {
-        // ✅ 1️⃣ Fetch Fusion+ Quote to Get `dstAmount`
-        console.log(`🔄 Fetching Fusion+ quote: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
-        const dstAmount = await getFusionQuote(
-            bestTrade.buyOn,
-            bestTrade.sellOn,
-            TOKENS[bestTrade.buyOn].find(t => t.name === "WETH").address, 
-            TOKENS[bestTrade.sellOn].find(t => t.name === "WETH").address,
+        const buyNetwork = bestTrade.buyOn;
+        const sellNetwork = bestTrade.sellOn;
+        const token = bestTrade.token;
+
+        // ✅ 1️⃣ Fetch Live Swap Quote for Buy Amount
+        console.log(`🔄 Fetching live swap quote: Buying ${token} on ${buyNetwork}...`);
+        const buyUSDCAddress = TOKENS[buyNetwork].find(t => t.name === "USDC").address;
+        const sellUSDCAddress = TOKENS[sellNetwork].find(t => t.name === "USDC").address;
+        const tokenAddressBuy = TOKENS[buyNetwork].find(t => t.name === token).address;
+        const tokenAddressSell = TOKENS[sellNetwork].find(t => t.name === token).address;
+
+        const liveBuyAmount = await fetchSwapQuote(
+            buyNetwork,
+            buyUSDCAddress,
+            tokenAddressBuy,
             TRADE_SIZE_USDC
         );
 
-        if (!dstAmount) {
-            console.log("❌ Failed to fetch Fusion+ quote.");
+        if (!liveBuyAmount) {
+            console.log("❌ Failed to fetch live buy swap quote.");
             return;
         }
 
-        console.log(`💰 Estimated amount to receive on ${bestTrade.sellOn}: ${dstAmount} ${bestTrade.token}`);
+        console.log(`💰 Live Buy Amount: ${liveBuyAmount} ${token}`);
 
-        // ✅ 2️⃣ Request Flash Loan Based on `dstAmount`
-        console.log(`💰 Requesting Flash Loan on ${bestTrade.sellOn} for ${dstAmount} ${bestTrade.token}...`);
-        await requestFlashLoan(bestTrade.sellOn, TOKENS[bestTrade.sellOn].find(t => t.name === "WETH").address, dstAmount);
+        // ✅ 2️⃣ Fetch Live Swap Quote for Sell Amount
+        console.log(`🔄 Fetching live swap quote: Selling ${token} on ${sellNetwork}...`);
+        const liveSellAmount = await fetchSwapQuote(
+            sellNetwork,
+            tokenAddressSell,
+            sellUSDCAddress,
+            liveBuyAmount
+        );
 
-        // ✅ 3️⃣ Execute Fusion+ Cross-Chain Swap
-        console.log(`🚀 Executing Fusion+ Swap: ${bestTrade.token} from ${bestTrade.buyOn} → ${bestTrade.sellOn}...`);
+        if (!liveSellAmount || liveSellAmount <= TRADE_SIZE_USDC) {
+            console.log("❌ Live swap quote resulted in insufficient USDC. Aborting...");
+            return;
+        }
+
+        console.log(`💰 Live Sell Amount: ${liveSellAmount} USDC`);
+
+        // ✅ 3️⃣ Request Flash Loan Based on Live Quote
+        console.log(`💰 Requesting Flash Loan on ${buyNetwork} for ${TRADE_SIZE_USDC} USDC...`);
+        await requestFlashLoan(buyNetwork, buyUSDCAddress, TRADE_SIZE_USDC);
+
+        // ✅ 4️⃣ Execute Buy Swap
+        console.log(`🚀 Executing Buy Swap: ${TRADE_SIZE_USDC} USDC → ${liveBuyAmount} ${token} on ${buyNetwork}...`);
+        await executeSwap(buyNetwork, buyUSDCAddress, tokenAddressBuy, TRADE_SIZE_USDC);
+
+        // ✅ 5️⃣ Execute Cross-Chain Swap
+        console.log(`🚀 Executing Cross-Chain Swap: Sending ${liveBuyAmount} ${token} from ${buyNetwork} → ${sellNetwork}...`);
         await executeFusionSwap(
-            bestTrade.buyOn,
-            bestTrade.sellOn,
-            TOKENS[bestTrade.buyOn].find(t => t.name === "WETH").address,
-            TOKENS[bestTrade.sellOn].find(t => t.name === "WETH").address,
-            TRADE_SIZE_USDC
+            buyNetwork,
+            sellNetwork,
+            tokenAddressBuy,
+            tokenAddressSell,
+            liveBuyAmount
         );
 
-        // ✅ 4️⃣ Swap Received Token for USDC on the Sell Network
-        console.log(`💵 Swapping received ${dstAmount} ${bestTrade.token} on ${bestTrade.sellOn} → USDC...`);
-        const usdcReceived = await swapTokenForUSDC(
-            bestTrade.sellOn,
-            TOKENS[bestTrade.sellOn].find(t => t.name === "WETH").address,
-            dstAmount
-        );
+        // ✅ 6️⃣ Sell on Destination Chain
+        console.log(`💵 Selling ${liveBuyAmount} ${token} on ${sellNetwork} for USDC...`);
+        const finalUSDC = await executeSwap(sellNetwork, tokenAddressSell, sellUSDCAddress, liveBuyAmount);
 
-        if (!usdcReceived || usdcReceived < TRADE_SIZE_USDC) {
-            console.error(`❌ Swap did not yield enough USDC. Expected: ${TRADE_SIZE_USDC}, Received: ${usdcReceived}`);
+        if (!finalUSDC || finalUSDC < TRADE_SIZE_USDC) {
+            console.error(`❌ Trade did not yield enough USDC. Expected: ${TRADE_SIZE_USDC}, Received: ${finalUSDC}`);
             return;
         }
 
-        console.log(`✅ Received ${usdcReceived} USDC on ${bestTrade.sellOn} after swap.`);
+        console.log(`✅ Final USDC Received on ${sellNetwork}: ${finalUSDC}`);
 
-        // ✅ 5️⃣ Transfer USDC Back to Buy Network for Loan Repayment
-        const totalRepayment = TRADE_SIZE_USDC + 50; // Adding loan premium
-        console.log(`🔄 Sending ${usdcReceived} USDC back to ${bestTrade.buyOn} for flash loan repayment...`);
-        await sendUSDCBack(bestTrade.buyOn, usdcReceived);
+        // ✅ 7️⃣ Transfer USDC Back for Flash Loan Repayment
+        const totalRepayment = TRADE_SIZE_USDC + (TRADE_SIZE_USDC * 0.005); // Loan repayment with 0.5% fee
+        console.log(`🔄 Sending ${finalUSDC} USDC back to ${buyNetwork} for loan repayment...`);
+        await sendUSDCBack(buyNetwork, finalUSDC);
 
-        // ✅ 6️⃣ Repay the Flash Loan
-        console.log(`💰 Repaying Flash Loan on ${bestTrade.buyOn} with ${totalRepayment} USDC...`);
-        await repayFlashLoan(bestTrade.buyOn, totalRepayment);
+        // ✅ 8️⃣ Repay the Flash Loan
+        console.log(`💰 Repaying Flash Loan on ${buyNetwork} with ${totalRepayment} USDC...`);
+        await repayFlashLoan(buyNetwork, totalRepayment);
 
         console.log("🎉 Arbitrage Trade Completed Successfully!");
         await sendTelegramMessage("✅ Arbitrage Trade Completed Successfully!");
