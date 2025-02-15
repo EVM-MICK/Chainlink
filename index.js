@@ -220,11 +220,14 @@ const TOKENS = {
 };
 
 // Token decimals mapping (Polygon, Arbitrum)
+// ✅ Polygon Tokens // ✅ Arbitrum Tokens
 const TOKEN_DECIMALS = {
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6, // USDC
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8, // WBTC
-    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 18, // WETH (Polygon)
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18  // WETH (Arbitrum)
+    "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359": 6,  // USDC (Polygon)
+    "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619": 18, // WETH (Polygon)
+    "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6": 8,  // WBTC (Polygon)
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6,  // USDC (Arbitrum)
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18, // WETH (Arbitrum)
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8   // WBTC (Arbitrum)
 };
 
 const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
