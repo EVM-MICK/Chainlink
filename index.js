@@ -1855,7 +1855,7 @@ async function executeArbitrage() {
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
                 const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
                       console.log(`💵 Buying ${bestTrade.buyAmount} ${token} on ${buyNetwork}...`);
-                      executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
+                      executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount);
                       // ✅ Sell received tokens for USDC
                      console.log(`💵 Selling ${fusionQuote.receivedAmount} ${token} on ${sellNetwork}...`);
                     executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, fusionQuote.receivedAmount);
