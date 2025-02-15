@@ -228,7 +228,7 @@ const TOKEN_DECIMALS = {
 };
 
 const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
-const TRADE_SIZE_USDC = 100000; // $100,000 per trade
+const TRADE_SIZE_USDC = 110000; // $100,000 per trade
 
 // Initialize Permit2 contract instance
 const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
@@ -454,12 +454,22 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
         console.error("❌ Failed to fetch Fusion+ quote");
         return null;
     }
+// ✅ Extract expected received amount
+    let expectedDstAmount = parseFloat(fusionQuote.dstAmount);
+    
+    // ✅ Correctly subtract the 0.05% Aave loan fee
+    let netLoanAmount = expectedDstAmount / 1.0005; // ✅ CORRECT formula
+    netLoanAmount = Math.floor(netLoanAmount); // ✅ Round down to avoid exceeding request 
+
+    console.log(`🔹 Adjusted Loan Request: ${netLoanAmount} (After 0.05% fee subtraction)`);
 
     // ✅ Use different slippage based on volatility
-    const slippage = fusionQuote.volatile ? 1.00 : 0.99;
+    //const slippage = fusionQuote.volatile ? 1.00 : 0.99;
 
     return {
-        receivedAmount: parseFloat(fusionQuote.dstTokenAmount) * slippage, // ✅ Use correct `dstTokenAmount`
+        //receivedAmount: parseFloat(fusionQuote.dstTokenAmount) * slippage, // ✅ Use correct `dstTokenAmount`
+        receivedAmount: expectedDstAmount, // The full amount sent
+        netLoanRequest: netLoanAmount, // The reduced loan request
         quoteData: fusionQuote
     };
 }
@@ -1368,7 +1378,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         console.log(`🔹 ${token.name} Prices → Polygon: $${polygonTokenPrice}, Arbitrum: $${arbitrumTokenPrice}`);
 
         // ✅ Case 1: Buy on Polygon, Sell on Arbitrum
-        const buyAmountPoly = 100000 / usdcPolygonPrice;
+        const buyAmountPoly = 110000 / usdcPolygonPrice;
         const tokensBoughtPoly = buyAmountPoly / polygonTokenPrice;
         const sellAmountArb = tokensBoughtPoly * arbitrumTokenPrice;
         const finalUSDCArb = sellAmountArb / usdcArbitrumPrice;
@@ -1402,7 +1412,7 @@ async function detectArbitrageOpportunities(pricesByNetwork) {
         }
 
         // ✅ Case 2: Buy on Arbitrum, Sell on Polygon
-        const buyAmountArb = 100000 / usdcArbitrumPrice;
+        const buyAmountArb = 110000 / usdcArbitrumPrice;
         const tokensBoughtArb = buyAmountArb / arbitrumTokenPrice;
         const sellAmountPoly = tokensBoughtArb * polygonTokenPrice;
         const finalUSDCPly = sellAmountPoly / usdcPolygonPrice;
@@ -1733,7 +1743,7 @@ async function repayFlashLoan(chain, loanAmount, premium) {
 
 
 async function sendUSDCBack(chain, amount) {
-    const minRequired = 100050; // Minimum repayment required
+    const minRequired = 110055; // Minimum repayment required
     if (amount < minRequired) {
         console.error(`❌ Insufficient USDC received. Expected ${minRequired}, got ${amount}`);
         await sendTelegramMessage(`🚨 **Warning:** Received only ${amount} USDC. Manual intervention required!`);
@@ -1752,7 +1762,7 @@ async function swapTokenForUSDC(chain, token, amount) {
 }
 
 async function requestFlashLoan(targetChain, token, amount) {
-    const bufferAmount = amount * 1.005; // Add 0.5% buffer to avoid underfunding
+    const bufferAmount = amount * 0.0005; // Add 0.5% buffer to avoid underfunding
     console.log(`🚀 Requesting Flash Loan on ${targetChain} for ${bufferAmount.toFixed(4)} ${token}`);
     await executeFlashLoan(
         targetChain === "Polygon" ? NETWORKS.POLYGON : NETWORKS.ARBITRUM,
@@ -1876,17 +1886,17 @@ async function executeArbitrage() {
                 }
 
                 console.log(`💰 Expected Tokens After Cross-Chain Swap: ${fusionQuote.receivedAmount} ${token}`);
-                //const sellAmountString = Math.floor(fusionQuote.receivedAmount).toString();
+                //const sellAmountString = Math.floor(fusionQuote.receivedAmount).toString(); netLoanRequest
 
-                // ✅ Request Flash Loan based on received token amount
-                console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${fusionQuote.receivedAmount} ${token}...`);
+                // ✅ Request Flash Loan based on received token amount netLoanRequest
+                console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${fusionQuote.netLoanRequest} ${token}...`);
                 // ✅ Fetch final sell swap quote (Token → USDC on Sell Network)
 
                 const expectedFinalUSDC = await fetchSwapQuote(
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    fusionQuote.receivedAmount
+                    fusionQuote.netLoanRequest
                 );
                   
                if (!expectedFinalUSDC) {
@@ -1902,11 +1912,11 @@ async function executeArbitrage() {
                 }
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
                 console.log(`💵 Buying ${bestTrade.buyAmount} ${token} on ${buyNetwork}...`);
-                console.log(`💵 Selling ${fusionQuote.receivedAmount} ${token} on ${sellNetwork}...`);
+                console.log(`💵 Selling ${fusionQuote.netLoanRequest} ${token} on ${sellNetwork}...`);
                   // ✅ Buy and Sell received tokens for USDC
                 const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
                     executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
-                    executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, fusionQuote.receivedAmount)
+                    executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, fusionQuote.netLoanRequest)
                     
                 ]);
 
