@@ -185,7 +185,7 @@ const redisClient = createClient({
 //const nonce = await permit2Contract.nonces(wallet.address);
 
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
-const API_BASE_URL1 = "https://api.1inch.dev/swap/v6.0";
+const API_BASE_URL1 = `https://api.1inch.dev/swap/v6.0`;
 const API_KEY = process.env.ONEINCH_API_KEY; // Set 1inch API Key in .env
 // Constants and Configuration
 const GO_BACKEND_URL = process.env.GO_BACKEND_URL || "http://humble-mindfulness-production.up.railway.app"; // Go service endpoint
@@ -1083,7 +1083,7 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
      const amountString = Math.floor(Number(amount)).toString(); // Ensure valid integer string
     const url = `${API_BASE_URL1}/${networkId}/quote`;
     const config = {
-        headers: { Authorization: `Bearer ${API_KEY}` },
+        headers: { "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr" },
         params: {
             src: fromToken,
             dst: toToken,
