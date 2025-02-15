@@ -228,7 +228,7 @@ const TOKEN_DECIMALS = {
 };
 
 const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
-const TRADE_SIZE_USDC = 110000; // $100,000 per trade
+const TRADE_SIZE_USDC = 110000; // $110,000 per trade
 
 // Initialize Permit2 contract instance
 const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
