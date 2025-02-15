@@ -434,16 +434,16 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
 
     // ✅ Convert to string to prevent `.toUpperCase()` errors
-    const normalizedSrcChain = String(srcChain).toUpperCase();
-    const normalizedDstChain = String(dstChain).toUpperCase();
+    // const normalizedSrcChain = String(srcChain).toUpperCase();
+    // const normalizedDstChain = String(dstChain).toUpperCase();
 
     // ✅ Extract corresponding Chain IDs
-    const srcChainID = NETWORKS[normalizedSrcChain];
-    const dstChainID = NETWORKS[normalizedDstChain];
+    const srcChainID = srcChain;
+    const dstChainID = dstChain;
 
     // ✅ Validate Chain IDs
-    if (!srcChainID || !dstChainID) {
-        console.error(`❌ Invalid Chain Names! Source: ${normalizedSrcChain} (${srcChainID}), Destination: ${normalizedDstChain} (${dstChainID})`);
+    if (!srcChain || !dstChain) {
+        console.error(`❌ Invalid Chain Names! Source: ${srcChain}, Destination: ${dstChain} `);
         return null;
     }
 
