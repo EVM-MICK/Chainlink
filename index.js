@@ -1564,7 +1564,7 @@ async function executeFlashLoanAndSwap(chain, token, amount, contractAddress) {
         const response = await axios.get(
             `https://api.1inch.dev/swap/v6.0/${NETWORKS[chain]}/swap`,
             {
-                headers: { Authorization: `Bearer ${ONEINCH_API_KEY}` },
+                headers: { Authorization: `Bearer ${API_KEY}` },
                 params: flashLoanData
             }
         );
