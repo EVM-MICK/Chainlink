@@ -433,15 +433,19 @@ axios.interceptors.request.use((config) => {
 async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
 
+    // ✅ Normalize the chain names to uppercase to match `NETWORKS`
+    const normalizedSrcChain = srcChain.toUpperCase();
+    const normalizedDstChain = dstChain.toUpperCase();
+
     // ✅ Extract the corresponding chain IDs
-    const srcChainID = NETWORKS[srcChain];
-    const dstChainID = NETWORKS[dstChain];
+    const srcChainID = NETWORKS[normalizedSrcChain];
+    const dstChainID = NETWORKS[normalizedDstChain];
 
     // ✅ Validate that the extracted IDs exist
-    // if (!srcChainID || !dstChainID) {
-    //     console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
-    //     return null;
-    // }
+    if (!srcChainID || !dstChainID) {
+        console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
+        return null;
+    }
 
     console.log(`🔹 Extracted Chain IDs → Source: ${srcChainID}, Destination: ${dstChainID}`);
 
@@ -454,8 +458,9 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
         console.error("❌ Failed to fetch Fusion+ quote");
         return null;
     }
-// ✅ Extract expected received amount
-    let expectedDstAmount = parseFloat(fusionQuote.dstAmount);
+
+    // ✅ Extract expected received amount
+    let expectedDstAmount = parseFloat(fusionQuote.dstTokenAmount); // ✅ Use correct `dstTokenAmount`
     
     // ✅ Correctly subtract the 0.05% Aave loan fee
     let netLoanAmount = expectedDstAmount / 1.0005; // ✅ CORRECT formula
@@ -463,16 +468,13 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
 
     console.log(`🔹 Adjusted Loan Request: ${netLoanAmount} (After 0.05% fee subtraction)`);
 
-    // ✅ Use different slippage based on volatility
-    //const slippage = fusionQuote.volatile ? 1.00 : 0.99;
-
     return {
-        //receivedAmount: parseFloat(fusionQuote.dstTokenAmount) * slippage, // ✅ Use correct `dstTokenAmount`
         receivedAmount: expectedDstAmount, // The full amount sent
         netLoanRequest: netLoanAmount, // The reduced loan request
         quoteData: fusionQuote
     };
 }
+
 
 /**
  * 📡 Get Fusion+ Quote from 1inch API
