@@ -1041,36 +1041,35 @@ async function checkCircuitBreaker() {
 // 🚀 Fetch Swap Quote (Using the Exact 1inch API Format)
 // ✅ Fetch Swap Quote with Rate-Limiting & Null Handling
 
-// async function fetchSwapQuote(chain, fromToken, toToken, amount) {
-//     const url = `${API_BASE_URL1}/${chain}/quote`;
+// async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
+//     console.log(`📡 Fetching swap quote on network ${networkId} for ${amount} ${fromToken} → ${toToken}...`);
+//      const amountString = Math.floor(Number(amount)).toString(); // Ensure valid integer string
+//     const url = `${API_BASE_URL1}/${networkId}/quote`;
 //     const config = {
-//         headers: { Authorization: `Bearer ${API_KEY}` },
-        // params: {
-        //     src: fromToken,
-        //     dst: toToken,
-        //     amount,
-        //     complexityLevel: 2,  // ✅ Ensures accurate route calculation
-        //     parts: 50,           // ✅ Splits trade across multiple liquidity sources
-        //     mainRouteParts: 10,   // ✅ Includes deeper route analysis
-        //     includeTokensInfo: false,
-        //     includeProtocols: true, // ✅ Fetches protocol details for better price accuracy
-        //     includeGas: true,        // ✅ Ensures gas estimation is included
-        // }
+//         headers: { "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr" },
+//         params: {
+//             src: fromToken,
+//             dst: toToken,
+//             amountString,
+//             complexityLevel: 2,  // ✅ Ensures accurate route calculation
+//             parts: 50,           // ✅ Splits trade across multiple liquidity sources
+//             mainRouteParts: 10,   // ✅ Includes deeper route analysis
+//             includeTokensInfo: false,
+//             includeProtocols: true, // ✅ Fetches protocol details for better price accuracy
+//             includeGas: true,        // ✅ Ensures gas estimation is included
+//         }
 //     };
 
 //     for (let attempt = 1; attempt <= 3; attempt++) {
 //         try {
-//             return await rateLimitedRequest(async () => {
-//                 const response = await axios.get(url, config);
-                
-//                 if (response.data?.dstAmount) {
-//                     console.log(`✅ Swap Quote Success: ${amount} ${fromToken} → ${response.data.dstAmount} ${toToken}`);
-//                     return response.data.dstAmount;
-//                 }
-//             });
+//             const response = await axios.get(url, config);
+//             if (response.data?.dstAmount) {
+//                 console.log(`✅ Swap Quote: Expected ${response.data.dstAmount} ${toToken}`);
+//                 return response.data.dstAmount;
+//             }
 //         } catch (error) {
 //             console.warn(`⚠️ Swap quote fetch attempt ${attempt} failed. Retrying...`);
-//             await delay(2000 * attempt); // ✅ Exponential backoff to prevent API blocks
+//             await delay(2000 * attempt);
 //         }
 //     }
 
@@ -1078,22 +1077,50 @@ async function checkCircuitBreaker() {
 //     return null;
 // }
 
+// Token decimals mapping (Polygon, Arbitrum)
+const TOKEN_DECIMALS = {
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6, // USDC
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8, // WBTC
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 18, // WETH (Polygon)
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18  // WETH (Arbitrum)
+};
+
+/**
+ * 📡 Fetch Swap Quote from 1inch API
+ * @param {number} networkId - The ID of the network (137 for Polygon, 42161 for Arbitrum)
+ * @param {string} fromToken - The contract address of the source token
+ * @param {string} toToken - The contract address of the destination token
+ * @param {string | number} amount - The amount in human-readable format (e.g., 100000 USDC)
+ * @returns {Promise<string | null>} - Returns the expected destination amount in string format or null if failed
+ */
 async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
     console.log(`📡 Fetching swap quote on network ${networkId} for ${amount} ${fromToken} → ${toToken}...`);
-     const amountString = Math.floor(Number(amount)).toString(); // Ensure valid integer string
+
+   // ✅ Ensure token decimal mapping exists
+    if (!TOKEN_DECIMALS[fromToken]) {
+        console.error(`❌ Token decimal mapping missing for ${fromToken}`);
+        return null;
+    }
+
+    // ✅ Convert human-readable amount to correct decimal format
+    const amountInWei = BigInt(Math.floor(amount * 10 ** TOKEN_DECIMALS[fromToken])).toString(); // ✅ Ensure string format
+
+    console.log(`🔹 Converted Amount for API: ${amountInWei} (in smallest unit)`);
+
     const url = `${API_BASE_URL1}/${networkId}/quote`;
+
     const config = {
         headers: { "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr" },
         params: {
             src: fromToken,
             dst: toToken,
-            amountString,
-            complexityLevel: 2,  // ✅ Ensures accurate route calculation
-            parts: 50,           // ✅ Splits trade across multiple liquidity sources
-            mainRouteParts: 10,   // ✅ Includes deeper route analysis
+            amount: amountInWei, // ✅ Correct field name and format
+            complexityLevel: 2,
+            parts: 50,
+            mainRouteParts: 10,
             includeTokensInfo: false,
-            includeProtocols: true, // ✅ Fetches protocol details for better price accuracy
-            includeGas: true,        // ✅ Ensures gas estimation is included
+            includeProtocols: true,
+            includeGas: true
         }
     };
 
@@ -1105,14 +1132,15 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
                 return response.data.dstAmount;
             }
         } catch (error) {
-            console.warn(`⚠️ Swap quote fetch attempt ${attempt} failed. Retrying...`);
-            await delay(2000 * attempt);
+            console.warn(`⚠️ Swap quote fetch attempt ${attempt} failed: ${error.response?.data?.error || error.message}. Retrying...`);
+            await delay(2000 * attempt); // Exponential backoff
         }
     }
 
     console.error(`❌ Failed to fetch swap quote after 3 attempts.`);
     return null;
 }
+
 
 
 // 🚀 Detect Arbitrage Opportunities
@@ -1771,7 +1799,7 @@ async function executeArbitrage() {
                 const sellNetwork = bestTrade.sellOn.toUpperCase();
                 const token = bestTrade.token.toUpperCase();
                 // Ensure amount is a positive integer string
-            const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
+            //const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
                 console.log(`🔄 Debugging trade details before validation:`);
                 console.log(`➡️ Buy Network: ${buyNetwork}`);
                 console.log(`➡️ Sell Network: ${sellNetwork}`);
@@ -1803,7 +1831,7 @@ async function executeArbitrage() {
                     buyNetworkId,
                     buyUSDC.address,
                     buyToken.address,
-                    buyAmountString // Ensure it's an integer string
+                    bestTrade.buyAmount // Ensure it's an integer string
                 );
 
                 if (!buyTokenAmount) {
@@ -1828,7 +1856,7 @@ async function executeArbitrage() {
                 }
 
                 console.log(`💰 Expected Tokens After Cross-Chain Swap: ${fusionQuote.receivedAmount} ${token}`);
-                const sellAmountString = Math.floor(fusionQuote.receivedAmount).toString();
+                //const sellAmountString = Math.floor(fusionQuote.receivedAmount).toString();
 
                 // ✅ Request Flash Loan based on received token amount
                 console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${fusionQuote.receivedAmount} ${token}...`);
@@ -1838,7 +1866,7 @@ async function executeArbitrage() {
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    sellAmountString
+                    fusionQuote.receivedAmount
                 );
                   
                if (!expectedFinalUSDC) {
