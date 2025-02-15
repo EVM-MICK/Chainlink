@@ -219,6 +219,13 @@ const TOKENS = {
     ]
 };
 
+// Token decimals mapping (Polygon, Arbitrum)
+const TOKEN_DECIMALS = {
+    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6, // USDC
+    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8, // WBTC
+    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 18, // WETH (Polygon)
+    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18  // WETH (Arbitrum)
+};
 
 const PROFIT_THRESHOLD = 200; // Minimum $500 profit per trade
 const TRADE_SIZE_USDC = 100000; // $100,000 per trade
@@ -414,46 +421,6 @@ axios.interceptors.request.use((config) => {
     return config;
 });
 
-
-// 🚀 Fusion+ Quote Function (Dynamic)
-// async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
-//     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
-
-//     const params = {
-//         srcChain: NETWORKS[srcChain],
-//         dstChain: NETWORKS[dstChain],
-//         srcTokenAddress: srcToken,
-//         dstTokenAddress: dstToken,
-//         amount: amount.toString(),
-//         walletAddress: process.env.WALLET_ADDRESS,
-//         enableEstimate: "true"
-//     };
-
-//     const config = {
-//         headers: { "Authorization": `Bearer ${process.env.ONEINCH_API_KEY}` },
-//         params
-//     };
-
-//     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
-
-//     try {
-//         const response = await axios.get(url, config);
-//         console.log(`✅ Fusion+ Quote Received:`, response.data);
-
-//         // ✅ Extract auctionEndAmount correctly
-//         const dstAmount = response.data.presets?.fast?.auctionEndAmount;
-//         if (!dstAmount) {
-//             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
-//             return null;
-//         }
-
-//         console.log(`🔹 Estimated Received Amount on ${dstChain}: ${dstAmount}`);
-//         return dstAmount;
-//     } catch (error) {
-//         console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
-//         return null;
-//     }
-// }
 /**
  * 📡 Fetch a Fusion+ Quote for Cross-Chain Swaps
  * @param {string} srcChain - Name of the source chain ("Polygon" or "Arbitrum")
@@ -496,42 +463,6 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
         quoteData: fusionQuote
     };
 }
-// async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
-//     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
-
-//     const params = {
-//         srcChain: NETWORKS[srcChain],
-//         dstChain: NETWORKS[dstChain],
-//         srcTokenAddress: srcToken,
-//         dstTokenAddress: dstToken,
-//         amount: amount,
-//         walletAddress: process.env.WALLET_ADDRESS,
-//         enableEstimate: "true"
-//     };
-
-//     const config = {
-//         headers: { Authorization: `Bearer ${API_KEY}` },
-//         params
-//     };
-
-//     try {
-//         const response = await axios.get(url, config);
-//         console.log(`✅ Fusion+ Quote Received:`, response.data);
-
-//         // ✅ Extract auctionEndAmount correctly
-//         const dstAmount = response.data.presets?.fast?.auctionEndAmount;
-//         if (!dstAmount) {
-//             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
-//             return null;
-//         }
-
-//         console.log(`🔹 Estimated Received Amount on ${dstChain}: ${dstAmount}`);
-//         return dstAmount;
-//     } catch (error) {
-//         console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
-//         return null;
-//     }
-// }
 
 /**
  * 📡 Get Fusion+ Quote from 1inch API
@@ -542,7 +473,12 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
  * @param {string} amount - Trade amount (already in smallest unit format)
  * @returns {Promise<object | null>} - Quote response from API
  */
-async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount) {
+// 🚀 Fusion+ Quote Function (Dynamic)
+
+// ✅ Store Last API Call Time to Enforce Rate Limiting
+let lastFusionQuoteTimestamp = 0;
+
+async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amountInWei) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
 
     // ✅ Ensure Chain IDs are correct
@@ -551,21 +487,53 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         return null;
     }
 
-    console.log(`🔹 API Request - srcChain: ${srcChainID}, dstChain: ${dstChainID}, amount: ${amountString}`);
+    // ✅ Enforce 1RPS Rate Limit
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastFusionQuoteTimestamp;
+    const waitTime = Math.max(0, 1000 - timeSinceLastRequest); // Ensure at least 1-second gap
+
+    if (waitTime > 0) {
+        console.log(`⏳ Respecting 1RPS limit, waiting ${waitTime}ms before next request...`);
+        await delay(waitTime);
+    }
+
+    // ✅ Update Last Request Timestamp
+    lastFusionQuoteTimestamp = Date.now();
+
+    console.log(`📡 Requesting Fusion+ Quote: ${srcChainID} → ${dstChainID}, Amount (Wei): ${amountInWei}`);
+
+    // ✅ Convert Amount from Wei to Decimal Format
+    const srcTokenDecimals = TOKEN_DECIMALS[srcToken] || 18; // Default to 18 decimals if not found
+    const amountInTokenUnits = parseFloat(amountInWei) / 10 ** srcTokenDecimals;
+
+    console.log(`🔹 Converted Amount from Wei to Token Units: ${amountInTokenUnits} ${srcToken}`);
+
+    // ✅ Convert Back to Wei for API Request
+    const finalAmountInWei = Math.floor(amountInTokenUnits * 10 ** srcTokenDecimals).toString();
+
+    console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
     const params = {
         srcChain: srcChainID,   // ✅ Pass correct chain ID
         dstChain: dstChainID,   // ✅ Pass correct chain ID
         srcTokenAddress: srcToken,
         dstTokenAddress: dstToken,
-        amount: amount,   // ✅ Ensure it's a string
+        amount: finalAmountInWei,   // ✅ Corrected amount in Wei
         walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: true  // ✅ Ensure boolean value
     };
 
     const config = {
         headers: { Authorization: `Bearer ${API_KEY}` },
-        params
+        params: {
+        srcChain: srcChainID,
+        dstChain: dstChainID,
+        srcTokenAddress: srcToken,
+        dstTokenAddress: dstToken,
+        amount: finalAmountInWei,
+        walletAddress: process.env.WALLET_ADDRESS,
+        enableEstimate: true
+    }
     };
 
     try {
@@ -1151,13 +1119,7 @@ async function checkCircuitBreaker() {
 //     return null;
 // }
 
-// Token decimals mapping (Polygon, Arbitrum)
-const TOKEN_DECIMALS = {
-    "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": 6, // USDC
-    "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": 8, // WBTC
-    "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 18, // WETH (Polygon)
-    "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": 18  // WETH (Arbitrum)
-};
+
 
 /**
  * 📡 Fetch Swap Quote from 1inch API
