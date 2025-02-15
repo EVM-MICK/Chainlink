@@ -1152,6 +1152,11 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
         return null;
     }
 
+    if (!TOKEN_DECIMALS[toToken]) {
+        console.error(`❌ Token decimal mapping missing for ${toToken}`);
+        return null;
+    }
+
     // ✅ Convert human-readable amount to correct decimal format
     const amountInWei = BigInt(Math.floor(amount * 10 ** TOKEN_DECIMALS[fromToken])).toString(); // ✅ Ensure string format
 
@@ -1568,20 +1573,29 @@ async function executeSwap(trade) {
         🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
-    // 🔹 Dynamically Select the Correct Contract  arbitrumContract
-    const buyContractAddress = buyOn === "Polygon" ? polygonContract : arbitrumContract;
-    const sellContractAddress = sellOn === "Polygon" ? polygonContract : arbitrumContract;
+    // 🔹 Get Network Chain IDs
+    const buyChainID = NETWORKS[buyOn.toUpperCase()];
+    const sellChainID = NETWORKS[sellOn.toUpperCase()];
+
+    if (!buyChainID || !sellChainID) {
+        console.error(`❌ Invalid chain IDs! Buy: ${buyChainID}, Sell: ${sellChainID}`);
+        return;
+    }
+
+    // 🔹 Dynamically Select the Correct Smart Contract for Execution
+    const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
+    const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
     try {
-         // 🔹 Track trade details by amount
+        // 🔹 Store trade details
         tradeMap.set(buyAmount.toString(), trade);
         tradeMap.set(sellAmount.toString(), trade);
 
-        // 🔹 1️⃣ Request Flash Loan & Execute Buy & Sell Simultaneously
-        console.log(`🔹 Requesting flash loans & executing swaps...`);
+        // 🔹 Request Flash Loan & Execute Buy/Sell Swaps
+        console.log(`🔹 Requesting Flash Loans & Executing Swaps...`);
         const [buyTx, sellTx] = await Promise.all([
-            executeFlashLoanAndSwap(buyOn, token, buyAmount, buyContractAddress),
-            executeFlashLoanAndSwap(sellOn, token, sellAmount, sellContractAddress)
+            executeFlashLoanAndSwap(buyOn, token, buyAmount, buyContract),
+            executeFlashLoanAndSwap(sellOn, token, sellAmount, sellContract)
         ]);
 
         if (!buyTx || !sellTx) {
@@ -1591,17 +1605,21 @@ async function executeSwap(trade) {
 
         console.log(`✅ Both Buy & Sell Transactions Confirmed!`);
 
-        // 🔹 2️⃣ Execute Fusion+ Swap for Loan Repayment
+        // 🔹 Execute Cross-Chain Fusion+ Swap for Loan Repayment
         try {
             console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
-            await executeFusionSwap(trade, TOKENS[sellOn].find(t => t.name === "USDC").address, 
-                                           TOKENS[buyOn].find(t => t.name === "USDC").address, sellAmount);
+            await executeFusionSwap(
+                trade,
+                TOKENS[sellOn].find(t => t.name === "USDC").address, 
+                TOKENS[buyOn].find(t => t.name === "USDC").address,
+                sellAmount
+            );
         } catch (error) {
             console.error("❌ Error executing Fusion+ swap for loan repayment:", error);
             await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
         }
 
-        // 🔹 Send Telegram Notification on Successful Trade
+        // 🔹 Notify on Successful Trade
         await sendTelegramTradeAlert({
             title: "✅ Arbitrage Trade Completed!",
             message: `🏆 Successfully completed arbitrage trade!
@@ -1625,29 +1643,105 @@ async function executeSwap(trade) {
 /**
  * 🔥 **Flash Loan Execution Function**
  */
-async function executeFlashLoanAndSwap(chain, token, amount, contractAddress) {
-    console.log(`🚀 Requesting Flash Loan & Swap on ${chain} for ${amount} ${token}`);
+async function executeFlashLoanAndSwap(buyOn, sellOn, token, amount) {
+    console.log(`🚀 Requesting Flash Loans & Swaps on ${buyOn} & ${sellOn} for ${amount} ${token}`);
 
-    const flashLoanData = {
-        src: token,
-        dst: TOKENS[chain].find(t => t.name === "USDC").address,
-        amount: Math.floor(amount).toString(),
-        from: contractAddress,
+    // ✅ Get Chain IDs
+    const buyChainID = NETWORKS[buyOn.toUpperCase()];
+    const sellChainID = NETWORKS[sellOn.toUpperCase()];
+
+    if (!buyChainID || !sellChainID) {
+        console.error(`❌ Invalid chain IDs! BuyOn: ${buyOn} (${buyChainID}), SellOn: ${sellOn} (${sellChainID})`);
+        return null;
+    }
+
+    // ✅ Ensure USDC addresses are available
+    const buyUSDC = TOKENS[buyOn.toUpperCase()].find(t => t.name === "USDC");
+    const sellUSDC = TOKENS[sellOn.toUpperCase()].find(t => t.name === "USDC");
+
+    if (!buyUSDC || !sellUSDC) {
+        console.error(`❌ USDC token address missing for BuyOn: ${buyOn} or SellOn: ${sellOn}`);
+        return null;
+    }
+
+    // ✅ Get Token Decimals & Convert Amount to Wei
+    const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
+    if (tokenDecimals === undefined) {
+        console.error(`❌ Missing token decimal for ${token}`);
+        return null;
+    }
+    const amountInWei = ethers.utils.parseUnits(amount.toString(), tokenDecimals);
+    console.log(`🔹 Converted Amount to Wei: ${amountInWei.toString()} (${tokenDecimals} decimals)`);
+
+    // ✅ Assign Correct Contract Based on BuyOn & SellOn Networks
+    const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
+    const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
+
+    // ✅ Construct Flash Loan Request Data for Buy & Sell Networks
+    const buyFlashLoanData = {
+        src: buyUSDC.address, // Buy USDC → Token
+        dst: token,
+        amount: amountInWei.toString(),
+        from: buyContract.address,
         origin: WALLET_ADDRESS,
         slippage: 1
     };
 
+    const sellFlashLoanData = {
+        src: token, // Sell Token → USDC
+        dst: sellUSDC.address,
+        amount: amountInWei.toString(),
+        from: sellContract.address,
+        origin: WALLET_ADDRESS,
+        slippage: 1
+    };
+
+    // ✅ Respect 1inch Rate Limit
+    await delay(1000);
+
     try {
-        const response = await axios.get(
-            `https://api.1inch.dev/swap/v6.0/${NETWORKS[chain]}/swap`,
-            {
+        // ✅ Fetch Swap Data for Buy & Sell Networks in Parallel
+        const [buyResponse, sellResponse] = await Promise.all([
+            axios.get(`https://api.1inch.dev/swap/v6.0/${buyChainID}/swap`, {
                 headers: { Authorization: `Bearer ${API_KEY}` },
-                params: flashLoanData
-            }
+                params: buyFlashLoanData
+            }),
+            axios.get(`https://api.1inch.dev/swap/v6.0/${sellChainID}/swap`, {
+                headers: { Authorization: `Bearer ${API_KEY}` },
+                params: sellFlashLoanData
+            })
+        ]);
+
+        console.log("✅ Flash Loan Swap Data (Buy):", buyResponse.data);
+        console.log("✅ Flash Loan Swap Data (Sell):", sellResponse.data);
+
+        // ✅ Compile Smart Contract Payloads for Both Networks
+        const buyRouteData = buyResponse.data.tx.data;
+        const sellRouteData = sellResponse.data.tx.data;
+
+        const buyPayload = ethers.utils.defaultAbiCoder.encode(
+            ["address", "uint256", "bytes"],
+            [token, amountInWei, buyRouteData]
         );
 
-        console.log("✅ Flash Loan Swap Data Generated:", response.data);
-        return response.data;
+        const sellPayload = ethers.utils.defaultAbiCoder.encode(
+            ["address", "uint256", "bytes"],
+            [token, amountInWei, sellRouteData]
+        );
+
+        // ✅ Execute Flash Loans on Both Networks in Parallel
+        console.log(`🔹 Sending Flash Loan Requests to Smart Contracts on ${buyOn} & ${sellOn}`);
+
+        const [buyTx, sellTx] = await Promise.all([
+            buyContract.fn_RequestFlashLoan(token, amountInWei, buyPayload),
+            sellContract.fn_RequestFlashLoan(token, amountInWei, sellPayload)
+        ]);
+
+        await Promise.all([buyTx.wait(), sellTx.wait()]);
+
+        console.log(`✅ Flash Loans Executed Successfully on ${buyOn} & ${sellOn}`);
+
+        return { buyResponse: buyResponse.data, sellResponse: sellResponse.data };
     } catch (error) {
         console.error("❌ Failed to generate Flash Loan Swap data:", error.response?.data || error.message);
         return null;
