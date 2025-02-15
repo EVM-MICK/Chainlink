@@ -454,38 +454,113 @@ axios.interceptors.request.use((config) => {
 //         return null;
 //     }
 // }
-
+/**
+ * 📡 Fetch a Fusion+ Quote for Cross-Chain Swaps
+ * @param {string} srcChain - Name of the source chain ("Polygon" or "Arbitrum")
+ * @param {string} dstChain - Name of the destination chain ("Polygon" or "Arbitrum")
+ * @param {string} srcToken - Source token address
+ * @param {string} dstToken - Destination token address
+ * @param {string} amount - Trade amount (already formatted in smallest unit)
+ * @returns {Promise<{ receivedAmount: string, quoteData: object } | null>}
+ */
 async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
 
-    await delay(1000); // Respect 1inch 1RPS limit
+    // ✅ Extract the corresponding chain IDs
+    const srcChainID = NETWORKS[srcChain];
+    const dstChainID = NETWORKS[dstChain];
 
-    const fusionQuote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
+    // ✅ Validate that the extracted IDs exist
+    if (!srcChainID || !dstChainID) {
+        console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
+        return null;
+    }
+
+    console.log(`🔹 Extracted Chain IDs → Source: ${srcChainID}, Destination: ${dstChainID}`);
+
+    // ✅ Respect 1inch 1RPS limit
+    await delay(1000);
+
+    // ✅ Fetch the Fusion+ Quote using extracted Chain IDs
+    const fusionQuote = await getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount);
     if (!fusionQuote) {
         console.error("❌ Failed to fetch Fusion+ quote");
         return null;
     }
 
-    // Use different slippage based on volatility
+    // ✅ Use different slippage based on volatility
     const slippage = fusionQuote.volatile ? 1.00 : 0.99;
 
     return {
-        receivedAmount: parseFloat(fusionQuote.dstAmount) * slippage,
+        receivedAmount: parseFloat(fusionQuote.dstTokenAmount) * slippage, // ✅ Use correct `dstTokenAmount`
         quoteData: fusionQuote
     };
 }
+// async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
+//     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
 
-async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
+//     const params = {
+//         srcChain: NETWORKS[srcChain],
+//         dstChain: NETWORKS[dstChain],
+//         srcTokenAddress: srcToken,
+//         dstTokenAddress: dstToken,
+//         amount: amount,
+//         walletAddress: process.env.WALLET_ADDRESS,
+//         enableEstimate: "true"
+//     };
+
+//     const config = {
+//         headers: { Authorization: `Bearer ${API_KEY}` },
+//         params
+//     };
+
+//     try {
+//         const response = await axios.get(url, config);
+//         console.log(`✅ Fusion+ Quote Received:`, response.data);
+
+//         // ✅ Extract auctionEndAmount correctly
+//         const dstAmount = response.data.presets?.fast?.auctionEndAmount;
+//         if (!dstAmount) {
+//             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
+//             return null;
+//         }
+
+//         console.log(`🔹 Estimated Received Amount on ${dstChain}: ${dstAmount}`);
+//         return dstAmount;
+//     } catch (error) {
+//         console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
+//         return null;
+//     }
+// }
+
+/**
+ * 📡 Get Fusion+ Quote from 1inch API
+ * @param {number} srcChainID - Source chain ID
+ * @param {number} dstChainID - Destination chain ID
+ * @param {string} srcToken - Source token address
+ * @param {string} dstToken - Destination token address
+ * @param {string} amount - Trade amount (already in smallest unit format)
+ * @returns {Promise<object | null>} - Quote response from API
+ */
+async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
 
+    // ✅ Ensure Chain IDs are correct
+    if (!srcChainID || !dstChainID) {
+        console.error(`❌ Invalid Chain IDs! Source: ${srcChainID}, Destination: ${dstChainID}`);
+        return null;
+    }
+
+    console.log(`🔹 API Request - srcChain: ${srcChainID}, dstChain: ${dstChainID}, amount: ${amountString}`);
+
     const params = {
-        srcChain: NETWORKS[srcChain],
-        dstChain: NETWORKS[dstChain],
+        srcChain: srcChainID,   // ✅ Pass correct chain ID
+        dstChain: dstChainID,   // ✅ Pass correct chain ID
         srcTokenAddress: srcToken,
         dstTokenAddress: dstToken,
-        amount: amount.toString(),
+        amount: amount,   // ✅ Ensure it's a string
         walletAddress: process.env.WALLET_ADDRESS,
-        enableEstimate: "true"
+        enableEstimate: true  // ✅ Ensure boolean value
     };
 
     const config = {
@@ -497,21 +572,20 @@ async function getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
         const response = await axios.get(url, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
-        // ✅ Extract auctionEndAmount correctly
+        // ✅ Extract `auctionEndAmount` correctly for final swap estimation
         const dstAmount = response.data.presets?.fast?.auctionEndAmount;
         if (!dstAmount) {
             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
             return null;
         }
 
-        console.log(`🔹 Estimated Received Amount on ${dstChain}: ${dstAmount}`);
-        return dstAmount;
+        console.log(`🔹 Estimated Received Amount on ${dstChainID}: ${dstAmount}`);
+        return response.data;
     } catch (error) {
         console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
         return null;
     }
 }
-
 
 async function buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
@@ -1724,22 +1798,6 @@ async function requestFlashLoan(targetChain, token, amount) {
         bufferAmount.toFixed(0) // Convert to whole number for better precision
     );
 }
-
-// async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
-//     const fusionQuote = await getFusionQuote(srcChain, dstChain, srcToken, dstToken, amount);
-//     if (!fusionQuote) {
-//         console.error("❌ Failed to fetch Fusion+ quote");
-//         return null;
-//     }
-
-//     // Use different slippage based on volatility
-//     const slippage = fusionQuote.volatile ? 1.00 : 0.99;
-
-//     return {
-//         receivedAmount: parseFloat(fusionQuote.dstAmount) * slippage,
-//         quoteData: fusionQuote
-//     };
-// }
 
 async function signFusionOrder(orderData) {
     const domain = {
