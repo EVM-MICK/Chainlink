@@ -1853,14 +1853,15 @@ async function executeArbitrage() {
                     continue;
                 }
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
+                console.log(`💵 Buying ${bestTrade.buyAmount} ${token} on ${buyNetwork}...`);
+                console.log(`💵 Selling ${fusionQuote.receivedAmount} ${token} on ${sellNetwork}...`);
+                  // ✅ Buy and Sell received tokens for USDC
                 const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
-                      console.log(`💵 Buying ${bestTrade.buyAmount} ${token} on ${buyNetwork}...`);
-                      executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount);
-                      // ✅ Sell received tokens for USDC
-                     console.log(`💵 Selling ${fusionQuote.receivedAmount} ${token} on ${sellNetwork}...`);
-                    executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, fusionQuote.receivedAmount);
+                    executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
+                    executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, fusionQuote.receivedAmount)
                     
                 ]);
+
                 if (!buySwapSuccess || !sellSwapSuccess) {
                     console.error("❌ Buy or Sell Swap failed. Retrying...");
                     continue;
