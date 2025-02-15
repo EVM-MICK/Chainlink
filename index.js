@@ -433,17 +433,17 @@ axios.interceptors.request.use((config) => {
 async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
 
-    // ✅ Normalize the chain names to uppercase to match `NETWORKS`
-    const normalizedSrcChain = srcChain.toUpperCase();
-    const normalizedDstChain = dstChain.toUpperCase();
+    // ✅ Convert to string to prevent `.toUpperCase()` errors
+    const normalizedSrcChain = String(srcChain).toUpperCase();
+    const normalizedDstChain = String(dstChain).toUpperCase();
 
-    // ✅ Extract the corresponding chain IDs
+    // ✅ Extract corresponding Chain IDs
     const srcChainID = NETWORKS[normalizedSrcChain];
     const dstChainID = NETWORKS[normalizedDstChain];
 
-    // ✅ Validate that the extracted IDs exist
+    // ✅ Validate Chain IDs
     if (!srcChainID || !dstChainID) {
-        console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
+        console.error(`❌ Invalid Chain Names! Source: ${normalizedSrcChain} (${srcChainID}), Destination: ${normalizedDstChain} (${dstChainID})`);
         return null;
     }
 
@@ -460,10 +460,10 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
     }
 
     // ✅ Extract expected received amount
-    let expectedDstAmount = parseFloat(fusionQuote.dstTokenAmount); // ✅ Use correct `dstTokenAmount`
-    
+    let expectedDstAmount = parseFloat(fusionQuote.dstTokenAmount);
+
     // ✅ Correctly subtract the 0.05% Aave loan fee
-    let netLoanAmount = expectedDstAmount / 1.0005; // ✅ CORRECT formula
+    let netLoanAmount = expectedDstAmount / 1.0005;
     netLoanAmount = Math.floor(netLoanAmount); // ✅ Round down to avoid exceeding request 
 
     console.log(`🔹 Adjusted Loan Request: ${netLoanAmount} (After 0.05% fee subtraction)`);
@@ -474,7 +474,6 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
         quoteData: fusionQuote
     };
 }
-
 
 /**
  * 📡 Get Fusion+ Quote from 1inch API
