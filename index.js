@@ -88,7 +88,7 @@ const providerArbitrum = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC);
 const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
 
-// Load Smart Contracts for both networks
+// Load Smart Contracts for both networks polygonContract arbitrumContract
 const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
@@ -1568,9 +1568,9 @@ async function executeSwap(trade) {
         🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
-    // 🔹 Dynamically Select the Correct Contract
-    const buyContractAddress = buyOn === "Polygon" ? POLYGON_SMART_CONTRACT : ARBITRUM_SMART_CONTRACT;
-    const sellContractAddress = sellOn === "Polygon" ? POLYGON_SMART_CONTRACT : ARBITRUM_SMART_CONTRACT;
+    // 🔹 Dynamically Select the Correct Contract  arbitrumContract
+    const buyContractAddress = buyOn === "Polygon" ? polygonContract : arbitrumContract;
+    const sellContractAddress = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
     try {
          // 🔹 Track trade details by amount
