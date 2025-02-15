@@ -771,9 +771,8 @@ async function executeFusionSwap(trade, srcToken, dstToken, amount) {
 //     await executeFusionSwap(srcToken, dstToken, returnAmount);
 // });
 
-**
- * 🔥 Listen for SwapExecuted Event & Trigger Fusion Swap
- */
+
+ // 🔥 Listen for SwapExecuted Event & Trigger Fusion Swap
 async function handleSwapExecuted(srcToken, dstToken, amount, returnAmount, timestamp, chain) {
     console.log(`🔥 Swap Completed on ${chain}: ${srcToken} → ${dstToken}, Amount: ${amount}`);
 
