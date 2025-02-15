@@ -438,10 +438,10 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
     const dstChainID = NETWORKS[dstChain];
 
     // ✅ Validate that the extracted IDs exist
-    if (!srcChainID || !dstChainID) {
-        console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
-        return null;
-    }
+    // if (!srcChainID || !dstChainID) {
+    //     console.error(`❌ Invalid Chain Name(s)! Source: ${srcChain} (${srcChainID}), Destination: ${dstChain} (${dstChainID})`);
+    //     return null;
+    // }
 
     console.log(`🔹 Extracted Chain IDs → Source: ${srcChainID}, Destination: ${dstChainID}`);
 
