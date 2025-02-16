@@ -1203,15 +1203,15 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
     return null;
 }
 
-function convertFromWei(amountInWei, token) {
+function convertToWei(amount, token) {
     const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
-    if (tokenDecimals === undefined) {
-        console.error(`❌ Token decimals not found for ${token}`);
-        return amountInWei;
+    if (!tokenDecimals) {
+        throw new Error(`❌ Missing token decimal for ${token}`);
     }
-    return parseFloat(ethers.utils.formatUnits(amountInWei, tokenDecimals));
-}
 
+    // ✅ Multiply by decimals & floor to ensure it's an integer
+    return BigInt(Math.floor(amount * 10 ** tokenDecimals));
+}
 
 // 🚀 Detect Arbitrage Opportunities
 
@@ -1792,7 +1792,10 @@ async function executeArbitrage() {
                     continue;
                 }
 
-                console.log(`💰 Buy Swap Expected Amount: ${buyTokenAmount} ${token}`);
+                // ✅ Convert amount from Wei back to token units
+        let buyTokenAmountWei = convertFromWei(buyTokenAmount, token);
+
+        console.log(`💰 Buy Swap Expected Amount: ${buyTokenAmountWei} ${token}`);
 
                 // ✅ Fetch Fusion+ cross-chain swap quote (Token → Token on Sell Network)
                 const fusionQuote = await fetchFusionQuote(
@@ -1807,19 +1810,23 @@ async function executeArbitrage() {
                     console.error("❌ Failed to fetch Fusion+ cross-chain swap quote. Retrying...");
                     continue;
                 }
-                let sellAmount = convertFromWei(fusionQuote.netLoanRequest, token);
-                console.log(`💰 Expected Tokens After Cross-Chain Swap: ${fusionQuote.receivedAmount} ${token}`);
-                //const sellAmountString = Math.floor(fusionQuote.receivedAmount).toString(); netLoanRequest
+               // ✅ Convert received amount from Wei back to token units
+        let sellAmount = convertFromWei(fusionQuote.receivedAmount, token);
 
-                // ✅ Request Flash Loan based on received token amount netLoanRequest
-                console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${fusionQuote.netLoanRequest} ${token}...`);
-                // ✅ Fetch final sell swap quote (Token → USDC on Sell Network)
+        console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
+
+        // ✅ Compute optimal loan amount covering 0.05% fees
+        let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
+        let netLoanRequest = convertFromWei(netLoanRequestWei, token);
+        console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
+
+        console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${netLoanRequest} ${token}...`);
 
                 const expectedFinalUSDC = await fetchSwapQuote(
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    fusionQuote.netLoanRequest
+                    netLoanRequest
                 );
                   
                if (!expectedFinalUSDC) {
@@ -1839,20 +1846,31 @@ async function executeArbitrage() {
                   // ✅ Buy and Sell received tokens for USDC
                     // executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
                     // executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, expectedFinalUSDC)
-                const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
-               executeSwap({
-                token,
-                buyOn: buyNetwork,
-                sellOn: sellNetwork,
-                buyAmount: bestTrade.buyAmount,
-                sellAmount
-               })  
-                ]);
+               //  const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
+               // executeSwap({
+               //  token,
+               //  buyOn: buyNetwork,
+               //  sellOn: sellNetwork,
+               //  buyAmount: bestTrade.buyAmount,
+               //  sellAmount
+               // })  
+               //  ]);
 
-                if (!buySwapSuccess || !sellSwapSuccess) {
-                    console.error("❌ Buy or Sell Swap failed. Retrying...");
-                    continue;
-                }
+               //  if (!buySwapSuccess || !sellSwapSuccess) {
+               //      console.error("❌ Buy or Sell Swap failed. Retrying...");
+               //      continue;
+               //  }
+
+                 // ✅ Pass compiled trade data to `executeSwap(trade)`
+        const tradeData = {
+            token,
+            buyOn: buyNetwork,
+            sellOn: sellNetwork,
+            buyAmount,
+            sellAmount
+        };
+
+        await executeSwap(tradeData);
                // console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment...`);
                // await executeFusionSwap(buyNetworkId, sellNetworkId, buyToken.address, sellToken.address, buyTokenAmount);  
                 console.log(`✅ Swaps executed.`);
