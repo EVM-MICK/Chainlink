@@ -1826,16 +1826,18 @@ async function executeArbitrage() {
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    netLoanRequest
+                    netLoanRequestWei
                 );
                   
                if (!expectedFinalUSDC) {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-                console.log(`💵 Final USDC Expected: ${expectedFinalUSDC} USDC`);
-                const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
-
+               let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, "USDC");
+                console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
+                 
+                //const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
+                const totalRepayment = bestTrade.buyAmount * 1.0005; // Flash Loan Fee 0.05%
                 if (expectedFinalUSDC <= totalRepayment) {
                     console.error("❌ Trade not profitable after fees. Skipping.");
                     continue;
