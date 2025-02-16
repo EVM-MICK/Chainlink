@@ -1797,9 +1797,9 @@ async function executeArbitrage() {
                     console.error("❌ Failed to fetch buy swap quote. Retrying...");
                     continue;
                 }
-
+          const buyTokenAddress = buyToken.address.toLowerCase();
                 // ✅ Convert amount from Wei back to token units
-        let buyTokenAmountWei = convertFromWei(buyTokenAmount, token);
+        let buyTokenAmountWei = convertFromWei(buyTokenAmount, buyTokenAddress);
 
         console.log(`💰 Buy Swap Expected Amount: ${buyTokenAmountWei} ${token}`);
 
@@ -1817,13 +1817,16 @@ async function executeArbitrage() {
                     continue;
                 }
                // ✅ Convert received amount from Wei back to token units
-        let sellAmount = convertFromWei(fusionQuote.receivedAmount, token);
+        const sellTokenAddress = sellToken.address.toLowerCase();
+        const FusionbuyTokenAddress = buyToken.address.toLowerCase();
+        let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
 
         console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
 
         // ✅ Compute optimal loan amount covering 0.05% fees
-        let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
-        let netLoanRequest = convertFromWei(netLoanRequestWei, token);
+        const netLoanRequestWei = Math.floor(fusionQuote.netLoanRequest).toString();
+        //let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
+        let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
         console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
 
         console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${netLoanRequest} ${token}...`);
@@ -1839,7 +1842,8 @@ async function executeArbitrage() {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-               let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, "USDC");
+                const expectedFinalUSDCTokenAddress = sellUSDC.address.toLowerCase();
+               let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
                 console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
                  
                 //const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
