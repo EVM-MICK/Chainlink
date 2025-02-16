@@ -1374,6 +1374,12 @@ async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amo
     console.log("✅ Cross-Chain Swap Successfully Executed!");
 }
 
+function convertFromWei(amountWei, token) {
+    const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
+    if (!tokenDecimals) throw new Error(`❌ Missing token decimal for ${token}`);
+
+    return Number(amountWei) / 10 ** tokenDecimals;
+}
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
 
