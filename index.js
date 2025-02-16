@@ -1752,7 +1752,7 @@ async function executeArbitrage() {
                 const sellNetwork = bestTrade.sellOn.toUpperCase();
                 const token = bestTrade.token.toUpperCase();
                 // Ensure amount is a positive integer string
-            //const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
+            const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
                 console.log(`🔄 Debugging trade details before validation:`);
                 console.log(`➡️ Buy Network: ${buyNetwork}`);
                 console.log(`➡️ Sell Network: ${sellNetwork}`);
@@ -1784,7 +1784,7 @@ async function executeArbitrage() {
                     buyNetworkId,
                     buyUSDC.address,
                     buyToken.address,
-                    bestTrade.buyAmount // Ensure it's an integer string
+                    buyAmountString // Ensure it's an integer string bestTrade.buyAmount 
                 );
 
                 if (!buyTokenAmount) {
