@@ -1817,8 +1817,8 @@ async function executeArbitrage() {
                     continue;
                 }
                // ✅ Convert received amount from Wei back to token units
-        const sellTokenAddress = sellToken.address.toLowerCase();
-        const FusionbuyTokenAddress = buyToken.address.toLowerCase();
+        const sellTokenAddress = sellToken.address;
+        const FusionbuyTokenAddress = buyToken.address;
         let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
 
         console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
@@ -1842,7 +1842,7 @@ async function executeArbitrage() {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-                const expectedFinalUSDCTokenAddress = sellUSDC.address.toLowerCase();
+                const expectedFinalUSDCTokenAddress = sellUSDC.address;
                let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
                 console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
                  
