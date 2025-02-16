@@ -1375,11 +1375,28 @@ async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amo
 }
 
 function convertFromWei(amountWei, token) {
-    const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
-    if (!tokenDecimals) throw new Error(`❌ Missing token decimal for ${token}`);
+    if (!token || typeof token !== "string") {
+        throw new Error(`❌ Invalid token address passed to convertFromWei: ${token}`);
+    }
 
+    // ✅ Ensure token address is properly formatted (remove spaces, convert to lowercase)
+    const normalizedToken = token.trim().toLowerCase();
+
+    if (!normalizedToken.startsWith("0x") || normalizedToken.length !== 42) {
+        throw new Error(`❌ Invalid token address format: ${normalizedToken}`);
+    }
+
+    // ✅ Retrieve decimals safely
+    const tokenDecimals = TOKEN_DECIMALS[normalizedToken];
+
+    if (tokenDecimals === undefined) {
+        throw new Error(`❌ Missing token decimal for ${normalizedToken}`);
+    }
+
+    // ✅ Convert Wei to human-readable token amount
     return Number(amountWei) / 10 ** tokenDecimals;
 }
+
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
 
@@ -1817,8 +1834,8 @@ async function executeArbitrage() {
                     continue;
                 }
                // ✅ Convert received amount from Wei back to token units
-        const sellTokenAddress = sellToken.address;
-        const FusionbuyTokenAddress = buyToken.address;
+        const sellTokenAddress = sellToken.address.toString();
+        const FusionbuyTokenAddress = buyToken.address.toString();
         let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
 
         console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
@@ -1842,7 +1859,7 @@ async function executeArbitrage() {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-                const expectedFinalUSDCTokenAddress = sellUSDC.address;
+                const expectedFinalUSDCTokenAddress = sellUSDC.address.toString();
                let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
                 console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
                  
