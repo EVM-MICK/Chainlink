@@ -1840,6 +1840,7 @@ async function executeArbitrage() {
         const netLoanRequestWei = Math.floor(fusionQuote.netLoanRequest).toString();
         //let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
         let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
+        let netRequest = netLoanRequest.toString();
         console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
 
         console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${netLoanRequest} ${token}...`);
@@ -1848,7 +1849,7 @@ async function executeArbitrage() {
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    netLoanRequestWei
+                    netRequest
                 );
                   
                if (!expectedFinalUSDC) {
@@ -1894,7 +1895,7 @@ async function executeArbitrage() {
             buyOn: buyNetwork,
             sellOn: sellNetwork,
             buyAmount: bestTrade.buyAmount,
-            sellAmount
+            netLoanRequest
         };
 
         await executeSwap(tradeData);
