@@ -1379,21 +1379,20 @@ function convertFromWei(amountWei, token) {
         throw new Error(`❌ Invalid token address type. Expected string, received ${typeof token}`);
     }
 
-    // ✅ Normalize address to lowercase for lookup
-    const normalizedToken = token.trim().toLowerCase();
+    // ✅ Normalize token address by matching against stored keys
+    const normalizedToken = Object.keys(TOKEN_DECIMALS).find(
+        (key) => key.toLowerCase() === token.toLowerCase()
+    );
 
-    if (!normalizedToken.startsWith("0x") || normalizedToken.length !== 42) {
-        throw new Error(`❌ Invalid token address format: ${normalizedToken}`);
+    if (!normalizedToken) {
+        throw new Error(`❌ Missing token decimal for ${token}`);
     }
 
-    const tokenDecimals = TOKEN_DECIMALS[normalizedToken];
-
-    if (tokenDecimals === undefined) {
-        throw new Error(`❌ Missing token decimal for ${normalizedToken}`);
-    }
+    const tokenDecimals = TOKEN_DECIMALS[normalizedToken]; // Get decimals using matched key
 
     return Number(amountWei) / 10 ** tokenDecimals;
 }
+
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
 
