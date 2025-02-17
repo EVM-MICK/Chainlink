@@ -1375,28 +1375,25 @@ async function executeCrossChainSwap(srcChain, dstChain, srcToken, dstToken, amo
 }
 
 function convertFromWei(amountWei, token) {
-    if (!token || typeof token !== "string") {
-        throw new Error(`❌ Invalid token address passed to convertFromWei: ${token}`);
+    if (typeof token !== "string") {
+        throw new Error(`❌ Invalid token address type. Expected string, received ${typeof token}`);
     }
 
-    // ✅ Ensure token address is properly formatted (remove spaces, convert to lowercase)
+    // ✅ Normalize address to lowercase for lookup
     const normalizedToken = token.trim().toLowerCase();
 
     if (!normalizedToken.startsWith("0x") || normalizedToken.length !== 42) {
         throw new Error(`❌ Invalid token address format: ${normalizedToken}`);
     }
 
-    // ✅ Retrieve decimals safely
     const tokenDecimals = TOKEN_DECIMALS[normalizedToken];
 
     if (tokenDecimals === undefined) {
         throw new Error(`❌ Missing token decimal for ${normalizedToken}`);
     }
 
-    // ✅ Convert Wei to human-readable token amount
     return Number(amountWei) / 10 ** tokenDecimals;
 }
-
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
 
