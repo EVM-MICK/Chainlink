@@ -1865,9 +1865,11 @@ async function executeArbitrage() {
                     console.error("❌ Trade not profitable after fees. Skipping.");
                     continue;
                 }
+                let selltoks = sellToken.address.toString();
+                let SellingAmount = convertFromWei(fusionQuote.netLoanRequest, selltoks);
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
-                console.log(`💵 Buying ${bestTrade.buyAmount} ${token} on ${buyNetwork}...`);
-                console.log(`💵 Selling ${fusionQuote.netLoanRequest} ${token} on ${sellNetwork}...`);
+                console.log(`💵 Buying ${bestTrade.buyAmount} ${buyUSDC} on ${buyNetwork}...`);
+                console.log(`💵 Selling ${SellingAmount} ${token} on ${sellNetwork}...`);
                   // ✅ Buy and Sell received tokens for USDC
                     // executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
                     // executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, expectedFinalUSDC)
@@ -1891,7 +1893,7 @@ async function executeArbitrage() {
             token,
             buyOn: buyNetwork,
             sellOn: sellNetwork,
-            buyAmount,
+            buyAmount: bestTrade.buyAmount,
             sellAmount
         };
 
