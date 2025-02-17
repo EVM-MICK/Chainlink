@@ -1400,21 +1400,21 @@ function convertFromWei(amountWei, token) {
  * 🔥 **Arbitrage Execution Function**
  */
 async function executeSwap(trade) {
-    const { token, buyOn, sellOn, buyAmount, sellAmount } = trade;
+    const { token, buyOn, sellOn, buyAmount, sellAmount, tokenAddress } = trade;
 
     console.log(`⚡ Executing Arbitrage Trade ⚡`);
-    console.log(`BUY on ${buyOn}: ${buyAmount} of ${token}`);
+    console.log(`BUY on ${buyOn}: ${buyAmount} of USDCto purchase ${token}`);
     console.log(`SELL on ${sellOn}: ${sellAmount} of ${token}`);
 
     await sendTelegramTradeAlert({
         title: "🚀 Executing Arbitrage Trade",
-        message: `🔹 Buy on ${buyOn}: ${buyAmount} of ${token}
+        message: `🔹 Buy on ${buyOn}: ${buyAmount} of USDCto purchase  ${token}
         🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
   // ✅ Convert amounts from Wei to original token units if necessary
-    const buyAmountConverted = convertFromWei(buyAmount, token);
-    const sellAmountConverted = convertFromWei(sellAmount, token);
+    const buyAmountConverted = convertFromWei(buyAmount, tokenAddress);
+    const sellAmountConverted = convertFromWei(sellAmount, tokenAddress);
 
     // 🔹 Get Network Chain IDs
     const buyChainID = NETWORKS[buyOn.toUpperCase()];
@@ -1786,6 +1786,7 @@ async function executeArbitrage() {
                 const sellToken = TOKENS[sellNetwork].find(t => t.name.toUpperCase() === token);
                 const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
                 const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
+                const tokenaddresstoexecute = TOKENS[token].find(t => t.name.toUpperCase() === token);
 
                 if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
                     console.error("❌ Missing token or USDC data. Retrying...");
@@ -1895,7 +1896,8 @@ async function executeArbitrage() {
             buyOn: buyNetwork,
             sellOn: sellNetwork,
             buyAmount: bestTrade.buyAmount,
-            netLoanRequest
+            netLoanRequest,
+            tokenAddress: tokenaddresstoexecute.address
         };
 
         await executeSwap(tradeData);
