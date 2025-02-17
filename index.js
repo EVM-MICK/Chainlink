@@ -1732,8 +1732,6 @@ async function signFusionOrder(orderData) {
     return await wallet._signTypedData(domain, types, orderData);
 }
 
-
-
 // 🚀 Execute Arbitrage Trade
 async function executeArbitrage() {
     console.log("🔍 Starting continuous arbitrage detection...");
@@ -1786,7 +1784,6 @@ async function executeArbitrage() {
                 const sellToken = TOKENS[sellNetwork].find(t => t.name.toUpperCase() === token);
                 const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
                 const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
-                const tokenaddresstoexecute = TOKENS[token].find(t => t.name.toUpperCase() === token);
 
                 if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
                     console.error("❌ Missing token or USDC data. Retrying...");
@@ -1869,27 +1866,11 @@ async function executeArbitrage() {
                 }
                 let selltoks = sellToken.address.toString();
                 let SellingAmount = convertFromWei(fusionQuote.netLoanRequest, selltoks);
+                const tokenAddress = buyToken.address; // Use the address of the token being bought
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
                 console.log(`💵 Buying ${bestTrade.buyAmount} ${buyUSDC} on ${buyNetwork}...`);
                 console.log(`💵 Selling ${SellingAmount} ${token} on ${sellNetwork}...`);
                   // ✅ Buy and Sell received tokens for USDC
-                    // executeSwap(buyNetworkId, buyUSDC.address, buyToken.address, bestTrade.buyAmount),
-                    // executeSwap(sellNetworkId, sellToken.address, sellUSDC.address, expectedFinalUSDC)
-               //  const [buySwapSuccess, sellSwapSuccesss] = await Promise.all([
-               // executeSwap({
-               //  token,
-               //  buyOn: buyNetwork,
-               //  sellOn: sellNetwork,
-               //  buyAmount: bestTrade.buyAmount,
-               //  sellAmount
-               // })  
-               //  ]);
-
-               //  if (!buySwapSuccess || !sellSwapSuccess) {
-               //      console.error("❌ Buy or Sell Swap failed. Retrying...");
-               //      continue;
-               //  }
-
                  // ✅ Pass compiled trade data to `executeSwap(trade)`
         const tradeData = {
             token,
@@ -1897,7 +1878,7 @@ async function executeArbitrage() {
             sellOn: sellNetwork,
             buyAmount: bestTrade.buyAmount,
             netLoanRequest,
-            tokenAddress: tokenaddresstoexecute.address
+            tokenAddress: buyToken.address  // ✅ Correctly Extract Token Address
         };
 
         await executeSwap(tradeData);
