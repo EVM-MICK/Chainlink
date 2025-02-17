@@ -1847,7 +1847,7 @@ async function executeArbitrage() {
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    netRequest
+                    netLoanRequestWei
                 );
                   
                if (!expectedFinalUSDC) {
