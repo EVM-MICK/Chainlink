@@ -1739,6 +1739,174 @@ async function signFusionOrder(orderData) {
 }
 
 // 🚀 Execute Arbitrage Trade
+// async function executeArbitrage() {
+//     console.log("🔍 Starting continuous arbitrage detection...");
+
+//     while (true) {
+//         console.log("🔄 Fetching latest prices...");
+//         const prices = await fetchPricesForBothChains();
+
+//         if (!prices || !prices.POLYGON || !prices.ARBITRUM) {
+//             console.error("❌ Failed to fetch valid price data. Retrying...");
+//             await delay(5000);
+//             continue;
+//         }
+
+//         console.log("✅ Prices fetched. Detecting arbitrage opportunities...");
+//         const opportunities = await detectArbitrageOpportunities(prices);
+
+//         if (!opportunities.length) {
+//             console.log("⚠️ No profitable arbitrage opportunities found. Retrying...");
+//             await delay(5000);
+//             continue;
+//         }
+
+//         for (const bestTrade of opportunities) {
+//             if (!bestTrade || !bestTrade.buyOn || !bestTrade.sellOn || !bestTrade.token || !bestTrade.buyAmount || !bestTrade.sellAmount || !bestTrade.profit) {
+//                 console.error("❌ Invalid trade data. Skipping.");
+//                 continue;
+//             }
+
+//             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
+//             await sendTelegramTradeAlert(bestTrade);
+
+//             try {
+//                 const buyNetwork = bestTrade.buyOn.toUpperCase();
+//                 const sellNetwork = bestTrade.sellOn.toUpperCase();
+//                 const token = bestTrade.token.toUpperCase();
+//                 // Ensure amount is a positive integer string
+//             const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
+//                 console.log(`🔄 Debugging trade details before validation:`);
+//                 console.log(`➡️ Buy Network: ${buyNetwork}`);
+//                 console.log(`➡️ Sell Network: ${sellNetwork}`);
+//                 console.log(`➡️ Token: ${token}`);
+
+//                 if (!TOKENS[buyNetwork] || !TOKENS[sellNetwork]) {
+//                     console.error(`❌ Missing TOKENS data for ${buyNetwork} or ${sellNetwork}. Skipping trade.`);
+//                     continue;
+//                 }
+
+//                 const buyToken = TOKENS[buyNetwork].find(t => t.name.toUpperCase() === token);
+//                 const sellToken = TOKENS[sellNetwork].find(t => t.name.toUpperCase() === token);
+//                 const buyUSDC = TOKENS[buyNetwork].find(t => t.name === "USDC");
+//                 const sellUSDC = TOKENS[sellNetwork].find(t => t.name === "USDC");
+
+//                 if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
+//                     console.error("❌ Missing token or USDC data. Retrying...");
+//                     await delay(5000);
+//                     continue;
+//                 }
+
+//                 const buyNetworkId = prices[buyNetwork].networkId;
+//                 const sellNetworkId = prices[sellNetwork].networkId;
+
+//                 console.log("🔄 Fetching live swap quotes...");
+
+//                 // ✅ Fetch live buy swap quote (USDC → Token)
+//                 const buyTokenAmount = await fetchSwapQuote(
+//                     buyNetworkId,
+//                     buyUSDC.address,
+//                     buyToken.address,
+//                     buyAmountString // Ensure it's an integer string bestTrade.buyAmount 
+//                 );
+
+//                 if (!buyTokenAmount) {
+//                     console.error("❌ Failed to fetch buy swap quote. Retrying...");
+//                     continue;
+//                 }
+//           const buyTokenAddress = buyToken.address.toLowerCase();
+//                 // ✅ Convert amount from Wei back to token units
+//         let buyTokenAmountWei = convertFromWei(buyTokenAmount, buyTokenAddress);
+
+//         console.log(`💰 Buy Swap Expected Amount: ${buyTokenAmountWei} ${token}`);
+
+//                 // ✅ Fetch Fusion+ cross-chain swap quote (Token → Token on Sell Network)
+//                 const fusionQuote = await fetchFusionQuote(
+//                     buyNetworkId,
+//                     sellNetworkId,
+//                     buyToken.address,
+//                     sellToken.address,
+//                     buyTokenAmount
+//                 );
+
+//                 if (!fusionQuote) {
+//                     console.error("❌ Failed to fetch Fusion+ cross-chain swap quote. Retrying...");
+//                     continue;
+//                 }
+//                // ✅ Convert received amount from Wei back to token units
+//         const sellTokenAddress = sellToken.address.toString();
+//         const FusionbuyTokenAddress = buyToken.address.toString();
+//         //let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
+//       const sellAmount = fusionQuote.receivedAmount ? convertFromWei(fusionQuote.receivedAmount, sellToken.address) : null;
+//         console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
+
+//         // ✅ Compute optimal loan amount covering 0.05% fees
+//         const netLoanRequestWei = Math.floor(fusionQuote.netLoanRequest).toString();
+//         //let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
+//         //let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
+//         let netLoanRequest = fusionQuote.netLoanRequest ? convertFromWei(fusionQuote.netLoanRequest, sellToken.address) : null;
+//         let netRequest = netLoanRequest.toString();
+//         console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
+
+//         console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${netLoanRequest} ${token}...`);
+
+//                 const expectedFinalUSDC = await fetchSwapQuote(
+//                     sellNetworkId,
+//                     sellToken.address,
+//                     sellUSDC.address,
+//                     netLoanRequestWei
+//                 );
+                  
+//                if (!expectedFinalUSDC) {
+//                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
+//                     continue;
+//                 }
+//                 const expectedFinalUSDCTokenAddress = sellUSDC.address.toString();
+//                let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
+//                 console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
+                 
+//                 const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
+//                // const totalRepayment = bestTrade.buyAmount * 1.0005; // Flash Loan Fee 0.05%
+//                 if (expectedFinalUSDC <= totalRepayment) {
+//                     console.error("❌ Trade not profitable after fees. Skipping.");
+//                     continue;
+//                 }
+//                 let selltoks = sellToken.address.toString();
+//                 let SellingAmount = convertFromWei(fusionQuote.netLoanRequest, selltoks);
+//                 const tokenAddress = buyToken.address; // Use the address of the token being bought
+//                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
+//                 console.log(`💵 Buying ${bestTrade.buyAmount} ${buyUSDC} on ${buyNetwork}...`);
+//                 console.log(`💵 Selling ${SellingAmount} ${token} on ${sellNetwork}...`);
+//                   // ✅ Buy and Sell received tokens for USDC
+//                  // ✅ Pass compiled trade data to `executeSwap(trade)`
+//        const tradeData = {
+//     token,                          // Token name (e.g., "WBTC")
+//     buyOn: buyNetwork,              // Network where the token is bought (e.g., "ARBITRUM")
+//     sellOn: sellNetwork,            // Network where the token is sold (e.g., "POLYGON")
+//     buyAmount: bestTrade.buyAmount, // Amount of USDC used to buy the token
+//     sellAmount: sellAmount ? sellAmount.toString() : "0", // Converted sell amount
+//     netLoanRequest: netLoanRequest ? netLoanRequest.toString() : "0", // Loan amount request
+//     tokenAddress: buyToken.address  // Token contract address
+// };
+
+
+//         await executeSwap(tradeData);
+//                // console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment...`);
+//                // await executeFusionSwap(buyNetworkId, sellNetworkId, buyToken.address, sellToken.address, buyTokenAmount);  
+//                 console.log(`✅ Swaps executed.`);
+//                 // ✅ Repay Flash Loan & Keep Profit
+//                 console.log(`✅ Flash Loan Repaid. Profit: ${(expectedFinalUSDC - totalRepayment).toFixed(2)} USDC`);
+//                 console.log(`✅ Arbitrage Trade Completed Successfully!`);
+//             } catch (error) {
+//                 console.error("❌ Error executing arbitrage trade:", error);
+//                 await sendTelegramMessage("🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.");
+//             }
+//         }
+
+//         await delay(1000); // Respect 1inch 1 RPS limit
+//     }
+// }
+
 async function executeArbitrage() {
     console.log("🔍 Starting continuous arbitrage detection...");
 
@@ -1762,20 +1930,18 @@ async function executeArbitrage() {
         }
 
         for (const bestTrade of opportunities) {
-            if (!bestTrade || !bestTrade.buyOn || !bestTrade.sellOn || !bestTrade.token || !bestTrade.buyAmount || !bestTrade.sellAmount || !bestTrade.profit) {
+            if (!bestTrade?.buyOn || !bestTrade?.sellOn || !bestTrade?.token || !bestTrade?.buyAmount || !bestTrade?.sellAmount || !bestTrade?.profit) {
                 console.error("❌ Invalid trade data. Skipping.");
                 continue;
             }
 
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
-            await sendTelegramTradeAlert(bestTrade);
 
             try {
                 const buyNetwork = bestTrade.buyOn.toUpperCase();
                 const sellNetwork = bestTrade.sellOn.toUpperCase();
                 const token = bestTrade.token.toUpperCase();
-                // Ensure amount is a positive integer string
-            const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
+
                 console.log(`🔄 Debugging trade details before validation:`);
                 console.log(`➡️ Buy Network: ${buyNetwork}`);
                 console.log(`➡️ Sell Network: ${sellNetwork}`);
@@ -1793,12 +1959,12 @@ async function executeArbitrage() {
 
                 if (!buyToken || !sellToken || !buyUSDC || !sellUSDC) {
                     console.error("❌ Missing token or USDC data. Retrying...");
-                    await delay(5000);
                     continue;
                 }
 
                 const buyNetworkId = prices[buyNetwork].networkId;
                 const sellNetworkId = prices[sellNetwork].networkId;
+                const buyAmountString = Math.floor(bestTrade.buyAmount).toString();
 
                 console.log("🔄 Fetching live swap quotes...");
 
@@ -1807,18 +1973,15 @@ async function executeArbitrage() {
                     buyNetworkId,
                     buyUSDC.address,
                     buyToken.address,
-                    buyAmountString // Ensure it's an integer string bestTrade.buyAmount 
+                    buyAmountString
                 );
 
                 if (!buyTokenAmount) {
                     console.error("❌ Failed to fetch buy swap quote. Retrying...");
                     continue;
                 }
-          const buyTokenAddress = buyToken.address.toLowerCase();
-                // ✅ Convert amount from Wei back to token units
-        let buyTokenAmountWei = convertFromWei(buyTokenAmount, buyTokenAddress);
 
-        console.log(`💰 Buy Swap Expected Amount: ${buyTokenAmountWei} ${token}`);
+                console.log(`💰 Buy Swap Expected Amount: ${convertFromWei(buyTokenAmount, buyToken.address)} ${token}`);
 
                 // ✅ Fetch Fusion+ cross-chain swap quote (Token → Token on Sell Network)
                 const fusionQuote = await fetchFusionQuote(
@@ -1826,77 +1989,79 @@ async function executeArbitrage() {
                     sellNetworkId,
                     buyToken.address,
                     sellToken.address,
-                    buyTokenAmount
+                    buyTokenAmount,
+                    fee: 100, // 1% fee (100 BPS)
+                    source: "wallet" // ✅ REQUIRED FIELD TO AVOID ERROR
                 );
 
-                if (!fusionQuote) {
+                if (!fusionQuote?.receivedAmount || !fusionQuote?.netLoanRequest) {
                     console.error("❌ Failed to fetch Fusion+ cross-chain swap quote. Retrying...");
                     continue;
                 }
-               // ✅ Convert received amount from Wei back to token units
-        const sellTokenAddress = sellToken.address.toString();
-        const FusionbuyTokenAddress = buyToken.address.toString();
-        //let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
-      const sellAmount = fusionQuote.receivedAmount ? convertFromWei(fusionQuote.receivedAmount, sellToken.address) : null;
-        console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
 
-        // ✅ Compute optimal loan amount covering 0.05% fees
-        const netLoanRequestWei = Math.floor(fusionQuote.netLoanRequest).toString();
-        //let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
-        //let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
-        let netLoanRequest = fusionQuote.netLoanRequest ? convertFromWei(fusionQuote.netLoanRequest, sellToken.address) : null;
-        let netRequest = netLoanRequest.toString();
-        console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
+                // ✅ Convert received token amount from Wei
+                const sellAmount = convertFromWei(fusionQuote.receivedAmount, sellToken.address);
+                console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
 
-        console.log(`💰 Requesting Flash Loan on ${sellNetwork} for ${netLoanRequest} ${token}...`);
+                // ✅ Compute optimal loan amount covering 0.05% loan fees
+                const netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, buyToken.address);
+                console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
 
+                // ✅ Fetch final USDC expected after selling loaned tokens
                 const expectedFinalUSDC = await fetchSwapQuote(
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    netLoanRequestWei
+                    fusionQuote.netLoanRequest
                 );
-                  
-               if (!expectedFinalUSDC) {
+
+                if (!expectedFinalUSDC) {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-                const expectedFinalUSDCTokenAddress = sellUSDC.address.toString();
-               let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
-                console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
-                 
-                const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
-               // const totalRepayment = bestTrade.buyAmount * 1.0005; // Flash Loan Fee 0.05%
-                if (expectedFinalUSDC <= totalRepayment) {
+
+                const finalUSDCAmount = convertFromWei(expectedFinalUSDC, sellUSDC.address);
+                console.log(`💵 Final USDC Expected: ${finalUSDCAmount} USDC`);
+
+                // ✅ Calculate total repayment with 0.05% loan fee
+                const totalRepayment = bestTrade.buyAmount * 1.0005;
+
+                if (finalUSDCAmount <= totalRepayment) {
                     console.error("❌ Trade not profitable after fees. Skipping.");
                     continue;
                 }
-                let selltoks = sellToken.address.toString();
-                let SellingAmount = convertFromWei(fusionQuote.netLoanRequest, selltoks);
-                const tokenAddress = buyToken.address; // Use the address of the token being bought
+
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
-                console.log(`💵 Buying ${bestTrade.buyAmount} ${buyUSDC} on ${buyNetwork}...`);
-                console.log(`💵 Selling ${SellingAmount} ${token} on ${sellNetwork}...`);
-                  // ✅ Buy and Sell received tokens for USDC
-                 // ✅ Pass compiled trade data to `executeSwap(trade)`
-       const tradeData = {
-    token,                          // Token name (e.g., "WBTC")
-    buyOn: buyNetwork,              // Network where the token is bought (e.g., "ARBITRUM")
-    sellOn: sellNetwork,            // Network where the token is sold (e.g., "POLYGON")
-    buyAmount: bestTrade.buyAmount, // Amount of USDC used to buy the token
-    sellAmount: sellAmount ? sellAmount.toString() : "0", // Converted sell amount
-    netLoanRequest: netLoanRequest ? netLoanRequest.toString() : "0", // Loan amount request
-    tokenAddress: buyToken.address  // Token contract address
-};
+                console.log(`💵 Buying ${bestTrade.buyAmount} USDC to purchase ${token} on ${buyNetwork}...`);
+                console.log(`💵 Selling ${sellAmount} ${token} on ${sellNetwork}...`);
 
+                // ✅ Prepare trade data for execution
+                const tradeData = {
+                    token,
+                    buyOn: buyNetwork,
+                    sellOn: sellNetwork,
+                    buyAmount: bestTrade.buyAmount.toString(),
+                    sellAmount: sellAmount.toString(),
+                    netLoanRequest: netLoanRequest.toString(),
+                    tokenAddress: buyToken.address
+                };
 
-        await executeSwap(tradeData);
-               // console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment...`);
-               // await executeFusionSwap(buyNetworkId, sellNetworkId, buyToken.address, sellToken.address, buyTokenAmount);  
-                console.log(`✅ Swaps executed.`);
-                // ✅ Repay Flash Loan & Keep Profit
-                console.log(`✅ Flash Loan Repaid. Profit: ${(expectedFinalUSDC - totalRepayment).toFixed(2)} USDC`);
-                console.log(`✅ Arbitrage Trade Completed Successfully!`);
+                console.log("✅ Sending Trade Data to Execute Swap:", tradeData);
+
+                // ✅ Execute Swap
+                await executeSwap(tradeData);
+
+                // ✅ Notify via Telegram
+                await sendTelegramTradeAlert({
+                    title: "🚀 Arbitrage Trade Alert",
+                    message: `💰 Buy on ${buyNetwork}: ${tradeData.buyAmount} USDC
+                    📌 Token: ${token}
+                    💵 Sell on ${sellNetwork}: ${tradeData.sellAmount} ${token}
+                    ✅ Profit: $${bestTrade.profit}`
+                });
+
+                console.log("✅ Trade Executed Successfully!");
+
             } catch (error) {
                 console.error("❌ Error executing arbitrage trade:", error);
                 await sendTelegramMessage("🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.");
@@ -1906,6 +2071,7 @@ async function executeArbitrage() {
         await delay(1000); // Respect 1inch 1 RPS limit
     }
 }
+
 
 // 🚀 Start the Bot
 executeArbitrage();
