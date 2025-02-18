@@ -1400,23 +1400,31 @@ function convertFromWei(amountWei, token) {
  * 🔥 **Arbitrage Execution Function**
  */
 async function executeSwap(trade) {
-    const { token, buyOn, sellOn, buyAmount, sellAmount, tokenAddress } = trade;
+    const { token, buyOn, sellOn, buyAmount, sellAmount, netLoanRequest, tokenAddress } = trade;
 
     console.log(`⚡ Executing Arbitrage Trade ⚡`);
-    console.log(`BUY on ${buyOn}: ${buyAmount} of USDCto purchase ${token}`);
+    console.log(`BUY on ${buyOn}: ${buyAmount} USDC to purchase ${token}`);
     console.log(`SELL on ${sellOn}: ${sellAmount} of ${token}`);
 
     await sendTelegramTradeAlert({
         title: "🚀 Executing Arbitrage Trade",
-        message: `🔹 Buy on ${buyOn}: ${buyAmount} of USDCto purchase  ${token}
+        message: `🔹 Buy on ${buyOn}: ${buyAmount} USDC to purchase ${token}
         🔹 Sell on ${sellOn}: ${sellAmount} of ${token}`
     });
 
-  // ✅ Convert amounts from Wei to original token units if necessary
+    // ✅ Validate Required Data
+    if (!token || !buyOn || !sellOn || !buyAmount || !sellAmount || !netLoanRequest || !tokenAddress) {
+        console.error(`❌ Invalid trade data received in executeSwap:`, trade);
+        return;
+    }
+
+    // ✅ Convert Amounts from Wei to Token Units if Necessary
     const buyAmountConverted = convertFromWei(buyAmount, tokenAddress);
     const sellAmountConverted = convertFromWei(sellAmount, tokenAddress);
+    console.log(`🔹 Converted Buy Amount: ${buyAmountConverted} ${token}`);
+    console.log(`🔹 Converted Sell Amount: ${sellAmountConverted} ${token}`);
 
-    // 🔹 Get Network Chain IDs
+    // ✅ Get Network Chain IDs
     const buyChainID = NETWORKS[buyOn.toUpperCase()];
     const sellChainID = NETWORKS[sellOn.toUpperCase()];
 
@@ -1425,16 +1433,12 @@ async function executeSwap(trade) {
         return;
     }
 
-    // 🔹 Dynamically Select the Correct Smart Contract for Execution
+    // ✅ Select the Correct Smart Contract for Execution
     const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
     const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
     try {
-        // 🔹 Store trade details
-        // tradeMap.set(buyAmount.toString(), trade);
-        // tradeMap.set(sellAmount.toString(), trade);
-
-        // 🔹 Request Flash Loan & Execute Buy/Sell Swaps
+        // ✅ Execute Flash Loan & Swaps in Parallel
         console.log(`🔹 Requesting Flash Loans & Executing Swaps...`);
         const [buyTx, sellTx] = await Promise.all([
             executeFlashLoanAndSwap(buyOn, token, buyAmountConverted, buyContract),
@@ -1448,7 +1452,7 @@ async function executeSwap(trade) {
 
         console.log(`✅ Both Buy & Sell Transactions Confirmed!`);
 
-        // 🔹 Execute Cross-Chain Fusion+ Swap for Loan Repayment
+        // ✅ Execute Cross-Chain Fusion+ Swap for Loan Repayment
         try {
             console.log(`🚀 Executing Fusion+ Swap for Loan Repayment...`);
             await executeFusionSwap(
@@ -1462,11 +1466,11 @@ async function executeSwap(trade) {
             await sendTelegramMessage(`🚨 **Warning:** Loan repayment swap failed. Manual intervention required.`);
         }
 
-        // 🔹 Notify on Successful Trade
+        // ✅ Notify on Successful Trade
         await sendTelegramTradeAlert({
             title: "✅ Arbitrage Trade Completed!",
             message: `🏆 Successfully completed arbitrage trade!
-            ✅ Bought ${buyAmount} of ${token} on ${buyOn}
+            ✅ Bought ${buyAmount} USDC of ${token} on ${buyOn}
             ✅ Sold ${sellAmount} of ${token} on ${sellOn}
             💰 Profit: $${trade.profit}`
         });
@@ -1486,10 +1490,10 @@ async function executeSwap(trade) {
 /**
  * 🔥 **Flash Loan Execution Function**
  */
-async function executeFlashLoanAndSwap(buyOn, sellOn, token, amount) {
-    console.log(`🚀 Requesting Flash Loans & Swaps on ${buyOn} & ${sellOn} for ${amount} ${token}`);
+async function executeFlashLoanAndSwap(buyOn, sellOn, tokenAddress, amount) {
+    console.log(`🚀 Requesting Flash Loans & Swaps on ${buyOn} & ${sellOn} for ${amount} of ${tokenAddress}`);
 
-    // ✅ Get Chain IDs
+    // ✅ Get Correct Chain IDs
     const buyChainID = NETWORKS[buyOn.toUpperCase()];
     const sellChainID = NETWORKS[sellOn.toUpperCase()];
 
@@ -1498,7 +1502,7 @@ async function executeFlashLoanAndSwap(buyOn, sellOn, token, amount) {
         return null;
     }
 
-    // ✅ Ensure USDC addresses are available
+    // ✅ Ensure USDC Addresses Exist on Both Networks
     const buyUSDC = TOKENS[buyOn.toUpperCase()].find(t => t.name === "USDC");
     const sellUSDC = TOKENS[sellOn.toUpperCase()].find(t => t.name === "USDC");
 
@@ -1507,33 +1511,35 @@ async function executeFlashLoanAndSwap(buyOn, sellOn, token, amount) {
         return null;
     }
 
-    // ✅ Get Token Decimals & Convert Amount to Wei
-    const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
+    // ✅ Fetch Token Decimals & Convert Amount if Needed
+    const tokenDecimals = TOKEN_DECIMALS[tokenAddress.toLowerCase()];
     if (tokenDecimals === undefined) {
-        console.error(`❌ Missing token decimal for ${token}`);
+        console.error(`❌ Missing token decimal for ${tokenAddress}`);
         return null;
     }
-    const amountInWei = ethers.utils.parseUnits(amount.toString(), tokenDecimals);
-    console.log(`🔹 Converted Amount to Wei: ${amountInWei.toString()} (${tokenDecimals} decimals)`);
 
-    // ✅ Assign Correct Contract Based on BuyOn & SellOn Networks
+    // Check if the amount is already in Wei (avoid double conversion)
+    const amountInWei = BigInt(amount) >= BigInt(10 ** tokenDecimals) ? amount.toString() : ethers.utils.parseUnits(amount.toString(), tokenDecimals).toString();
+    console.log(`🔹 Final Converted Amount to Wei: ${amountInWei} (${tokenDecimals} decimals)`);
+
+    // ✅ Select Smart Contracts for Each Network
     const buyContract = buyOn === "Polygon" ? polygonContract : arbitrumContract;
     const sellContract = sellOn === "Polygon" ? polygonContract : arbitrumContract;
 
     // ✅ Construct Flash Loan Request Data for Buy & Sell Networks
     const buyFlashLoanData = {
         src: buyUSDC.address, // Buy USDC → Token
-        dst: token,
-        amount: amountInWei.toString(),
+        dst: tokenAddress,
+        amount: amountInWei,
         from: buyContract.address,
         origin: WALLET_ADDRESS,
         slippage: 1
     };
 
     const sellFlashLoanData = {
-        src: token, // Sell Token → USDC
+        src: tokenAddress, // Sell Token → USDC
         dst: sellUSDC.address,
-        amount: amountInWei.toString(),
+        amount: amountInWei,
         from: sellContract.address,
         origin: WALLET_ADDRESS,
         slippage: 1
@@ -1564,20 +1570,20 @@ async function executeFlashLoanAndSwap(buyOn, sellOn, token, amount) {
 
         const buyPayload = ethers.utils.defaultAbiCoder.encode(
             ["address", "uint256", "bytes"],
-            [token, amountInWei, buyRouteData]
+            [tokenAddress, amountInWei, buyRouteData]
         );
 
         const sellPayload = ethers.utils.defaultAbiCoder.encode(
             ["address", "uint256", "bytes"],
-            [token, amountInWei, sellRouteData]
+            [tokenAddress, amountInWei, sellRouteData]
         );
 
         // ✅ Execute Flash Loans on Both Networks in Parallel
         console.log(`🔹 Sending Flash Loan Requests to Smart Contracts on ${buyOn} & ${sellOn}`);
 
         const [buyTx, sellTx] = await Promise.all([
-            buyContract.fn_RequestFlashLoan(token, amountInWei, buyPayload),
-            sellContract.fn_RequestFlashLoan(token, amountInWei, sellPayload)
+            buyContract.fn_RequestFlashLoan(tokenAddress, amountInWei, buyPayload),
+            sellContract.fn_RequestFlashLoan(tokenAddress, amountInWei, sellPayload)
         ]);
 
         await Promise.all([buyTx.wait(), sellTx.wait()]);
@@ -1830,14 +1836,15 @@ async function executeArbitrage() {
                // ✅ Convert received amount from Wei back to token units
         const sellTokenAddress = sellToken.address.toString();
         const FusionbuyTokenAddress = buyToken.address.toString();
-        let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
-
+        //let sellAmount = convertFromWei(fusionQuote.receivedAmount, sellTokenAddress);
+      const sellAmount = fusionQuote.receivedAmount ? convertFromWei(fusionQuote.receivedAmount, sellToken.address) : null;
         console.log(`💰 Expected Tokens After Cross-Chain Swap: ${sellAmount} ${token}`);
 
         // ✅ Compute optimal loan amount covering 0.05% fees
         const netLoanRequestWei = Math.floor(fusionQuote.netLoanRequest).toString();
         //let netLoanRequestWei = BigInt(fusionQuote.netLoanRequest);
-        let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
+        //let netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, FusionbuyTokenAddress);
+        let netLoanRequest = fusionQuote.netLoanRequest ? convertFromWei(fusionQuote.netLoanRequest, sellToken.address) : null;
         let netRequest = netLoanRequest.toString();
         console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
 
@@ -1872,14 +1879,16 @@ async function executeArbitrage() {
                 console.log(`💵 Selling ${SellingAmount} ${token} on ${sellNetwork}...`);
                   // ✅ Buy and Sell received tokens for USDC
                  // ✅ Pass compiled trade data to `executeSwap(trade)`
-        const tradeData = {
-            token,
-            buyOn: buyNetwork,
-            sellOn: sellNetwork,
-            buyAmount: bestTrade.buyAmount,
-            netLoanRequest,
-            tokenAddress: buyToken.address  // ✅ Correctly Extract Token Address
-        };
+       const tradeData = {
+    token,                          // Token name (e.g., "WBTC")
+    buyOn: buyNetwork,              // Network where the token is bought (e.g., "ARBITRUM")
+    sellOn: sellNetwork,            // Network where the token is sold (e.g., "POLYGON")
+    buyAmount: bestTrade.buyAmount, // Amount of USDC used to buy the token
+    sellAmount: sellAmount ? sellAmount.toString() : "0", // Converted sell amount
+    netLoanRequest: netLoanRequest ? netLoanRequest.toString() : "0", // Loan amount request
+    tokenAddress: buyToken.address  // Token contract address
+};
+
 
         await executeSwap(tradeData);
                // console.log(`🚀 Executing Cross-Chain Swap & Loan Repayment...`);
