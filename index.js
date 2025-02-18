@@ -534,7 +534,9 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         dstTokenAddress: dstToken,
         amount: finalAmountInWei,   // ✅ Corrected amount in Wei
         walletAddress: process.env.WALLET_ADDRESS,
-        enableEstimate: true  // ✅ Ensure boolean value
+        enableEstimate: true,  // ✅ Ensure boolean value
+        fee: 100, // 1% fee (100 BPS)
+        source: process.env.WALLET_ADDRESS // ✅ REQUIRED FIELD TO AVOID ERROR
     };
 
     const config = {
@@ -1989,9 +1991,7 @@ async function executeArbitrage() {
                     sellNetworkId,
                     buyToken.address,
                     sellToken.address,
-                    buyTokenAmount,
-                    fee: 100, // 1% fee (100 BPS)
-                    source: "wallet" // ✅ REQUIRED FIELD TO AVOID ERROR
+                    buyTokenAmount
                 );
 
                 if (!fusionQuote?.receivedAmount || !fusionQuote?.netLoanRequest) {
