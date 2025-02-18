@@ -1865,8 +1865,8 @@ async function executeArbitrage() {
                let expectedFinalUSDCWei = convertFromWei(expectedFinalUSDC, expectedFinalUSDCTokenAddress);
                 console.log(`💵 Final USDC Expected: ${expectedFinalUSDCWei} USDC`);
                  
-                //const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
-                const totalRepayment = bestTrade.buyAmount * 1.0005; // Flash Loan Fee 0.05%
+                const totalRepayment = bestTrade.buyAmount + (bestTrade.buyAmount * 0.0005); // Flash Loan Fee 0.05%
+               // const totalRepayment = bestTrade.buyAmount * 1.0005; // Flash Loan Fee 0.05%
                 if (expectedFinalUSDC <= totalRepayment) {
                     console.error("❌ Trade not profitable after fees. Skipping.");
                     continue;
