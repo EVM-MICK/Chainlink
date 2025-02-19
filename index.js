@@ -1614,21 +1614,18 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Convert values safely to prevent errors
-    const buyAmount = parseFloat(bestTrade.buyAmount) || 0;
-    const sellAmount = parseFloat(bestTrade.sellAmount) || 0;
-    const profit = parseFloat(bestTrade.profit) || 0;
+//          💰 **Buy Network:** ${bestTrade.buyOn}
+// 📌 **Token:** ${bestTrade.token}
+// 💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
+// 📈 **Sell Network:** ${bestTrade.sellOn}
+// 💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
+// ✅ **Profit:** ${bestTrade.profit} USDC
 
     // ✅ Send formatted data to Telegram
     await sendTelegramTradeAlert({
         title: "🚀 Arbitrage Trade Alert",
         message: `
-🚀 **Arbitrage Trade Alert** 🚀
-💰 **Buy Network:** ${bestTrade.buyOn}
-📌 **Token:** ${bestTrade.token}
-💵 **Buy Amount:** ${buyAmount.toFixed(2)} USDC
-📈 **Sell Network:** ${bestTrade.sellOn}
-💵 **Sell Amount:** ${sellAmount.toFixed(2)} USDC
-✅ **Profit:** ${profit.toFixed(2)} USDC
+🚀 **Arbitrage Trade Alert: ** ${bestTrade}
 `
     });
 
