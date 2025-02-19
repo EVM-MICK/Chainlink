@@ -525,7 +525,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: true,  // ✅ Ensure boolean value
         fee: 100, // 1% fee (100 BPS)
-        source: process.env.WALLET_ADDRESS // ✅ REQUIRED FIELD TO AVOID ERROR
+        source: process.env.WALLET_ADDRESS // ✅ REQUIRED FIELD TO AVOID ERROR  
+        preset: "fair" // 👈 Choose from "auto", "fast", "fair", "custom"
     };
 
     const config = {
@@ -539,7 +540,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: true,
         fee: 100,
-        source: "Backend"
+        source: "Backend",
+        preset: "fair"
     }
     };
 
