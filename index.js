@@ -516,7 +516,7 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
 
     console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
-    const params = {
+    const payload = {
        srcChain: srcChainID,
         dstChain: dstChainID,
         srcTokenAddress: srcToken,
