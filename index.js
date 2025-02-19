@@ -825,54 +825,55 @@ async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
 }
 
 // 🚀 Telegram Notification
-async function sendTelegramTradeAlert(details) {
+async function sendTelegramTradeAlert(tradeData) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-    // ✅ Validate the details object
-    if (!details || typeof details !== "object") {
-        console.error("❌ Invalid trade details. Cannot send Telegram alert.");
-        return;
-    }
-
-    // ✅ Extract trade details
-    const { buyOn, token, buyAmount, sellOn, sellAmount, profit } = details;
-
-    // ✅ Ensure values are correctly formatted
-    const formattedBuyAmount = buyAmount !== undefined ? Number(buyAmount).toFixed(2) : "N/A";
-    const formattedSellAmount = sellAmount !== undefined ? Number(sellAmount).toFixed(2) : "N/A";
-    const formattedProfit = profit !== undefined ? Number(profit).toFixed(2) : "N/A";
-
-    // ✅ Construct a clean, well-formatted message
-    const message = `
-🚀 **Arbitrage Trade Alert** 🚀
-💰 **Buy Network:** ${buyOn || "Unknown"}
-📌 **Token:** ${token || "Unknown"}
-💵 **Buy Amount:** $${formattedBuyAmount}
-
-📈 **Sell Network:** ${sellOn || "Unknown"}
-💵 **Sell Amount:** $${formattedSellAmount}
-
-✅ **Profit:** $${formattedProfit}
-    `;
-
+    // ✅ Ensure bot token and chat ID are set
     if (!botToken || !chatId) {
         console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
         return;
     }
 
+    // ✅ Validate trade data
+    if (!tradeData || typeof tradeData !== "object") {
+        console.error("❌ Invalid trade data. Cannot send Telegram alert.");
+        return;
+    }
+
+    // ✅ Extract trade details safely (avoid `undefined`)
+    const buyOn = tradeData.buyOn || "N/A";
+    const sellOn = tradeData.sellOn || "N/A";
+    const token = tradeData.token || "N/A";
+    const buyAmount = tradeData.buyAmount ? parseFloat(tradeData.buyAmount).toFixed(2) : "N/A";
+    const sellAmount = tradeData.sellAmount ? parseFloat(tradeData.sellAmount).toFixed(2) : "N/A";
+    const profit = tradeData.profit ? parseFloat(tradeData.profit).toFixed(2) : "N/A";
+
+    // ✅ Construct the Telegram message (proper formatting)
+    const message = `
+🚀 **Arbitrage Trade Alert** 🚀
+💰 **Buy Network:** ${buyOn}
+📌 **Token:** ${token}
+💵 **Buy Amount:** $${buyAmount}
+
+📈 **Sell Network:** ${sellOn}
+💵 **Sell Amount:** $${sellAmount}
+
+✅ **Profit:** $${profit}
+    `;
+
     try {
         const response = await axios.post(url, {
             chat_id: chatId,
             text: message,
+            parse_mode: "Markdown"
         });
-        console.log("✅ Telegram trade alert sent:", response.data);
+        console.log("✅ Telegram trade alert sent successfully:", response.data);
     } catch (error) {
-        console.error("❌ Failed to send Telegram trade alert:", error.message);
+        console.error("❌ Failed to send Telegram trade alert:", error.response?.data || error.message);
     }
 }
-
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
@@ -1614,18 +1615,22 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Convert values safely to prevent errors
-//          💰 **Buy Network:** ${bestTrade.buyOn}
-// 📌 **Token:** ${bestTrade.token}
-// 💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
-// 📈 **Sell Network:** ${bestTrade.sellOn}
-// 💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
-// ✅ **Profit:** ${bestTrade.profit} USDC
+               // ✅ Convert values safely to prevent errors
+    const buyAmount = parseFloat(bestTrade.buyAmount) || 0;
+    const sellAmount = parseFloat(bestTrade.sellAmount) || 0;
+    const profit = parseFloat(bestTrade.profit) || 0;
 
     // ✅ Send formatted data to Telegram
     await sendTelegramTradeAlert({
         title: "🚀 Arbitrage Trade Alert",
         message: `
-🚀 **Arbitrage Trade Alert: ** ${bestTrade}
+🚀 **Arbitrage Trade Alert** 🚀
+💰 **Buy Network:** ${bestTrade.buyOn}
+📌 **Token:** ${bestTrade.token}
+💵 **Buy Amount:** ${buyAmount.toFixed(2)} USDC
+📈 **Sell Network:** ${bestTrade.sellOn}
+💵 **Sell Amount:** ${sellAmount.toFixed(2)} USDC
+✅ **Profit:** ${profit.toFixed(2)} USDC
 `
     });
 
