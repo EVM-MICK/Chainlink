@@ -538,13 +538,12 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         amount: finalAmountInWei,
         walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: true,
-         fee: 100, 
-        source: process.env.WALLET_ADDRESS
+        fee: 100
     }
     };
 
     try {
-        const response = await axios.get(url, config);
+        const response = await axios.post(url, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
