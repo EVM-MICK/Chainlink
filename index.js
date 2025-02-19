@@ -1783,15 +1783,21 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Notify via Telegram before execution
-                await sendTelegramTradeAlert({
-                    title: "🚀 Arbitrage Trade Alert",
-                     message: `💰 **Buy Network:** ${bestTrade.buyOn}
-                     📌 **Token:** ${bestTrade.token}
-                    💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
-                   📈 **Sell Network:** ${bestTrade.sellOn}
-                   💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
-                    ✅ **Profit:** ${bestTrade.profit} USDC`
-                 });
+              const telegramMessage = `
+🚀 **Arbitrage Trade Alert** 🚀
+💰 **Buy Network:** ${bestTrade.buyOn}
+📌 **Token:** ${bestTrade.token}
+💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
+📈 **Sell Network:** ${bestTrade.sellOn}
+💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
+✅ **Profit:** ${bestTrade.profit} USDC
+`;
+
+await sendTelegramTradeAlert({
+    title: "🚀 Arbitrage Trade Alert",
+    message: telegramMessage
+});
+
 
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
