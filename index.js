@@ -1633,7 +1633,6 @@ async function executeArbitrage() {
     });
 
     console.log("✅ Telegram trade alert sent successfully.");
-}
    
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
