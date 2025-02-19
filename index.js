@@ -536,8 +536,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
     };
 
     try {
-        //const response = await axios.post(url, config);
-         const response = await axios.post(url, payload, config);
+        const response = await axios.post(url, payload, { headers: { Authorization: `Bearer ${API_KEY}` } });
+       //const response = await axios.post(url, payload, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
@@ -1782,6 +1782,17 @@ async function executeArbitrage() {
                 continue;
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
+             // ✅ Notify via Telegram before execution
+            await sendTelegramTradeAlert({
+               title: "🚀 Arbitrage Trade Alert (Pre-Execution)",
+               message: `💰 **Buy Network:** ${bestTrade.buyOn || "Unknown"}
+               📌 **Token:** ${bestTrade.token || "Unknown"}
+               💵 **Buy Amount:** ${bestTrade.buyAmount ? bestTrade.buyAmount.toFixed(2) : "N/A"} USDC
+               📈 **Sell Network:** ${bestTrade.sellOn || "Unknown"}
+               💵 **Sell Amount:** ${bestTrade.sellAmount ? bestTrade.sellAmount.toFixed(2) : "N/A"} USDC
+               ✅ **Profit:** ${bestTrade.profit ? bestTrade.profit.toFixed(2) : "N/A"} USDC`
+                  });
+
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
             try {
