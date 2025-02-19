@@ -482,7 +482,7 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
 let lastFusionQuoteTimestamp = 0;
 
 async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amountInWei) {
-    const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/receive";
+    const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
 
     // ✅ Ensure Chain IDs are correct
     if (!srcChainID || !dstChainID) {
@@ -538,7 +538,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         amount: finalAmountInWei,
         walletAddress: process.env.WALLET_ADDRESS,
         enableEstimate: true,
-        fee: 100
+        fee: 100,
+        source: "Backend"
     }
     };
 
