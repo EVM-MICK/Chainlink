@@ -436,17 +436,11 @@ axios.interceptors.request.use((config) => {
 async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) {
     console.log(`📡 Fetching Fusion+ Quote: ${srcChain} → ${dstChain}, Amount: ${amount}`);
 
-    // ✅ Convert to string to prevent `.toUpperCase()` errors
-    // const normalizedSrcChain = String(srcChain).toUpperCase();
-    // const normalizedDstChain = String(dstChain).toUpperCase();
-
-    // ✅ Extract corresponding Chain IDs
     const srcChainID = srcChain;
     const dstChainID = dstChain;
 
-    // ✅ Validate Chain IDs
     if (!srcChain || !dstChain) {
-        console.error(`❌ Invalid Chain Names! Source: ${srcChain}, Destination: ${dstChain} `);
+        console.error(`❌ Invalid Chain Names! Source: ${srcChain}, Destination: ${dstChain}`);
         return null;
     }
 
@@ -465,15 +459,10 @@ async function fetchFusionQuote(srcChain, dstChain, srcToken, dstToken, amount) 
     // ✅ Extract expected received amount
     let expectedDstAmount = parseFloat(fusionQuote.dstTokenAmount);
 
-    // ✅ Correctly subtract the 0.05% Aave loan fee
-    let netLoanAmount = expectedDstAmount / 1.0005;
-    netLoanAmount = Math.floor(netLoanAmount); // ✅ Round down to avoid exceeding request 
-
-    console.log(`🔹 Adjusted Loan Request: ${netLoanAmount} (After 0.05% fee subtraction)`);
+    console.log(`✅ Fusion+ Quote Received: ${expectedDstAmount} ${dstToken}`);
 
     return {
-        receivedAmount: expectedDstAmount, // The full amount sent
-        netLoanRequest: netLoanAmount, // The reduced loan request
+        receivedAmount: expectedDstAmount, // ✅ Full amount received
         quoteData: fusionQuote
     };
 }
@@ -548,7 +537,9 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         dstTokenAddress: dstToken,
         amount: finalAmountInWei,
         walletAddress: process.env.WALLET_ADDRESS,
-        enableEstimate: true
+        enableEstimate: true,
+         fee: 100, 
+        source: process.env.WALLET_ADDRESS
     }
     };
 
@@ -1179,9 +1170,9 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
             src: fromToken,
             dst: toToken,
             amount: amountInWei, // ✅ Correct field name and format
-            complexityLevel: 2,
-            parts: 50,
-            mainRouteParts: 10,
+            complexityLevel: 3,
+            parts: 100,
+            mainRouteParts: 50,
             includeTokensInfo: false,
             includeProtocols: true,
             includeGas: true
@@ -2140,33 +2131,33 @@ async function executeArbitrage() {
                  console.error("❌ Sell Amount is missing. Skipping trade.");
                  continue;
                   }
-                // ✅ Compute optimal loan amount covering 0.05% loan fees
-                const netLoanRequest = convertFromWei(fusionQuote.netLoanRequest, buyToken.address);
-                console.log(`💰 Optimal Loan Request: ${netLoanRequest} ${token}`);
+                 // ✅ Compute optimal loan amount covering 0.05% loan fees
+                //const netLoanRequest = convertFromWei(adjustedLoanRequest, buyToken.address);
+                 const netLoanRequest = fusionQuote.receivedAmount / 1.0005;
+                 // ✅ Adjust Loan Request by 0.5% buffer to cover fees
+                const adjustedLoanRequest = Math.floor(netLoanRequest); // ✅ Round down
+                console.log(`💰 Optimal Loan Request: ${adjustedLoanRequest} ${token} (After Loan Fee)`);
                 // ✅ Fetch final USDC expected after selling loaned tokens
                 const expectedFinalUSDC = await fetchSwapQuote(
                     sellNetworkId,
                     sellToken.address,
                     sellUSDC.address,
-                    fusionQuote.netLoanRequest
+                    adjustedLoanRequest.toString()
                 );
 
                 if (!expectedFinalUSDC) {
                     console.error("❌ Failed to fetch final USDC swap quote. Retrying...");
                     continue;
                 }
-
-                const finalUSDCAmount = convertFromWei(expectedFinalUSDC, sellUSDC.address);
-                console.log(`💵 Final USDC Expected: ${finalUSDCAmount} USDC`);
-
-                // ✅ Calculate total repayment with 0.05% loan fee
-                const totalRepayment = bestTrade.buyAmount * 1.0005;
-
-                if (finalUSDCAmount <= totalRepayment) {
-                    console.error("❌ Trade not profitable after fees. Skipping.");
-                    continue;
-                }
-
+               const finalUSDCAmount = convertFromWei(expectedFinalUSDC, sellUSDC.address);
+               console.log(`💵 Final USDC Expected: ${finalUSDCAmount} USDC`); 
+               // ✅ Calculate total repayment (loan amount + fees)
+               const totalRepayment = bestTrade.buyAmount * 1.0005;
+              if (finalUSDCAmount <= totalRepayment) {
+                console.error("❌ Trade not profitable after fees. Skipping.");
+                 continue;
+                   }
+                console.log(`✅ Profitable trade detected: Final USDC ${finalUSDCAmount} > Repayment ${totalRepayment}`);
                 console.log(`🚀 Executing Buy Swap & Cross-Chain Swap...`);
                 console.log(`💵 Buying ${bestTrade.buyAmount} USDC to purchase ${token} on ${buyNetwork}...`);
                 console.log(`💵 Selling ${sellAmount} ${token} on ${sellNetwork}...`);
@@ -2181,26 +2172,19 @@ async function executeArbitrage() {
                     netLoanRequest: netLoanRequest.toString(),
                     tokenAddress: buyToken.address
                 };
-
                 console.log("✅ Sending Trade Data to Execute Swap:", tradeData);
-
                 // ✅ Execute Swap
                 await executeSwap(tradeData);
-
                 // ✅ Notify via Telegram
                 await sendTelegramTradeAlert({
-    title: "🚀 Arbitrage Trade Alert",
-    message: `💰 **Buy Network:** ${bestTrade.buyOn || "Unknown"}
-📌 **Token:** ${bestTrade.token || "Unknown"}
-💵 **Buy Amount:** ${bestTrade.buyAmount ? bestTrade.buyAmount.toFixed(2) : "N/A"} USDC
-
-📈 **Sell Network:** ${bestTrade.sellOn || "Unknown"}
-💵 **Sell Amount:** ${bestTrade.sellAmount ? bestTrade.sellAmount.toFixed(2) : "N/A"} USDC
-
-✅ **Profit:** ${bestTrade.profit ? bestTrade.profit.toFixed(2) : "N/A"} USDC`
-});
-
-
+                       title: "🚀 Arbitrage Trade Alert",
+                       message: `💰 **Buy Network:** ${bestTrade.buyOn || "Unknown"}
+                       📌 **Token:** ${bestTrade.token || "Unknown"}
+                       💵 **Buy Amount:** ${bestTrade.buyAmount ? bestTrade.buyAmount.toFixed(2) : "N/A"} USDC
+                       📈 **Sell Network:** ${bestTrade.sellOn || "Unknown"}
+                       💵 **Sell Amount:** ${bestTrade.sellAmount ? bestTrade.sellAmount.toFixed(2) : "N/A"} USDC
+                       ✅ **Profit:** ${bestTrade.profit ? bestTrade.profit.toFixed(2) : "N/A"} USDC`
+                      });
                 console.log("✅ Trade Executed Successfully!");
 
             } catch (error) {
