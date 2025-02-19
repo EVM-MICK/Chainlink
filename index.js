@@ -517,22 +517,7 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
     console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
     const params = {
-        srcChain: srcChainID,   // ✅ Pass correct chain ID
-        dstChain: dstChainID,   // ✅ Pass correct chain ID
-        srcTokenAddress: srcToken,
-        dstTokenAddress: dstToken,
-        amount: finalAmountInWei,   // ✅ Corrected amount in Wei
-        walletAddress: process.env.WALLET_ADDRESS,
-        enableEstimate: true,  // ✅ Ensure boolean value
-        fee: 100, // 1% fee (100 BPS)
-        source: process.env.WALLET_ADDRESS // ✅ REQUIRED FIELD TO AVOID ERROR  
-        preset: "fair" // 👈 Choose from "auto", "fast", "fair", "custom"
-    };
-
-    const config = {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-        params: {
-        srcChain: srcChainID,
+       srcChain: srcChainID,
         dstChain: dstChainID,
         srcTokenAddress: srcToken,
         dstTokenAddress: dstToken,
@@ -542,11 +527,17 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         fee: 100,
         source: "Backend",
         preset: "fair"
-    }
+    };
+
+     const config = {
+        headers: {
+            Authorization: `Bearer ${API_KEY}`
+        }
     };
 
     try {
-        const response = await axios.post(url, config);
+        //const response = await axios.post(url, config);
+         const response = await axios.post(url, payload, config);
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
