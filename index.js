@@ -485,13 +485,7 @@ let lastFusionQuoteTimestamp = 0;
 async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amountInWei) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
 
-    // ✅ Ensure Chain IDs are correct
-    if (!srcChainID || !dstChainID) {
-        console.error(`❌ Invalid Chain IDs! Source: ${srcChainID}, Destination: ${dstChainID}`);
-        return null;
-    }
-
-    // ✅ Ensure API Key and Wallet Address are available
+    // ✅ Ensure API Key and Wallet Address
     const API_KEY = process.env.ONEINCH_API_KEY?.trim();
     const walletAddress = process.env.WALLET_ADDRESS_MAIN?.trim();
 
@@ -500,65 +494,65 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         return null;
     }
 
-    // ✅ Enforce 1RPS Rate Limit
-    const now = Date.now();
-    const timeSinceLastRequest = now - lastFusionQuoteTimestamp;
-    const waitTime = Math.max(0, 1000 - timeSinceLastRequest); // Ensure at least 1-second gap
-    if (waitTime > 0) {
-        console.log(`⏳ Respecting 1RPS limit, waiting ${waitTime}ms before next request...`);
-        await delay(waitTime);
-    }
-    lastFusionQuoteTimestamp = Date.now();
-
     console.log(`📡 Requesting Fusion+ Quote: ${srcChainID} → ${dstChainID}, Amount (Wei): ${amountInWei}`);
 
     // ✅ Convert Amount from Wei to Decimal Format
     const srcTokenDecimals = TOKEN_DECIMALS[srcToken] || 18;
     const amountInTokenUnits = parseFloat(amountInWei) / 10 ** srcTokenDecimals;
-
-    console.log(`🔹 Converted Amount from Wei to Token Units: ${amountInTokenUnits} ${srcToken}`);
-
-    // ✅ Convert Back to Wei for API Request
     const finalAmountInWei = Math.floor(amountInTokenUnits * 10 ** srcTokenDecimals).toString();
+
     console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
-    // ✅ API Request Payload
+    // ✅ Fusion+ API Request Payload (following 1inch Docs)
     const payload = {
-        srcChain: srcChainID,
-        dstChain: dstChainID,
-        srcTokenAddress: srcToken,
-        dstTokenAddress: dstToken,
-        amount: finalAmountInWei,
-        walletAddress: walletAddress, // ✅ Ensure this is passed
-        fee: 100,
-        preset: "fair",
-        source: "Backend",
-        isPermit2: false,
-        permit: null,
-        feeReceiver: null
+        quote: {
+            quoteId: "custom_quote_id",
+            srcTokenAmount: finalAmountInWei,
+            dstTokenAmount: "", // API will fill this based on the best quote
+            walletAddress: walletAddress,
+            srcTokenAddress: srcToken,
+            dstTokenAddress: dstToken,
+            srcChain: srcChainID,
+            dstChain: dstChainID,
+            presets: {
+                fair: {
+                    auctionDuration: 360, // 6-minute auction
+                    initialRateBump: 1000,
+                    auctionStartAmount: finalAmountInWei,
+                    startAmount: finalAmountInWei,
+                    auctionEndAmount: finalAmountInWei,
+                    allowPartialFills: true,
+                    allowMultipleFills: true
+                }
+            },
+            timeLocks: {
+                srcWithdrawal: 180,
+                dstWithdrawal: 180
+            },
+            recommendedPreset: "fair"
+        },
+        secretsHashList: [
+            "0x315b47a8c3780434b153667588db4ca628526e20000000000000000000000000"
+        ]
     };
 
     // ✅ API Request Headers
     const headers = {
         Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json",
-        "walletAddress": walletAddress  // ✅ Also add here
+        "Content-Type": "application/json"
     };
 
     try {
         const response = await axios.post(url, payload, { headers });
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
-        // ✅ Ensure presets exist before accessing
         if (!response.data.presets) {
             console.error(`❌ Fusion+ Quote Failed: No preset data returned.`);
             return null;
         }
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
-        const dstAmount = response.data.presets?.fast?.auctionEndAmount || 
-                          response.data.presets?.medium?.auctionEndAmount || 
-                          response.data.presets?.slow?.auctionEndAmount;
+        const dstAmount = response.data.presets?.fair?.auctionEndAmount;
 
         if (!dstAmount) {
             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
@@ -569,9 +563,6 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         return response.data;
     } catch (error) {
         console.error(`❌ Fusion+ API Error:`, error.response?.data || error.message);
-        if (error.response?.status === 400) {
-            console.error(`❌ Possible bad request. Check parameters!`);
-        }
         return null;
     }
 }
