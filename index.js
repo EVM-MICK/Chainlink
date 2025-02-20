@@ -483,10 +483,17 @@ let lastFusionQuoteTimestamp = 0;
 
 async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amountInWei) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
-
     // ✅ Ensure Chain IDs are correct
     if (!srcChainID || !dstChainID) {
         console.error(`❌ Invalid Chain IDs! Source: ${srcChainID}, Destination: ${dstChainID}`);
+        return null;
+    }
+    // ✅ Ensure API Key and Wallet Address are available
+    const API_KEY = process.env.API_KEY?.trim();
+    const walletAddress = process.env.WALLET_ADDRESS?.trim();
+
+    if (!API_KEY || !walletAddress) {
+        console.error("❌ Missing API Key or Wallet Address. Cannot proceed.");
         return null;
     }
 
@@ -494,7 +501,6 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
     const now = Date.now();
     const timeSinceLastRequest = now - lastFusionQuoteTimestamp;
     const waitTime = Math.max(0, 1000 - timeSinceLastRequest); // Ensure at least 1-second gap
-
     if (waitTime > 0) {
         console.log(`⏳ Respecting 1RPS limit, waiting ${waitTime}ms before next request...`);
         await delay(waitTime);
@@ -513,35 +519,53 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
 
     // ✅ Convert Back to Wei for API Request
     const finalAmountInWei = Math.floor(amountInTokenUnits * 10 ** srcTokenDecimals).toString();
-
     console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
-    const payload = {
-       srcChain: srcChainID,
-        dstChain: dstChainID,
-        srcTokenAddress: srcToken,
-        dstTokenAddress: dstToken,
-        amount: finalAmountInWei,
-        walletAddress: process.env.WALLET_ADDRESS,
-        enableEstimate: true,
-        fee: 100,
-        source: "Backend",
-        preset: "fair"
+    // ✅ Construct API Request Payload
+    // const payload = {
+    //     srcChain: srcChainID,
+    //     dstChain: dstChainID,
+    //     srcTokenAddress: srcToken,
+    //     dstTokenAddress: dstToken,
+    //     amount: finalAmountInWei,
+    //     walletAddress: walletAddress, // Ensure walletAddress is correctly passed
+    //     enableEstimate: true,
+    //     fee: 100,
+    //     source: "Backend",
+    //     preset: "fair"
+    // };
+
+ const payload = {
+        "srcChain": srcChain,
+        "dstChain": dstChain,
+        "srcTokenAddress": srcToken,
+        "dstTokenAddress": dstToken,
+        "amount": finalAmountInWei,  // Use retrieved dstAmount
+        "walletAddress": walletAddress,
+        "fee": 100,
+        "preset": "fair",
+        "source": "Backend",
+        "isPermit2": false,
+        "permit": null,
+        "feeReceiver": null
     };
 
-     const config = {
-        headers: {
-            Authorization: `Bearer ${API_KEY}`
-        }
+    // ✅ API Request Headers
+    const headers = {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
     };
 
     try {
-        const response = await axios.post(url, payload, { headers: { Authorization: `Bearer ${API_KEY}` } });
-       //const response = await axios.post(url, payload, config);
+        // ✅ Send API Request
+        const response = await axios.post(url, payload, { headers });
         console.log(`✅ Fusion+ Quote Received:`, response.data);
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
-        const dstAmount = response.data.presets?.fast?.auctionEndAmount;
+        const dstAmount = response.data.presets?.fast?.auctionEndAmount || 
+                          response.data.presets?.medium?.auctionEndAmount || 
+                          response.data.presets?.slow?.auctionEndAmount;
+
         if (!dstAmount) {
             console.warn(`⚠️ Warning: Could not retrieve auctionEndAmount.`);
             return null;
@@ -706,7 +730,7 @@ async function executeFusionSwap(trade, srcToken, dstToken, amount) {
 
         console.log(`✅ Fusion+ Cross-Chain Swap Successfully Executed!`);
 
-        await sendTelegramMessage(`✅ **Cross-Chain Swap Completed**  
+        await sendTelegramTradeAlert(`✅ **Cross-Chain Swap Completed**  
         🔹 **From:** ${trade.buyOn} (${srcToken})  
         🔹 **To:** ${trade.sellOn} (${dstToken})  
         🔹 **Amount:** ${amount}`);
@@ -843,31 +867,27 @@ async function sendTelegramTradeAlert(tradeData) {
     }
 
     // ✅ Extract trade details safely (avoid `undefined`)
-    const buyOn = tradeData.buyOn || "N/A";
-    const sellOn = tradeData.sellOn || "N/A";
-    const token = tradeData.token || "N/A";
-    const buyAmount = tradeData.buyAmount ? parseFloat(tradeData.buyAmount).toFixed(2) : "N/A";
-    const sellAmount = tradeData.sellAmount ? parseFloat(tradeData.sellAmount).toFixed(2) : "N/A";
-    const profit = tradeData.profit ? parseFloat(tradeData.profit).toFixed(2) : "N/A";
+    const buyOn = tradeData.buyOn;
+    const sellOn = tradeData.sellOn;
+    const token = tradeData.token;
+    const buyAmount = tradeData.buyAmount ? parseFloat(tradeData.buyAmount).toFixed(2);
+    const sellAmount = tradeData.sellAmount ? parseFloat(tradeData.sellAmount).toFixed(2);
+    const profit = tradeData.profit ? parseFloat(tradeData.profit).toFixed(2);
 
     // ✅ Construct the Telegram message (proper formatting)
     const message = `
-🚀 **Arbitrage Trade Alert** 🚀
-💰 **Buy Network:** ${buyOn}
-📌 **Token:** ${token}
-💵 **Buy Amount:** $${buyAmount}
-
-📈 **Sell Network:** ${sellOn}
-💵 **Sell Amount:** $${sellAmount}
-
-✅ **Profit:** $${profit}
+            🚀 **Arbitrage Trade Alert** 🚀
+            💰 **Buy Network:** ${buyOn}
+            📌 **Token:** ${token}
+            💵 **Buy Amount:** $${buyAmount}
+            📈 **Sell Network:** ${sellOn}
+            💵 **Sell Amount:** $${sellAmount}
+            ✅ **Profit:** $${profit}
     `;
-
     try {
         const response = await axios.post(url, {
             chat_id: chatId,
             text: message,
-            parse_mode: "Markdown"
         });
         console.log("✅ Telegram trade alert sent successfully:", response.data);
     } catch (error) {
@@ -880,12 +900,10 @@ async function sendTelegramMessage(message) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-
   if (!botToken || !chatId) {
     console.error("❌ Telegram bot token or chat ID is missing. Cannot send message.");
     return;
   }
-
   try {
     const response = await axios.post(url, {
       chat_id: chatId,
@@ -1249,11 +1267,9 @@ function convertFromWei(amountWei, token) {
  */
 async function executeSwap(trade) {
     const { token, buyOn, sellOn, buyAmount, sellAmount, netLoanRequest, tokenAddress } = trade;
-
     console.log(`⚡ Executing Arbitrage Trade ⚡`);
     console.log(`BUY on ${buyOn}: ${buyAmount} USDC to purchase ${token}`);
     console.log(`SELL on ${sellOn}: ${sellAmount} of ${token}`);
-
     await sendTelegramTradeAlert({
         title: "🚀 Executing Arbitrage Trade",
         message: `🔹 Buy on ${buyOn}: ${buyAmount} USDC to purchase ${token}
@@ -1327,7 +1343,7 @@ async function executeSwap(trade) {
 
     } catch (error) {
         console.error(`❌ Error executing arbitrage trade:`, error);
-        await sendTelegramTradeAlert({
+        await sendTelegramMessage({
             title: "❌ Arbitrage Trade Failed!",
             message: `🚨 An error occurred during execution:
             ❌ ${error.message}`
@@ -1624,17 +1640,16 @@ async function executeArbitrage() {
     await sendTelegramTradeAlert({
         title: "🚀 Arbitrage Trade Alert",
         message: `
-🚀 **Arbitrage Trade Alert** 🚀
-💰 **Buy Network:** ${bestTrade.buyOn}
-📌 **Token:** ${bestTrade.token}
-💵 **Buy Amount:** ${buyAmount.toFixed(2)} USDC
-📈 **Sell Network:** ${bestTrade.sellOn}
-💵 **Sell Amount:** ${sellAmount.toFixed(2)} USDC
-✅ **Profit:** ${profit.toFixed(2)} USDC
-`
-    });
-
-    console.log("✅ Telegram trade alert sent successfully.");
+             🚀 **Arbitrage Trade Alert** 🚀
+             💰 **Buy Network:** ${bestTrade.buyOn}
+              📌 **Token:** ${bestTrade.token}
+              💵 **Buy Amount:** ${buyAmount.toFixed(2)} USDC
+               📈 **Sell Network:** ${bestTrade.sellOn}
+               💵 **Sell Amount:** ${sellAmount.toFixed(2)} USDC
+               ✅ **Profit:** ${profit.toFixed(2)} USDC
+  `
+             });
+     console.log("✅ Telegram trade alert sent successfully.");
    
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
