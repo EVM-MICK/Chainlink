@@ -536,8 +536,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
     // };
 
  const payload = {
-        "srcChain": srcChain,
-        "dstChain": dstChain,
+        "srcChain": srcChainID,
+        "dstChain": dstChainID,
         "srcTokenAddress": srcToken,
         "dstTokenAddress": dstToken,
         "amount": finalAmountInWei,  // Use retrieved dstAmount
@@ -1631,22 +1631,19 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Convert values safely to prevent errors
-               // ✅ Convert values safely to prevent errors
-    const buyAmount = parseFloat(bestTrade.buyAmount) || 0;
-    const sellAmount = parseFloat(bestTrade.sellAmount) || 0;
-    const profit = parseFloat(bestTrade.profit) || 0;
+             const { token, buyOn, sellOn, buyAmount, sellAmount, profit } = detectArbitrageOpportunities[0];
 
     // ✅ Send formatted data to Telegram
     await sendTelegramTradeAlert({
         title: "🚀 Arbitrage Trade Alert",
         message: `
              🚀 **Arbitrage Trade Alert** 🚀
-             💰 **Buy Network:** ${bestTrade.buyOn}
-              📌 **Token:** ${bestTrade.token}
-              💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
-               📈 **Sell Network:** ${bestTrade.sellOn}
-               💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
-               ✅ **Profit:** ${bestTrade.profit} USDC
+             💰 **Buy Network:** ${buyOn}
+              📌 **Token:** ${token}
+              💵 **Buy Amount:** ${buyAmount} USDC
+               📈 **Sell Network:** ${sellOn}
+               💵 **Sell Amount:** ${sellAmount} USDC
+               ✅ **Profit:** ${profit} USDC
   `
              });
      console.log("✅ Telegram trade alert sent successfully.");
@@ -1766,12 +1763,12 @@ async function executeArbitrage() {
                 // ✅ Notify via Telegram
                 await sendTelegramTradeAlert({
                        title: "🚀 Arbitrage Trade Alert",
-                       message: `💰 **Buy Network:** ${bestTrade.buyOn || "Unknown"}
-                       📌 **Token:** ${bestTrade.token || "Unknown"}
-                       💵 **Buy Amount:** ${bestTrade.buyAmount ? bestTrade.buyAmount.toFixed(2) : "N/A"} USDC
-                       📈 **Sell Network:** ${bestTrade.sellOn || "Unknown"}
-                       💵 **Sell Amount:** ${bestTrade.sellAmount ? bestTrade.sellAmount.toFixed(2) : "N/A"} USDC
-                       ✅ **Profit:** ${bestTrade.profit ? bestTrade.profit.toFixed(2) : "N/A"} USDC`
+                       message: `💰 **Buy Network:** ${buyOn}
+                       📌 **Token:** ${token}
+                       💵 **Buy Amount:** ${buyAmount} USDC
+                       📈 **Sell Network:** ${sellOn}
+                       💵 **Sell Amount:** ${sellAmount} USDC
+                       ✅ **Profit:** ${profit} USDC`
                       });
                 console.log("✅ Trade Executed Successfully!");
 
