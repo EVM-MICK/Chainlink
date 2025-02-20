@@ -489,8 +489,8 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         return null;
     }
     // ✅ Ensure API Key and Wallet Address are available
-    const API_KEY = process.env.API_KEY?.trim();
-    const walletAddress = process.env.WALLET_ADDRESS?.trim();
+    const API_KEY = process.env.ONEINCH_API_KEY?.trim();
+    const walletAddress = process.env.WALLET_ADDRESS_MAIN?.trim();
 
     if (!API_KEY || !walletAddress) {
         console.error("❌ Missing API Key or Wallet Address. Cannot proceed.");
@@ -1643,10 +1643,10 @@ async function executeArbitrage() {
              🚀 **Arbitrage Trade Alert** 🚀
              💰 **Buy Network:** ${bestTrade.buyOn}
               📌 **Token:** ${bestTrade.token}
-              💵 **Buy Amount:** ${buyAmount.toFixed(2)} USDC
+              💵 **Buy Amount:** ${bestTrade.buyAmount} USDC
                📈 **Sell Network:** ${bestTrade.sellOn}
-               💵 **Sell Amount:** ${sellAmount.toFixed(2)} USDC
-               ✅ **Profit:** ${profit.toFixed(2)} USDC
+               💵 **Sell Amount:** ${bestTrade.sellAmount} USDC
+               ✅ **Profit:** ${bestTrade.profit} USDC
   `
              });
      console.log("✅ Telegram trade alert sent successfully.");
