@@ -850,51 +850,105 @@ async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
 }
 
 // 🚀 Telegram Notification
-async function sendTelegramTradeAlert(tradeData) {
+// async function sendTelegramTradeAlert(tradeData) {
+//     const botToken = process.env.TELEGRAM_BOT_TOKEN;
+//     const chatId = process.env.TELEGRAM_CHAT_ID;
+//     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+//     // ✅ Ensure bot token and chat ID are set
+//     if (!botToken || !chatId) {
+//         console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
+//         return;
+//     }
+
+//     // ✅ Validate trade data
+//     if (!tradeData || typeof tradeData !== "object") {
+//         console.error("❌ Invalid trade data. Cannot send Telegram alert.");
+//         return;
+//     }
+
+//     // ✅ Extract trade details safely (avoid `undefined`)
+//     const buyOn = tradeData.buyOn;
+//     const sellOn = tradeData.sellOn;
+//     const token = tradeData.token;
+//     const buyAmount = tradeData.buyAmount;
+//     const sellAmount = tradeData.sellAmount;
+//     const profit = tradeData.profit;
+
+//     // ✅ Construct the Telegram message (proper formatting)
+//     const message = `
+//             🚀 **Arbitrage Trade Alert** 🚀
+//             💰 **Buy Network:** ${buyOn}
+//             📌 **Token:** ${token}
+//             💵 **Buy Amount:** $${buyAmount}
+//             📈 **Sell Network:** ${sellOn}
+//             💵 **Sell Amount:** $${sellAmount}
+//             ✅ **Profit:** $${profit}
+//     `;
+//     try {
+//         const response = await axios.post(url, {
+//             chat_id: chatId,
+//             text: message,
+//         });
+//         console.log("✅ Telegram trade alert sent successfully:", response.data);
+//     } catch (error) {
+//         console.error("❌ Failed to send Telegram trade alert:", error.response?.data || error.message);
+//     }
+// }
+
+async function sendTelegramTradeAlert(tradeDetails) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-    // ✅ Ensure bot token and chat ID are set
+    if (!tradeDetails || typeof tradeDetails !== "object") {
+        console.error("❌ Invalid trade details. Cannot send Telegram alert.");
+        return;
+    }
+
+    // ✅ Extract trade details safely
+    const {
+        token = "N/A",
+        buyOn = "N/A",
+        sellOn = "N/A",
+        buyAmount = "0",
+        sellAmount = "0",
+        profit = "0",
+    } = tradeDetails;
+
+    // ✅ Ensure numeric values are correctly formatted
+    const formattedBuyAmount = parseFloat(buyAmount).toFixed(2);
+    const formattedSellAmount = parseFloat(sellAmount).toFixed(2);
+    const formattedProfit = parseFloat(profit).toFixed(2);
+
+    // ✅ Construct message correctly
+    const message = `
+🚀 **Arbitrage Trade Alert** 🚀
+💰 **Buy Network:** ${buyOn}
+📌 **Token:** ${token}
+💵 **Buy Amount:** $${formattedBuyAmount}
+📈 **Sell Network:** ${sellOn}
+💵 **Sell Amount:** $${formattedSellAmount}
+✅ **Profit:** $${formattedProfit}
+    `;
+
     if (!botToken || !chatId) {
         console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
         return;
     }
 
-    // ✅ Validate trade data
-    if (!tradeData || typeof tradeData !== "object") {
-        console.error("❌ Invalid trade data. Cannot send Telegram alert.");
-        return;
-    }
-
-    // ✅ Extract trade details safely (avoid `undefined`)
-    const buyOn = tradeData.buyOn;
-    const sellOn = tradeData.sellOn;
-    const token = tradeData.token;
-    const buyAmount = tradeData.buyAmount;
-    const sellAmount = tradeData.sellAmount;
-    const profit = tradeData.profit;
-
-    // ✅ Construct the Telegram message (proper formatting)
-    const message = `
-            🚀 **Arbitrage Trade Alert** 🚀
-            💰 **Buy Network:** ${buyOn}
-            📌 **Token:** ${token}
-            💵 **Buy Amount:** $${buyAmount}
-            📈 **Sell Network:** ${sellOn}
-            💵 **Sell Amount:** $${sellAmount}
-            ✅ **Profit:** $${profit}
-    `;
     try {
         const response = await axios.post(url, {
             chat_id: chatId,
-            text: message,
+            text: message.trim(), // ✅ Ensure proper formatting
         });
+
         console.log("✅ Telegram trade alert sent successfully:", response.data);
     } catch (error) {
-        console.error("❌ Failed to send Telegram trade alert:", error.response?.data || error.message);
+        console.error("❌ Failed to send Telegram trade alert:", error.message);
     }
 }
+
 
 // Error Handling and Notifications
 async function sendTelegramMessage(message) {
@@ -1818,17 +1872,7 @@ async function executeArbitrage() {
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
 
             // ✅ Construct and Send Telegram Message for Arbitrage Alert
-            const message = `
-🚀 **Arbitrage Trade Alert** 🚀
-💰 **Buy Network:** ${bestTrade.buyOn || "N/A"}
-📌 **Token:** ${bestTrade.token || "N/A"}
-💵 **Buy Amount:** ${bestTrade.buyAmount || "0"} USDC
-📈 **Sell Network:** ${bestTrade.sellOn || "N/A"}
-💵 **Sell Amount:** ${bestTrade.sellAmount || "0"} USDC
-✅ **Profit:** ${bestTrade.profit || "0"} USDC
-`;
-            await sendTelegramTradeAlert({ title: "🚀 Arbitrage Trade Alert", message });
-
+           await sendTelegramTradeAlert(bestTrade);
             console.log("✅ Telegram trade alert sent successfully.");
             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
@@ -1951,19 +1995,7 @@ async function executeArbitrage() {
                 await executeSwap(tradeData);
 
                 // ✅ Send execution data to Telegram
-                await sendTelegramTradeAlert({
-                    title: "🚀 Arbitrage Execution Alert",
-                    message: `
-🚀 **Arbitrage Execution Alert** 🚀
-💰 **Buy Network:** ${tradeData.buyOn}
-📌 **Token:** ${tradeData.token}
-💵 **Buy Amount:** ${tradeData.buyAmount} USDC
-📈 **Sell Network:** ${tradeData.sellOn}
-💵 **Sell Amount:** ${tradeData.sellAmount} USDC
-🏦 **Loan Request:** ${tradeData.netLoanRequest} ${tradeData.token}
-🔗 **Token Address:** ${tradeData.tokenAddress}
-                    `
-                });
+                await sendTelegramTradeAlert(tradeData);
 
                 console.log("✅ Trade Data Sent to Telegram:", tradeData);
 
