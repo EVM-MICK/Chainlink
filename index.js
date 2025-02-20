@@ -484,11 +484,13 @@ let lastFusionQuoteTimestamp = 0;
 
 async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amountInWei) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
+
     // ✅ Ensure Chain IDs are correct
     if (!srcChainID || !dstChainID) {
         console.error(`❌ Invalid Chain IDs! Source: ${srcChainID}, Destination: ${dstChainID}`);
         return null;
     }
+
     // ✅ Ensure API Key and Wallet Address are available
     const API_KEY = process.env.ONEINCH_API_KEY?.trim();
     const walletAddress = process.env.WALLET_ADDRESS_MAIN?.trim();
@@ -506,14 +508,12 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         console.log(`⏳ Respecting 1RPS limit, waiting ${waitTime}ms before next request...`);
         await delay(waitTime);
     }
-
-    // ✅ Update Last Request Timestamp
     lastFusionQuoteTimestamp = Date.now();
 
     console.log(`📡 Requesting Fusion+ Quote: ${srcChainID} → ${dstChainID}, Amount (Wei): ${amountInWei}`);
 
     // ✅ Convert Amount from Wei to Decimal Format
-    const srcTokenDecimals = TOKEN_DECIMALS[srcToken] || 18; // Default to 18 decimals if not found
+    const srcTokenDecimals = TOKEN_DECIMALS[srcToken] || 18;
     const amountInTokenUnits = parseFloat(amountInWei) / 10 ** srcTokenDecimals;
 
     console.log(`🔹 Converted Amount from Wei to Token Units: ${amountInTokenUnits} ${srcToken}`);
@@ -522,45 +522,38 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
     const finalAmountInWei = Math.floor(amountInTokenUnits * 10 ** srcTokenDecimals).toString();
     console.log(`🔹 Final Amount in Wei to Send to API: ${finalAmountInWei}`);
 
-    // ✅ Construct API Request Payload
-    // const payload = {
-    //     srcChain: srcChainID,
-    //     dstChain: dstChainID,
-    //     srcTokenAddress: srcToken,
-    //     dstTokenAddress: dstToken,
-    //     amount: finalAmountInWei,
-    //     walletAddress: walletAddress, // Ensure walletAddress is correctly passed
-    //     enableEstimate: true,
-    //     fee: 100,
-    //     source: "Backend",
-    //     preset: "fair"
-    // };
-
- const payload = {
-        "srcChain": srcChainID,
-        "dstChain": dstChainID,
-        "srcTokenAddress": srcToken,
-        "dstTokenAddress": dstToken,
-        "amount": finalAmountInWei,  // Use retrieved dstAmount
-        "walletAddress": walletAddress,
-        "fee": 100,
-        "preset": "fair",
-        "source": "Backend",
-        "isPermit2": false,
-        "permit": null,
-        "feeReceiver": null
+    // ✅ API Request Payload
+    const payload = {
+        srcChain: srcChainID,
+        dstChain: dstChainID,
+        srcTokenAddress: srcToken,
+        dstTokenAddress: dstToken,
+        amount: finalAmountInWei,
+        walletAddress: walletAddress, // ✅ Ensure this is passed
+        fee: 100,
+        preset: "fair",
+        source: "Backend",
+        isPermit2: false,
+        permit: null,
+        feeReceiver: null
     };
 
     // ✅ API Request Headers
     const headers = {
         Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "walletAddress": walletAddress  // ✅ Also add here
     };
 
     try {
-        // ✅ Send API Request
         const response = await axios.post(url, payload, { headers });
         console.log(`✅ Fusion+ Quote Received:`, response.data);
+
+        // ✅ Ensure presets exist before accessing
+        if (!response.data.presets) {
+            console.error(`❌ Fusion+ Quote Failed: No preset data returned.`);
+            return null;
+        }
 
         // ✅ Extract `auctionEndAmount` correctly for final swap estimation
         const dstAmount = response.data.presets?.fast?.auctionEndAmount || 
@@ -575,10 +568,14 @@ async function getFusionQuote(srcChainID, dstChainID, srcToken, dstToken, amount
         console.log(`🔹 Estimated Received Amount on ${dstChainID}: ${dstAmount}`);
         return response.data;
     } catch (error) {
-        console.error(`❌ Error fetching Fusion+ quote:`, error.response?.data || error.message);
+        console.error(`❌ Fusion+ API Error:`, error.response?.data || error.message);
+        if (error.response?.status === 400) {
+            console.error(`❌ Possible bad request. Check parameters!`);
+        }
         return null;
     }
 }
+
 
 async function buildFusionOrder(dstAmount, srcChain, dstChain, srcToken, dstToken, walletAddress) {
     const url = "https://api.1inch.dev/fusion-plus/quoter/v1.0/quote/build";
