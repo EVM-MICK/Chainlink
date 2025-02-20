@@ -870,9 +870,9 @@ async function sendTelegramTradeAlert(tradeData) {
     const buyOn = tradeData.buyOn;
     const sellOn = tradeData.sellOn;
     const token = tradeData.token;
-    const buyAmount = tradeData.buyAmount ? parseFloat(tradeData.buyAmount).toFixed(2);
-    const sellAmount = tradeData.sellAmount ? parseFloat(tradeData.sellAmount).toFixed(2);
-    const profit = tradeData.profit ? parseFloat(tradeData.profit).toFixed(2);
+    const buyAmount = tradeData.buyAmount;
+    const sellAmount = tradeData.sellAmount;
+    const profit = tradeData.profit;
 
     // ✅ Construct the Telegram message (proper formatting)
     const message = `
