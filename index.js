@@ -1631,24 +1631,22 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Convert values safely to prevent errors
-             const { token, buyOn, sellOn, buyAmount, sellAmount, profit } = detectArbitrageOpportunities[0];
-
-    // ✅ Send formatted data to Telegram
-    await sendTelegramTradeAlert({
-        title: "🚀 Arbitrage Trade Alert",
-        message: `
-             🚀 **Arbitrage Trade Alert** 🚀
-             💰 **Buy Network:** ${buyOn}
-              📌 **Token:** ${token}
-              💵 **Buy Amount:** ${buyAmount} USDC
-               📈 **Sell Network:** ${sellOn}
-               💵 **Sell Amount:** ${sellAmount} USDC
-               ✅ **Profit:** ${profit} USDC
-  `
-             });
-     console.log("✅ Telegram trade alert sent successfully.");
-   
-            console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
+                    detectArbitrageOpportunities.forEach(async (trade) => {
+                                             const message = `
+                                  🚀 **Arbitrage Trade Alert** 🚀
+                                 💰 **Buy Network:** ${trade.buyOn}
+                                 📌 **Token:** ${trade.token}
+                                 💵 **Buy Amount:** ${trade.buyAmount} USDC
+                                 📈 **Sell Network:** ${trade.sellOn}
+                                 💵 **Sell Amount:** ${trade.sellAmount} USDC
+                                 ✅ **Profit:** ${trade.profit} USDC
+                             `;
+    
+                   await sendTelegramTradeAlert({ title: "🚀 Arbitrage Trade Alert", message });
+                  });
+ 
+               console.log("✅ Telegram trade alert sent successfully.");
+               console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
 
             try {
                 const buyNetwork = bestTrade.buyOn.toUpperCase();
@@ -1761,16 +1759,22 @@ async function executeArbitrage() {
                 // ✅ Execute Swap
                 await executeSwap(tradeData);
                 // ✅ Notify via Telegram
-                await sendTelegramTradeAlert({
-                       title: "🚀 Arbitrage Trade Alert",
-                       message: `💰 **Buy Network:** ${buyOn}
-                       📌 **Token:** ${token}
-                       💵 **Buy Amount:** ${buyAmount} USDC
-                       📈 **Sell Network:** ${sellOn}
-                       💵 **Sell Amount:** ${sellAmount} USDC
-                       ✅ **Profit:** ${profit} USDC`
+                // ✅ Send execution data to Telegram
+            await sendTelegramTradeAlert({
+                     title: "🚀 Arbitrage Execution Alert",
+                  message: `
+                       🚀 **Arbitrage Execution Alert** 🚀
+                       💰 **Buy Network:** ${tradeData.buyOn}
+                       📌 **Token:** ${tradeData.token}
+                       💵 **Buy Amount:** ${tradeData.buyAmount} USDC
+                       📈 **Sell Network:** ${tradeData.sellOn}
+                       💵 **Sell Amount:** ${tradeData.sellAmount} USDC
+                       🏦 **Loan Request:** ${tradeData.netLoanRequest} ${tradeData.token}
+                       🔗 **Token Address:** ${tradeData.tokenAddress}
+                     `
                       });
-                console.log("✅ Trade Executed Successfully!");
+
+                console.log("✅ Trade Data Sent to Telegram:", tradeData);
 
             } catch (error) {
                 console.error("❌ Error executing arbitrage trade:", error);
