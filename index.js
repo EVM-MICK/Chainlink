@@ -1631,7 +1631,7 @@ async function executeArbitrage() {
             }
             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
              // ✅ Convert values safely to prevent errors
-                    detectArbitrageOpportunities.forEach(async (trade) => {
+                    opportunities.forEach(async (trade) => {
                                              const message = `
                                   🚀 **Arbitrage Trade Alert** 🚀
                                  💰 **Buy Network:** ${trade.buyOn}
