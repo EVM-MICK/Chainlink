@@ -700,8 +700,6 @@ async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
 }
 
 // 🚀 Telegram Notification
-const axios = require("axios");
-
 async function sendTelegramTradeAlert(tradeDetails) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
