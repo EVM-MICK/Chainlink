@@ -700,6 +700,8 @@ async function rateLimitedRequest(fn, retries = 3, delay = RETRY_DELAY) {
 }
 
 // 🚀 Telegram Notification
+const axios = require("axios");
+
 async function sendTelegramTradeAlert(tradeDetails) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -718,21 +720,35 @@ async function sendTelegramTradeAlert(tradeDetails) {
         buyAmount = "0",
         sellAmount = "0",
         profit = "0",
+        optimizedWbtcAmount = "0",
+        orderSplits = [],
     } = tradeDetails;
 
     // ✅ Ensure numeric values are correctly formatted
     const formattedBuyAmount = parseFloat(buyAmount).toFixed(2);
     const formattedSellAmount = parseFloat(sellAmount).toFixed(2);
     const formattedProfit = parseFloat(profit).toFixed(2);
+    const formattedWbtcAmount = parseFloat(optimizedWbtcAmount).toFixed(8);
+
+    // ✅ Format limit order details if available
+    let orderDetails = "";
+    if (orderSplits.length > 0) {
+        orderDetails = `\n🔹 **Limit Order Details:**\n`;
+        orderSplits.forEach((order, index) => {
+            orderDetails += `   📌 Order ${index + 1}: **${order.splitAmount} USDC** → **${order.expectedWbtc} WBTC** @ ${order.price} \n`;
+        });
+    }
 
     // ✅ Construct message correctly
     const message = `
-title: "✅ Arbitrage Trade Completed!",
-                    message: `🏆 Successfully completed arbitrage trade!
-                    ✅ Bought ${bestTrade.buyAmount} USDC of ${bestTrade.token} on ${bestTrade.buyOn}
-                    ✅ Sold ${bestTrade.sellAmount} of ${bestTrade.token} on ${bestTrade.sellOn}
-                    💰 Profit: $${bestTrade.profit}`
-    `;
+🚀 **Arbitrage Trade Executed!**  
+📍 **Trade Summary**  
+✅ **Bought:** ${formattedBuyAmount} USDC → ${formattedWbtcAmount} WBTC on *${buyOn}*  
+✅ **Sold:** ${formattedSellAmount} WBTC → USDC on *${sellOn}*  
+💰 **Profit:** $${formattedProfit}  
+${orderDetails}
+🔄 **Trade executed successfully!**
+    `.trim();
 
     if (!botToken || !chatId) {
         console.error("❌ Telegram bot token or chat ID is missing. Cannot send trade alert.");
@@ -742,7 +758,8 @@ title: "✅ Arbitrage Trade Completed!",
     try {
         const response = await axios.post(url, {
             chat_id: chatId,
-            text: message.trim(), // ✅ Ensure proper formatting
+            text: message,
+            parse_mode: "Markdown",
         });
 
         console.log("✅ Telegram trade alert sent successfully:", response.data);
@@ -750,6 +767,7 @@ title: "✅ Arbitrage Trade Completed!",
         console.error("❌ Failed to send Telegram trade alert:", error.message);
     }
 }
+
 
 
 // Error Handling and Notifications
