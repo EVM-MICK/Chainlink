@@ -587,7 +587,7 @@ async function fetchTokenPrices(networkId, tokenAddresses) {
         console.error(`❌ No valid token addresses for network ${networkId}. Skipping request.`);
         return { networkId, prices: {} };
     }
-
+    
     // ✅ Ensure addresses are properly formatted in URL
     const tokenList = tokenAddresses.filter(Boolean).map(addr => addr.toLowerCase()).join(",");
     const url = `${API_BASE_URL}/${networkId}/${tokenList}`;
@@ -719,6 +719,7 @@ async function sendTelegramTradeAlert(tradeDetails) {
         sellAmount = "0",
         profit = "0",
         optimizedWbtcAmount = "0",
+        spotPrice = "0",
         orderSplits = [],
     } = tradeDetails;
 
@@ -741,8 +742,8 @@ async function sendTelegramTradeAlert(tradeDetails) {
     const message = `
 🚀 **Arbitrage Trade Executed!**  
 📍 **Trade Summary**  
-✅ **Bought:** ${formattedBuyAmount} USDC → ${formattedWbtcAmount} WBTC on *${buyOn}*  
-✅ **Sold:** ${formattedSellAmount} WBTC → USDC on *${sellOn}*  
+✅ **BUYING:** ${formattedBuyAmount} USDC → ${formattedWbtcAmount} WBTC on *${buyOn}*  
+✅ **SELLING:** ${formattedSellAmount} WBTC → USDC on *${sellOn}*  
 💰 **Profit:** $${formattedProfit}  
 ${orderDetails}
 🔄 **Trade executed successfully!**
@@ -1021,149 +1022,125 @@ function convertToWei(amount, token) {
 
 // 🚀 Detect Arbitrage Opportunities
 
-// async function detectArbitrageOpportunities() {
-//     console.log("🔍 Detecting arbitrage opportunities on Uniswap, Sushiswap, Curve, and Balancer...");
-
-//     const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f";
-//     const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831"; // USDC on Arbitrum
-//     const NETWORK_ID = 42161; // Arbitrum
-//     const CAPITAL_USDC = 150000; // Fixed trading capital
-
-//     const dexProtocols = {
-//         uniswap: "ARBITRUM_UNISWAP_V3",
-//         sushiswap: "ARBITRUM_SUSHISWAP",
-//         curve: "ARBITRUM_CURVE",
-//         balancer: "ARBITRUM_BALANCER_V2",
-//     };
-
-//     // ✅ Fetch Prices from All 4 DEXs
-//     const prices = await Promise.all([
-//         fetchSwapQuote(NETWORK_ID, WBTC, USDC, 1, dexProtocols.uniswap),
-//         fetchSwapQuote(NETWORK_ID, WBTC, USDC, 1, dexProtocols.sushiswap),
-//         fetchSwapQuote(NETWORK_ID, WBTC, USDC, 1, dexProtocols.curve),
-//         fetchSwapQuote(NETWORK_ID, WBTC, USDC, 1, dexProtocols.balancer),
-//     ]);
-
-//     const priceData = {
-//         uniswap: prices[0],
-//         sushiswap: prices[1],
-//         curve: prices[2],
-//         balancer: prices[3],
-//     };
-
-//     if (Object.values(priceData).some(price => price === null)) {
-//         console.error("❌ Missing price data from one or more DEXs. Skipping arbitrage detection.");
-//         return [];
-//     }
-
-//     console.log("✅ Fetched Prices:", priceData);
-
-//     let bestTrade = null;
-//     let maxProfit = 0;
-
-//     // ✅ Find the Best Buy and Sell DEX Combination
-//     for (let [buyDex, buyPrice] of Object.entries(priceData)) {
-//         for (let [sellDex, sellPrice] of Object.entries(priceData)) {
-//             if (buyDex === sellDex) continue; // Skip same DEX trades
-
-//             const tokensBought = CAPITAL_USDC / buyPrice;
-//             const sellAmount = tokensBought * sellPrice;
-//             const profit = sellAmount - CAPITAL_USDC;
-//             const profitMargin = (profit / CAPITAL_USDC) * 100;
-
-//             console.log(`🔄 ${buyDex} → ${sellDex} | Buy: $${buyPrice.toFixed(2)} | Sell: $${sellPrice.toFixed(2)} | Profit: $${profit.toFixed(2)} (${profitMargin.toFixed(2)}%)`);
-
-//             if (profit > 150) { // ✅ Minimum profit threshold (adjustable)
-//                 if (profit > maxProfit) {
-//                     maxProfit = profit;
-//                     bestTrade = {
-//                         token: "WBTC",
-//                         buyOn: buyDex,
-//                         sellOn: sellDex,
-//                         buyAmount: CAPITAL_USDC.toFixed(2),
-//                         sellAmount: sellAmount.toFixed(2),
-//                         profit: profit.toFixed(2),
-//                         profitMargin: profitMargin.toFixed(2),
-//                     };
-//                 }
-//             }
-//         }
-//     }
-
-//     if (bestTrade) {
-//         console.log(`🚀 Best Arbitrage Found! Buy on ${bestTrade.buyOn} at $${bestTrade.buyAmount}, Sell on ${bestTrade.sellOn} at $${bestTrade.sellAmount}. Profit: $${bestTrade.profit}`);
-//         return [bestTrade];
-//     } else {
-//         console.log("⚠️ No profitable arbitrage opportunity at the moment.");
-//         return [];
-//     }
-// }
-
 // 📡 Fetch a live swap quote from USDC → WBTC using 1inch API
 async function getExpectedWbtc(usdcAmount) {
-  console.log(`📡 Fetching WBTC quote for ${usdcAmount} USDC...`);
-  try {
-    const response = await axios.get(`https://api.1inch.dev/swap/v6.0/${NETWORK_ID}/quote`, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      params: {
-        src: USDC,
-        dst: WBTC,
-        amount: ethers.utils.parseUnits(usdcAmount.toString(), 6).toString()
-      }
-    });
-    const expectedWbtc = parseFloat(ethers.utils.formatUnits(response.data.dstAmount, 8));
-    console.log(`✅ Expected WBTC from 1inch: ${expectedWbtc}`);
-    return expectedWbtc;
-  } catch (error) {
-    console.error("❌ Error fetching USDC→WBTC quote:", error.response?.data || error.message);
+    console.log(`📡 Fetching WBTC and USDC market prices for ${usdcAmount} USDC...`);
+
+    const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+    const config = {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        params: { currency: "USD" }
+    };
+
+    let retries = 5;
+    let delay = 1000; // Start with 1-second delay
+
+    while (retries > 0) {
+        try {
+            // ✅ Fetch WBTC & USDC market prices
+            const response = await axios.get(url, config);
+            const prices = response.data;
+
+            if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
+
+            const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
+            const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
+
+            if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
+
+            console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
+
+            // ✅ Calculate spot price: WBTC/USD ÷ USDC/USD
+            let spotPrice = wbtcPrice / usdcPrice;
+            console.log(`🔹 Spot WBTC Price: ${spotPrice}`);
+
+            // ✅ Adjust price by subtracting 0.010% (discounted buy price)
+            let adjustedBuyPrice = spotPrice * (1 - 0.0001);
+            console.log(`🔹 Adjusted Buy Price (after -0.010%): ${adjustedBuyPrice}`);
+
+            // ✅ Calculate expected WBTC to receive (150,000 USDC ÷ adjusted price)
+            let expectedWbtc = usdcAmount / adjustedBuyPrice;
+            console.log(`✅ Expected WBTC to Receive: ${expectedWbtc}`);
+
+            return { expectedWbtc, spotPrice }; // ✅ Return values for `executeSwap()`
+
+        } catch (error) {
+            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
+            retries--;
+            if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
     return null;
-  }
 }
 
 // 📡 Check the USDC output when swapping WBTC back to USDC
 async function validateWbtcToUsdc(wbtcAmount) {
-  console.log(`📡 Checking USDC output for ${wbtcAmount} WBTC...`);
-  try {
-    const response = await axios.get(`https://api.1inch.dev/swap/v6.0/${NETWORK_ID}/quote`, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      params: {
-        src: WBTC,
-        dst: USDC,
-        amount: ethers.utils.parseUnits(wbtcAmount.toString(), 8).toString()
-      }
-    });
-    const expectedUsdc = parseFloat(ethers.utils.formatUnits(response.data.dstAmount, 6));
-    console.log(`✅ Expected USDC from WBTC: ${expectedUsdc}`);
-    return expectedUsdc;
-  } catch (error) {
-    console.error("❌ Error fetching WBTC→USDC quote:", error.response?.data || error.message);
+    console.log(`📡 Checking USDC output for ${wbtcAmount} WBTC...`);
+
+    const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+    const config = {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        params: { currency: "USD" }
+    };
+
+    let retries = 5;
+    let delay = 1000; // Start with 1-second delay
+
+    while (retries > 0) {
+        try {
+            // ✅ Fetch real-time WBTC & USDC prices
+            const response = await axios.get(url, config);
+            const prices = response.data;
+
+            if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
+
+            const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
+            const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
+
+            if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
+
+            console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
+
+            // ✅ Calculate the spot price of WBTC in USDC
+            let spotPrice = wbtcPrice / usdcPrice;
+            console.log(`🔹 Spot WBTC Price in USDC: ${spotPrice}`);
+
+            // ✅ Add +0.16% increase for selling price
+            let adjustedSellPrice = spotPrice * (1 + 0.0016);
+            console.log(`🔹 Adjusted Sell Price (after +0.16%): ${adjustedSellPrice}`);
+
+            // ✅ Calculate expected USDC to receive (WBTC amount × adjusted price)
+            let expectedUsdc = wbtcAmount * adjustedSellPrice;
+            console.log(`✅ Expected USDC from WBTC: ${expectedUsdc}`);
+
+            return expectedUsdc;
+
+        } catch (error) {
+            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
+            retries--;
+            if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
     return null;
-  }
 }
+
+
 
 // 🔄 Optimize WBTC Amount Until USDC Output is Profitable
 async function optimizeWbtcAmount(usdcCapital) {
   let finalWbtc = await getExpectedWbtc(usdcCapital);
   if (!finalWbtc) return null;
-  
-  finalWbtc += MIN_EXTRA_WBTC; // Ensure slightly higher WBTC output
-
-  while (true) {
-    let expectedUsdc = await validateWbtcToUsdc(finalWbtc);
-    if (expectedUsdc >= usdcCapital) {
-      console.log(`✅ Profit Achieved: ${expectedUsdc} USDC > ${usdcCapital} USDC`);
-      return finalWbtc;
-    }
-    console.log(`🔄 Increasing WBTC for higher USDC output...`);
-    finalWbtc += 0.0002;
-  }
 }
 
 // 🚀 Create and submit multiple limit orders for faster execution
 async function createLimitOrders(maker, totalWbtcAmount, usdcTargetPrice) {
     console.log(`📡 Creating limit orders for ${totalWbtcAmount} WBTC...`);
     
-    const orderCount = 5; 
+    const orderCount = 1; 
     const splitAmount = totalWbtcAmount / orderCount;
     const orders = [];
 
@@ -1228,30 +1205,50 @@ async function signOrder(order, privateKey) {
 }
 
 // 🔥 Detect Arbitrage Opportunity
+
 async function detectArbitrageOpportunities() {
-  console.log("🔍 Detecting arbitrage opportunities on 1inch → Uniswap V3...");
+    console.log("🔍  Detecting arbitrage opportunities on 1inch → Inch-limit Order...");
 
-  try {
-    let finalWbtcAmount = await optimizeWbtcAmount(CAPITAL_USDC);
-    if (!finalWbtcAmount) return [];
+    try {
+        // ✅ Step 1: Calculate optimized WBTC amount for trade
+        let finalWbtcAmount = await optimizeWbtcAmount(CAPITAL_USDC);
+        if (!finalWbtcAmount) {
+            console.log("⚠️ No profitable trade found.");
+            return [];
+        }
+         let { expectedWbtc, spotPrice } = optimizedData;
 
-    let expectedUsdc = await validateWbtcToUsdc(finalWbtcAmount);
+        // ✅ Step 2: Validate final USDC output from selling WBTC
+        let expectedUsdc = await validateWbtcToUsdc(expectedWbtc);
 
-    return [{
-      token: "WBTC",
-      buyOn: "1inch",
-      sellOn: "Uniswap V3",
-      buyAmount: CAPITAL_USDC.toFixed(2),
-      sellAmount: expectedUsdc.toFixed(2),
-      profit: (expectedUsdc - CAPITAL_USDC).toFixed(2),
-      optimizedWbtcAmount: finalWbtcAmount.toFixed(8)
-    }];
+        // ✅ Step 3: Ensure profitability ($150 minimum profit)
+        let profit = expectedUsdc - CAPITAL_USDC;
+        if (profit < 150) {
+            console.log("⚠️ Trade not profitable. Skipping.");
+            return [];
+        }
 
-  } catch (error) {
-    console.error("❌ Error detecting arbitrage opportunities:", error);
-    return [];
-  }
+        console.log(`🚀 Profitable Trade Found! Expected Profit: $${profit.toFixed(2)}`);
+        // ✅ Step 4: Return trade details for execution, including spot price
+        return [{
+            token: "WBTC",
+            buyOn: "1inch-limit Order",
+            sellOn: "1inch-limit Order",
+            buyAmount: CAPITAL_USDC.toFixed(2),
+            sellAmount: expectedUsdc.toFixed(2),
+            profit: profit.toFixed(2),
+            optimizedWbtcAmount: expectedWbtc.toFixed(8),
+            spotPrice: spotPrice.toFixed(2) // Return spot price for comparison
+        }];
+
+
+    } catch (error) {
+        console.error("❌ Error detecting arbitrage opportunities:", error);
+        return [];
+    }
 }
+
+
 
 function convertFromWei(amountWei, token) {
     if (typeof token !== "string") {
@@ -1274,146 +1271,136 @@ function convertFromWei(amountWei, token) {
 
 
 // 🔹 Execute Arbitrage Trade via Smart Contracts
-
-/**
- * 🔥 **Arbitrage Execution Function**
- */
-
-// async function executeSwap(trade) {
-//     const { token, buyOn, sellOn, buyAmount, sellAmount } = trade;
-
-//     console.log(`⚡ Preparing Arbitrage Execution ⚡`);
-//     console.log(`BUY on ${buyOn}: ${buyAmount} USDC → ${token}`);
-//     console.log(`SELL on ${sellOn}: ${sellAmount} ${token} → USDC`);
-
-//     // ✅ Convert DEX names to protocol IDs
-//     const dexProtocols = {
-//         UNISWAP: "ARBITRUM_UNISWAP_V3",
-//         SUSHISWAP: "ARBITRUM_SUSHISWAP",
-//         CURVE: "ARBITRUM_CURVE_V2",
-//         BALANCER: "ARBITRUM_BALANCER_V2",
-//     };
-
-//     if (!dexProtocols[buyOn] || !dexProtocols[sellOn]) {
-//         console.error(`❌ Unsupported DEX: Buy on ${buyOn}, Sell on ${sellOn}.`);
-//         return;
-//     }
-
-//     // ✅ Get USDC & WBTC token addresses
-//     const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f";
-//     const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
-//     const NETWORK_ID = 42161; // Arbitrum
-
-//     // ✅ Generate calldata for buy & sell swaps
-//     const buyCalldata = await executeFlashLoanAndSwap(buyOn, USDC, WBTC, buyAmount, dexProtocols[buyOn]);
-//     const sellCalldata = await executeFlashLoanAndSwap(sellOn, WBTC, USDC, sellAmount, dexProtocols[sellOn]);
-
-//     if (!buyCalldata || !sellCalldata) {
-//         console.error("❌ Failed to generate calldata for swaps. Aborting trade.");
-//         return;
-//     }
-
-//     console.log("✅ Successfully generated calldata for buy & sell swaps.");
-
-//     // ✅ Convert buy amount to Wei (assuming 6 decimals for USDC)
-//     const buyAmountInWei = ethers.utils.parseUnits(buyAmount.toString(), 6).toString();
-
-//     // ✅ Execute smart contract flash loan & swaps
-//     try {
-//         console.log("🚀 Requesting Flash Loan & Executing Trades...");
-//         const tx = await smartContract.fn_RequestFlashLoan(
-//             USDC,            // Token to loan (USDC)
-//             buyAmountInWei,  // Amount in Wei
-//             buyCalldata,     // Buy swap calldata
-//             sellCalldata     // Sell swap calldata
-//         );
-
-//         await tx.wait();
-//         console.log("✅ Smart Contract Execution Confirmed!");
-
-//         // ✅ Notify Telegram after successful execution
-//         await sendTelegramTradeAlert({
-//             title: "✅ Arbitrage Trade Executed!",
-//             message: `🏆 Arbitrage trade executed successfully!
-//             ✅ Bought ${buyAmount} USDC of ${token} on ${buyOn}
-//             ✅ Sold ${sellAmount} ${token} on ${sellOn}
-//             💰 Profit: $${(sellAmount - buyAmount).toFixed(2)}`
-//         });
-
-//     } catch (error) {
-//         console.error("❌ Error executing smart contract trade:", error);
-//         await sendTelegramMessage("🚨 **Critical Error:** Trade execution failed. Manual intervention required.");
-//     }
-// }
-
 /**
  * 🔥 **Flash Loan Execution Function  🔥 Execute Swap using Flash Loan & Limit Orders**
  */
 
 async function executeSwap(bestTrade) {
-    const { token, buyOn, sellOn, buyAmount, sellAmount, optimizedWbtcAmount } = bestTrade;
+    const { token, buyOn, sellOn, buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
 
-    console.log(`⚡ Executing Arbitrage Swap:`);
-    console.log(`BUY on ${buyOn}: ${buyAmount} USDC → ${token}`);
-    console.log(`SELL on ${sellOn}: ${sellAmount} ${token} → USDC`);
+    console.log(`⚡ Executing Arbitrage Swap:`);  
+    console.log(`BUY on ${buyOn}: ${buyAmount} USDC → ${token}`);  
+    console.log(`SELL on ${sellOn}: ${sellAmount} ${token} → USDC`);  
+    console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);  
 
     try {
-        // ✅ Step 1: Request Flash Loan
+        // ✅ Step 1: Request Flash Loan Before Placing Limit Orders
         console.log("🚀 Requesting Flash Loan from smart contract...");
+        const buyCalldata = await generateSwapCalldata(USDC, WBTC, optimizedWbtcAmount, "1inch-limit Order");
+        if (!buyCalldata) {
+            console.error("❌ Failed to generate buy swap calldata.");
+            return false;
+        }
+
         const flashLoanTx = await smartContract.fn_RequestFlashLoan(
             USDC, 
             ethers.utils.parseUnits(buyAmount.toString(), 6), 
-            "0x" // Placeholder, calldata will be determined after loan is received
+            buyCalldata  
         );
         await flashLoanTx.wait();
-
-        console.log("✅ Flash Loan Successfully Requested! Listening for funds...");
+        console.log("✅ Flash Loan Successfully Requested! Waiting for loan funds...");
 
         // ✅ Step 2: Listen for Flash Loan Event
-        smartContract.on("FlashLoanReceived", async (asset, amount, premium, initiator) => {
+        smartContract.once("FlashLoanReceived", async (asset, amount, premium, initiator) => {
             console.log(`📡 Flash Loan Received: ${ethers.utils.formatUnits(amount, 6)} USDC with premium ${ethers.utils.formatUnits(premium, 6)}`);
 
-            // ✅ Step 3: Split capital into smaller amounts for limit orders
-            console.log("🔹 Splitting capital into smaller trades...");
-            const orderParts = 5;  // Number of limit orders
-            const splitAmount = buyAmount / orderParts; // Divide USDC into parts
-            
-            // ✅ Step 4: Create limit orders for buying WBTC in parts
-            console.log(`📡 Creating ${orderParts} limit orders...`);
+            // ✅ Step 3: Create Buy Limit Orders for WBTC (at lower than market price)
+            console.log(`📡 Creating Limit Orders for ${optimizedWbtcAmount} WBTC...`);
             const limitOrderResponse = await createLimitOrders(WALLET_ADDRESS, optimizedWbtcAmount, buyAmount);
-            if (!limitOrderResponse) throw new Error("❌ Failed to submit limit orders.");
-
+            if (!limitOrderResponse) {
+                console.error("❌ Failed to submit buy limit orders.");
+                return false;
+            }
             console.log("✅ Limit Orders Submitted Successfully! Waiting for execution...");
 
-            // ✅ Step 5: Monitor order fills & Track final WBTC received
-            let totalWbtcReceived = 0;
-            for (const order of limitOrderResponse.orders) {
-                smartContract.on("OrderFilled", async (filledAmount) => {
-                    console.log(`📡 Order Filled: ${filledAmount} WBTC`);
-                    totalWbtcReceived += parseFloat(filledAmount);
-                    
-                    // ✅ Step 6: Once all orders are filled, swap WBTC → USDC
-                    if (totalWbtcReceived >= optimizedWbtcAmount) {
-                        console.log(`✅ Total WBTC Received: ${totalWbtcReceived}, Executing Final Swap...`);
-                        
-                        // ✅ Step 7: Swap WBTC for USDC on Uniswap V3
-                        const sellCalldata = await generateSwapCalldata(WBTC, USDC, totalWbtcReceived, "Uniswap V3");
-                        if (!sellCalldata) throw new Error("❌ Failed to generate sell swap calldata.");
-
-                        // ✅ Step 8: Execute swap with smart contract
-                        console.log("🚀 Sending swap execution request to smart contract...");
-                        const swapTx = await smartContract.executeSwap(sellCalldata);
-                        await swapTx.wait();
-                        
-                        console.log("✅ Arbitrage Trade Completed Successfully! Profit Secured.");
-                    }
+            // ✅ Step 4: Listen for Buy Order Fill Event
+            smartContract.once("OrderFilled", async (filledAmount) => {
+                console.log(`📡 Buy Order Filled: ${filledAmount} WBTC`);
+                await sendTelegramTradeAlert({
+                    title: "✅ Buy Order Filled!",
+                    message: `Bought ${filledAmount} WBTC successfully. Preparing to sell for USDC.`
                 });
-            }
+
+                // ✅ Step 5: Fetch Current Spot Price Before Selling
+                let updatedData = await optimizeWbtcAmount(150000);
+                if (!updatedData) {
+                    console.error("❌ Failed to fetch updated market data.");
+                    return false;
+                }
+                let newSpotPrice = updatedData.spotPrice;
+
+                // ✅ Step 6: Compare New Spot Price to Initial Spot Price
+                if (newSpotPrice < spotPrice) {
+                    console.warn(`⚠️ Market price dropped: ${newSpotPrice} < ${spotPrice}. Adjusting sell order...`);
+                    spotPrice = newSpotPrice; // Use the latest price to prevent selling at a loss
+                }
+
+                // ✅ Step 7: Ensure Sell Order is Placed Above Spot Price
+                let sellPrice = spotPrice * 1.0016; // 0.16% increase
+                let expectedUsdc = sellPrice * filledAmount;
+
+                console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC (Above ${spotPrice})`);
+
+                // ✅ Step 8: Generate Sell Order on 1inch Limit Order
+                const sellCalldata = await generateSwapCalldata(WBTC, USDC, filledAmount, "1inch-limit Order");
+                if (!sellCalldata) {
+                    console.error("❌ Failed to generate sell swap calldata.");
+                    return false;
+                }
+
+                // ✅ Step 9: Execute Sell Order via Smart Contract
+                console.log("🚀 Executing Sell Order...");
+                const sellTx = await smartContract.executeSwap(sellCalldata);
+                await sellTx.wait();
+
+                // ✅ Step 10: Listen for Sell Order Fill Event
+                smartContract.once("OrderFilled", async (receivedUsdc) => {
+                    console.log(`📡 Sell Order Filled: ${receivedUsdc} USDC`);
+                    await sendTelegramTradeAlert({
+                        title: "✅ Sell Order Filled!",
+                        message: `Sold WBTC for ${receivedUsdc} USDC. Repaying flash loan...`
+                    });
+
+                    // ✅ Step 11: Ensure Flash Loan Repayment
+                    let finalUsdcReceived = parseFloat(receivedUsdc);
+                    if (finalUsdcReceived < buyAmount) {
+                        console.log("❌ Not enough USDC received. Trade Reverted.");
+                        return false;
+                    }
+
+                    console.log(`✅ Arbitrage Trade Completed Successfully! Profit: $${finalUsdcReceived - buyAmount}`);
+
+                    // ✅ Step 12: Notify Telegram & Return Success
+                    await sendTelegramTradeAlert({
+                        token: "WBTC",
+                        buyOn: "1inch-limit Order",
+                        sellOn: "1inch-limit Order",
+                        buyAmount,
+                        sellAmount: finalUsdcReceived.toFixed(2),
+                        profit: (finalUsdcReceived - buyAmount).toFixed(2)
+                    });
+
+                    return true;
+                });
+
+                // ✅ Step 13: If Sell Order Fails, Retry Trade
+                smartContract.once("OrderFailed", async () => {
+                    console.log("❌ Order Execution Failed. Retrying...");
+                    await executeSwap(bestTrade);
+                });
+            });
+
+            // ✅ Step 14: If Buy Order Fails, Retry Trade
+            smartContract.once("OrderFailed", async () => {
+                console.log("❌ Buy Order Failed. Retrying...");
+                await executeSwap(bestTrade);
+            });
         });
 
     } catch (error) {
         console.error("❌ Error executing arbitrage trade:", error);
         await sendTelegramMessage("🚨 **Critical Error:** Flashloan execution failed. Manual intervention required.");
+        return false;
     }
 }
 
@@ -1550,55 +1537,6 @@ async function notifyMonitoringSystem(message) {
   }
 }
 
-
-// async function executeArbitrage() {
-//     console.log("🔍 Starting continuous arbitrage detection...");
-
-//     while (true) {
-//         console.log("🔄 Detecting arbitrage opportunities...");
-
-//         // ✅ Detect arbitrage using updated logic
-//         const opportunities = await detectArbitrageOpportunities();
-
-//         if (!opportunities.length) {
-//             console.log("⚠️ No profitable arbitrage opportunities found. Retrying...");
-//             await delay(5000);
-//             continue;
-//         }
-
-//         for (const bestTrade of opportunities) {
-//             if (!bestTrade?.buyOn || !bestTrade?.sellOn || !bestTrade?.token || !bestTrade?.buyAmount || !bestTrade?.sellAmount || !bestTrade?.profit) {
-//                 console.error("❌ Invalid trade data. Skipping.");
-//                 continue;
-//             }
-
-//             console.log("🚀 Preparing Telegram Alert with Data:", bestTrade);
-
-//             // ✅ Notify Telegram about arbitrage opportunity
-//             await sendTelegramTradeAlert(bestTrade);
-//             console.log("✅ Telegram trade alert sent.");
-
-//             console.log(`🚀 Executing Trade: Buy on ${bestTrade.buyOn}, Sell on ${bestTrade.sellOn}`);
-
-//             try {
-//                 // ✅ Execute swap with smart contract
-//                 await executeSwap(bestTrade);
-
-//                 // ✅ Notify Telegram after successful trade execution
-//                 await sendTelegramTradeAlert(bestTrade);
-
-//                 console.log("✅ Arbitrage Trade Executed Successfully!");
-
-//             } catch (error) {
-//                 console.error("❌ Error executing arbitrage trade:", error);
-//                 await sendTelegramMessage("🚨 **Critical Error:** Arbitrage execution failed. Manual intervention required.");
-//             }
-//         }
-
-//         await delay(1000); // Respect 1inch 1 RPS limit
-//     }
-// }
-
 async function executeArbitrage() {
     console.log("🔍 Starting continuous arbitrage detection...");
 
@@ -1615,7 +1553,7 @@ async function executeArbitrage() {
         }
 
         for (const bestTrade of opportunities) {
-            if (!bestTrade?.buyOn || !bestTrade?.sellOn || !bestTrade?.token || !bestTrade?.buyAmount || !bestTrade?.sellAmount || !bestTrade?.profit || !bestTrade?.optimizedWbtcAmount) {
+            if (!bestTrade?.buyOn || !bestTrade?.sellOn || !bestTrade?.token || !bestTrade?.buyAmount || !bestTrade?.sellAmount || !bestTrade?.profit || !bestTrade?.optimizedWbtcAmount || !bestTrade?.spotPrice ) {
                 console.error("❌ Invalid trade data. Skipping.");
                 continue;
             }
@@ -1630,12 +1568,15 @@ async function executeArbitrage() {
 
             try {
                 // ✅ Step 3: Execute swap with smart contract using flash loan
-                await executeSwap(bestTrade);
+                const success = await executeSwap(bestTrade);
 
-                // ✅ Step 4: Notify Telegram after successful trade execution
-                await sendTelegramTradeAlert(bestTrade);
-
-                console.log("✅ Arbitrage Trade Executed Successfully!");
+                if (success) {
+                    // ✅ Step 4: Notify Telegram after successful trade execution
+                    await (bestTrade);
+                    console.log("✅ Arbitrage Trade Executed Successfully!");
+                } else {
+                    console.log("❌ Trade Execution Failed. Restarting Detection...");
+                }
 
             } catch (error) {
                 console.error("❌ Error executing arbitrage trade:", error);
