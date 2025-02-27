@@ -258,10 +258,10 @@ const permit2Contract = new web3.eth.Contract(permit2Abi, PERMIT2_ADDRESS);
 const app = express();
 app.use(express.json());
 
-let fetch;
-(async () => {
-  fetch = (await import("node-fetch")).default;
-})();
+// let fetch;
+// (async () => {
+//   fetch = (await import("node-fetch")).default;
+// })();
 
 
 
@@ -345,15 +345,15 @@ function log(message, level = 'info') {
 }
 
 // Connect to Redis
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('Connected to Redis');
-  } catch (err) {
-    console.error('Error connecting to Redis:', err);
-    process.exit(1);
-  }
-})();
+// (async () => {
+//   try {
+//     await redisClient.connect();
+//     console.log('Connected to Redis');
+//   } catch (err) {
+//     console.error('Error connecting to Redis:', err);
+//     process.exit(1);
+//   }
+// })();
 
 redisClient.on('error', (err) => {
   console.error('Redis connection error:', err);
