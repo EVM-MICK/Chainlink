@@ -171,15 +171,15 @@ const provider = new JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
 const REDIS_PORT = process.env.REDIS_PORT || 13219;
-const REDIS_USERNAME = process.env.REDIS_USERNAME || 'default';
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || '';
+const REDIS_USERNAME = process.env.REDIS_USERNAME || 'mc-1JAiM';
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7';
 const REDIS_TTL = 60; // Cache data for 1 minute
 const redisClient = createClient({
-  username: REDIS_USERNAME,
-  password: REDIS_PASSWORD,
+  username: 'mc-1JAiM',
+  password: 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7',
   socket: {
-    host: REDIS_HOST,
-    port: REDIS_PORT,
+    host: 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com',
+    port: 13219,
   },
 });
 
