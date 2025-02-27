@@ -86,7 +86,6 @@ const WALLET_ADDRESS = process.env.WALLET_ADDRESS_MAIN;
 const providerPolygon = new ethers.WebSocketProvider(process.env.POLYGON_WS);
 const providerArbitrum = new ethers.WebSocketProvider(process.env.ARBITRUM_WS);
 
-
 const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
 
@@ -175,13 +174,22 @@ const REDIS_USERNAME = process.env.REDIS_USERNAME || 'mc-1JAiM';
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7';
 const REDIS_TTL = 60; // Cache data for 1 minute
 const redisClient = createClient({
-  username: 'mc-1JAiM',
-  password: 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7',
-  socket: {
-    host: 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com',
-    port: 13219,
-  },
+    username: 'default',
+    password: '*******',
+    socket: {
+        host: 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com',
+        port: 13219
+    }
 });
+
+// createClient({
+//   username: 'mc-1JAiM',
+//   password: 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7',
+//   socket: {
+//     host: 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com',
+//     port: 13219,
+//   },
+// });
 
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const API_BASE_URL1 = `https://api.1inch.dev/swap/v6.0`;
@@ -337,15 +345,16 @@ function log(message, level = 'info') {
 }
 
 // Connect to Redis
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('Connected to Redis');
-  } catch (err) {
-    console.error('Error connecting to Redis:', err);
-    process.exit(1);
-  }
-})();
+await redisClient.connect();
+// (async () => {
+//   try {
+//     await redisClient.connect();
+//     console.log('Connected to Redis');
+//   } catch (err) {
+//     console.error('Error connecting to Redis:', err);
+//     process.exit(1);
+//   }
+// })();
 
 redisClient.on('error', (err) => {
   console.error('Redis connection error:', err);
@@ -947,67 +956,6 @@ async function fetchSwapQuote(networkId, fromToken, toToken, amount, protocolToI
     return null;
 }
 
-
-// async function fetchSwapQuote(networkId, fromToken, toToken, amount) {
-//     console.log(`📡 Fetching swap quote on network ${networkId} for ${amount} ${fromToken} → ${toToken}...`);
-
-//     // ✅ Ensure token decimal mapping exists
-//     if (!TOKEN_DECIMALS[fromToken]) {
-//         console.error(`❌ Token decimal mapping missing for ${fromToken}`);
-//         return null;
-//     }
-
-//     if (!TOKEN_DECIMALS[toToken]) {
-//         console.error(`❌ Token decimal mapping missing for ${toToken}`);
-//         return null;
-//     }
-
-//     // ✅ Determine if amount is already in Wei (i.e., large number)
-//     let amountInWei;
-//     if (BigInt(amount) < BigInt(10 ** TOKEN_DECIMALS[fromToken])) {
-//         // Convert only if it's not already in Wei
-//         amountInWei = BigInt(Math.floor(amount * 10 ** TOKEN_DECIMALS[fromToken])).toString();
-//         console.log(`🔹 Converted Amount to Wei: ${amountInWei} (smallest unit)`);
-//     } else {
-//         // Assume amount is already in Wei
-//         amountInWei = amount.toString();
-//         console.log(`🔹 Amount is already in Wei: ${amountInWei}`);
-//     }
-
-//     const url = `${API_BASE_URL1}/${networkId}/quote`;
-
-//     const config = {
-//         headers: { "Authorization": "Bearer DAqqEXsx5pIazLLOf1QcjJu3KmQhB8pr" },
-//         params: {
-//             src: fromToken,
-//             dst: toToken,
-//             amount: amountInWei, // ✅ Correct field name and format
-//             complexityLevel: 3,
-//             parts: 100,
-//             mainRouteParts: 50,
-//             includeTokensInfo: false,
-//             includeProtocols: true,
-//             includeGas: true
-//         }
-//     };
-
-//     for (let attempt = 1; attempt <= 3; attempt++) {
-//         try {
-//             const response = await axios.get(url, config);
-//             if (response.data?.dstAmount) {
-//                 console.log(`✅ Swap Quote: Expected ${response.data.dstAmount} ${toToken}`);
-//                 return response.data.dstAmount;
-//             }
-//         } catch (error) {
-//             console.warn(`⚠️ Swap quote fetch attempt ${attempt} failed: ${error.response?.data?.error || error.message}. Retrying...`);
-//             await delay(2000 * attempt); // Exponential backoff
-//         }
-//     }
-
-//     console.error(`❌ Failed to fetch swap quote after 3 attempts.`);
-//     return null;
-// }
-
 function convertToWei(amount, token) {
     const tokenDecimals = TOKEN_DECIMALS[token.toLowerCase()];
     if (!tokenDecimals) {
@@ -1081,7 +1029,7 @@ async function getExpectedWbtc(usdcAmount) {
             return { expectedWbtc, spotPrice };
 
         } catch (error) {
-            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
+            console.error(`❌ Error fetching USDC/WBTC prices (Retries left: ${retries - 1}):`, error.message);
             retries--;
 
             if (retries > 0) {
@@ -1092,121 +1040,68 @@ async function getExpectedWbtc(usdcAmount) {
         }
     }
 
-    console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
+    console.error("❌ Failed to fetch valid USDC/WBTC prices after multiple attempts.");
     return null;
 }
 
 
-// async function getExpectedWbtc(usdcAmount) {
-//     console.log(`📡 Fetching WBTC and USDC market prices for ${usdcAmount} USDC...`);
-
-//     const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
-//     const config = {
-//         headers: { Authorization: `Bearer ${API_KEY}` },
-//         params: { currency: "USD" }
-//     };
-
-//     let retries = 5;
-//     let delay = 1000; // Start with 1-second delay
-
-//     while (retries > 0) {
-//         try {
-//             // ✅ Fetch WBTC & USDC market prices
-//             const response = await axios.get(url, config);
-//             const prices = response.data;
-
-//             if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
-
-//             const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
-//             const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
-
-//             if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
-
-//             console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
-
-//             // ✅ Calculate spot price: WBTC/USD ÷ USDC/USD
-//             let spotPrice = wbtcPrice / usdcPrice;
-//             console.log(`🔹 Spot WBTC Price: ${spotPrice}`);
-
-//             // ✅ Adjust price by subtracting 0.010% (discounted buy price)
-//             let adjustedBuyPrice = spotPrice * (1 - 0.0001);
-//             console.log(`🔹 Adjusted Buy Price (after -0.010%): ${adjustedBuyPrice}`);
-
-//             // ✅ Calculate expected WBTC to receive (150,000 USDC ÷ adjusted price)
-//             let expectedWbtc = usdcAmount / adjustedBuyPrice;
-//             console.log(`✅ Expected WBTC to Receive: ${expectedWbtc}`);
-
-//             return { expectedWbtc, spotPrice }; // ✅ Return values for `executeSwap()`
-
-//         } catch (error) {
-//             console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
-//             retries--;
-//             if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
-//         }
-//     }
-
-//     console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
-//     return null;
-// }
-
 // 📡 Check the USDC output when swapping WBTC back to USDC
-async function validateWbtcToUsdc(wbtcAmount) {
-    console.log(`📡 Checking USDC output for ${wbtcAmount} WBTC...`);
-    const NETWORK_ID = 42161; // Arbitrum
-    const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
-    const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
+async function validateWbtcToUsdc(wbtcAmount1) {
+    console.log(`📡 Checking USDC output for ${wbtcAmount1} WBTC...`);
+    const NETWORK_ID1 = 42161; // Arbitrum
+    const USDC1 = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
+    const WBTC1 = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
 
-    const tokenList = [WBTC, USDC].join(",");
-    const url = `https://api.1inch.dev/price/v1.1/${NETWORK_ID}/${tokenList}`;
+    const tokenList1 = [WBTC1, USDC1].join(",");
+    const url1 = `https://api.1inch.dev/price/v1.1/${NETWORK_ID1}/${tokenList1}`;
 
-    const config = {
+    const config1 = {
         headers: { Authorization: `Bearer ${API_KEY}` },
         params: { currency: "USD" }
     };
 
-    let retries = 5;
-    let delay = 1000; // Start with 1-second delay
+    let retries1 = 5;
+    let delay1 = 1000; // Start with 1-second delay
 
-    while (retries > 0) {
+    while (retries1 > 0) {
         try {
             // ✅ Fetch real-time WBTC & USDC prices
-            const response = await axios.get(url, config);
-            const prices = response.data;
+            const response1 = await axios.get(url1, config1);
+            const prices1 = response1.data;
 
-            if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
+            if (!prices1 || !prices1.prices) throw new Error("Invalid response from 1inch API.");
 
-            const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
-            const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
+            const wbtcPrice1 = parseFloat(prices.prices[WBTC1]); // WBTC price in USD
+            const usdcPrice1 = parseFloat(prices.prices[USDC1]); // USDC price in USD
 
-            if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
+            if (!wbtcPrice1 || !usdcPrice1) throw new Error("Missing WBTC or USDC price data.");
 
-            console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
+            console.log(`✅ WBTC Price: $${wbtcPrice1} | USDC Price: $${usdcPrice1}`);
 
             // ✅ Calculate the spot price of WBTC in USDC
-            let spotPrice = wbtcPrice / usdcPrice;
-            console.log(`🔹 Spot WBTC Price in USDC: ${spotPrice}`);
+            let spotPrice1 = wbtcPrice1 / usdcPrice1;
+            console.log(`🔹 Spot WBTC Price in USDC: ${spotPrice1}`);
 
             // ✅ Add +0.16% increase for selling price
-            let adjustedSellPrice = spotPrice * (1 + 0.0016);
-            console.log(`🔹 Adjusted Sell Price (after +0.16%): ${adjustedSellPrice}`);
+            let adjustedSellPrice1 = spotPrice1 * (1 + 0.0016);
+            console.log(`🔹 Adjusted Sell Price (after +0.16%): ${adjustedSellPrice1}`);
 
             // ✅ Calculate expected USDC to receive (WBTC amount × adjusted price)
-            let expectedUsdc = wbtcAmount * adjustedSellPrice;
-            console.log(`✅ Expected USDC from WBTC: ${expectedUsdc}`);
+            let expectedUsdc1 = wbtcAmount1 * adjustedSellPrice1;
+            console.log(`✅ Expected USDC from WBTC: ${expectedUsdc1}`);
 
-            return expectedUsdc;
+            return expectedUsdc1;
 
         } catch (error) {
-            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
-            retries--;
-            if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
+            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries1 - 1}):`, error.message);
+            retries1--;
+            if (retries1 > 0) await new Promise(resolve1 => setTimeout(resolve1, delay1));
         }
     }
 
     console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
     return null;
 }
-
 
 
 // 🔄 Optimize WBTC Amount Until USDC Output is Profitable
