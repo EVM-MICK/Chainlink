@@ -1004,8 +1004,8 @@ async function getExpectedWbtc(usdcAmount) {
             console.log(`✅ Raw API Response:`, responseData);
 
             // ✅ Extract WBTC & USDC prices from response
-            const wbtcPrice = parseFloat(responseData[WBTC]?.price);
-            const usdcPrice = parseFloat(responseData[USDC]?.price);
+            const wbtcPrice = parseFloat(responseData[WBTC]); // ✅ Extract price directly
+            const usdcPrice = parseFloat(responseData[USDC]);
 
             if (!wbtcPrice || !usdcPrice) {
                 throw new Error("Missing WBTC or USDC price data.");
@@ -1067,11 +1067,12 @@ async function validateWbtcToUsdc(wbtcAmount1) {
             // ✅ Fetch real-time WBTC & USDC prices
             const response1 = await axios.get(url1, config1);
             const prices1 = response1.data;
-
-            if (!prices1 || !prices1.prices) throw new Error("Invalid response from 1inch API.");
-
-            const wbtcPrice1 = parseFloat(prices.prices[WBTC1]); // WBTC price in USD
-            const usdcPrice1 = parseFloat(prices.prices[USDC1]); // USDC price in USD
+         if (!prices1 || typeof prices1 !== "object") {
+                throw new Error("Invalid API response structure.");
+            }
+            
+              const wbtcPrice1 = parseFloat(prices1[WBTC1]); // ✅ Extract price directly
+              const usdcPrice1 = parseFloat(prices1[USDC1]);
 
             if (!wbtcPrice1 || !usdcPrice1) throw new Error("Missing WBTC or USDC price data.");
 
