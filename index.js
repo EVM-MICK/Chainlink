@@ -172,7 +172,7 @@ const wallet = new Wallet(process.env.PRIVATE_KEY, provider);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
 const REDIS_PORT = process.env.REDIS_PORT || 13219;
 const REDIS_USERNAME = process.env.REDIS_USERNAME || 'default';
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || 'A03DC9FzAQu3fixrUEZXOj2BJx9oeIC7';
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || '';
 const REDIS_TTL = 60; // Cache data for 1 minute
 const redisClient = createClient({
   username: REDIS_USERNAME,
@@ -182,8 +182,6 @@ const redisClient = createClient({
     port: REDIS_PORT,
   },
 });
-
-//const nonce = await permit2Contract.nonces(wallet.address);
 
 const API_BASE_URL = `https://api.1inch.dev/price/v1.1`;
 const API_BASE_URL1 = `https://api.1inch.dev/swap/v6.0`;
@@ -1020,13 +1018,24 @@ function convertToWei(amount, token) {
     return BigInt(Math.floor(amount * 10 ** tokenDecimals));
 }
 
-// 🚀 Detect Arbitrage Opportunities
-
 // 📡 Fetch a live swap quote from USDC → WBTC using 1inch API
-async function getExpectedWbtc(usdcAmount) {
-    console.log(`📡 Fetching WBTC and USDC market prices for ${usdcAmount} USDC...`);
 
-    const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+/**
+ * Fetches market prices for WBTC and USDC, calculates spot price, and determines expected WBTC amount for given USDC.
+ * @param {number} usdcAmount - The amount of USDC to swap for WBTC.
+ * @returns {Promise<{expectedWbtc: number, spotPrice: number} | null>}
+ */
+async function getExpectedWbtc(usdcAmount) {
+    console.log(`📡 Fetching WBTC & USDC prices for ${usdcAmount} USDC...`);
+
+    // ✅ Format token addresses for API request
+    const NETWORK_ID = 42161; // Arbitrum
+    const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
+    const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
+
+    const tokenList = [WBTC, USDC].join(",");
+    const url = `https://api.1inch.dev/price/v1.1/${NETWORK_ID}/${tokenList}`;
+
     const config = {
         headers: { Authorization: `Bearer ${API_KEY}` },
         params: { currency: "USD" }
@@ -1037,37 +1046,49 @@ async function getExpectedWbtc(usdcAmount) {
 
     while (retries > 0) {
         try {
-            // ✅ Fetch WBTC & USDC market prices
+            // ✅ Fetch WBTC & USDC prices
             const response = await axios.get(url, config);
-            const prices = response.data;
+            const responseData = response.data;
 
-            if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
+            if (!responseData || typeof responseData !== "object") {
+                throw new Error("Invalid API response structure.");
+            }
 
-            const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
-            const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
+            console.log(`✅ Raw API Response:`, responseData);
 
-            if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
+            // ✅ Extract WBTC & USDC prices from response
+            const wbtcPrice = parseFloat(responseData[WBTC]?.price);
+            const usdcPrice = parseFloat(responseData[USDC]?.price);
+
+            if (!wbtcPrice || !usdcPrice) {
+                throw new Error("Missing WBTC or USDC price data.");
+            }
 
             console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
 
-            // ✅ Calculate spot price: WBTC/USD ÷ USDC/USD
+            // ✅ Calculate spot price: (WBTC/USD ÷ USDC/USD)
             let spotPrice = wbtcPrice / usdcPrice;
-            console.log(`🔹 Spot WBTC Price: ${spotPrice}`);
+            console.log(`🔹 Spot Price: ${spotPrice}`);
 
-            // ✅ Adjust price by subtracting 0.010% (discounted buy price)
+            // ✅ Adjust buy price (subtract 0.010% for better entry)
             let adjustedBuyPrice = spotPrice * (1 - 0.0001);
-            console.log(`🔹 Adjusted Buy Price (after -0.010%): ${adjustedBuyPrice}`);
+            console.log(`🔹 Adjusted Buy Price: ${adjustedBuyPrice}`);
 
-            // ✅ Calculate expected WBTC to receive (150,000 USDC ÷ adjusted price)
+            // ✅ Calculate expected WBTC amount
             let expectedWbtc = usdcAmount / adjustedBuyPrice;
             console.log(`✅ Expected WBTC to Receive: ${expectedWbtc}`);
 
-            return { expectedWbtc, spotPrice }; // ✅ Return values for `executeSwap()`
+            return { expectedWbtc, spotPrice };
 
         } catch (error) {
             console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
             retries--;
-            if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
+
+            if (retries > 0) {
+                console.log(`⏳ Retrying in ${delay / 1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential Backoff
+            }
         }
     }
 
@@ -1075,11 +1096,69 @@ async function getExpectedWbtc(usdcAmount) {
     return null;
 }
 
+
+// async function getExpectedWbtc(usdcAmount) {
+//     console.log(`📡 Fetching WBTC and USDC market prices for ${usdcAmount} USDC...`);
+
+//     const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+//     const config = {
+//         headers: { Authorization: `Bearer ${API_KEY}` },
+//         params: { currency: "USD" }
+//     };
+
+//     let retries = 5;
+//     let delay = 1000; // Start with 1-second delay
+
+//     while (retries > 0) {
+//         try {
+//             // ✅ Fetch WBTC & USDC market prices
+//             const response = await axios.get(url, config);
+//             const prices = response.data;
+
+//             if (!prices || !prices.prices) throw new Error("Invalid response from 1inch API.");
+
+//             const wbtcPrice = parseFloat(prices.prices[WBTC]); // WBTC price in USD
+//             const usdcPrice = parseFloat(prices.prices[USDC]); // USDC price in USD
+
+//             if (!wbtcPrice || !usdcPrice) throw new Error("Missing WBTC or USDC price data.");
+
+//             console.log(`✅ WBTC Price: $${wbtcPrice} | USDC Price: $${usdcPrice}`);
+
+//             // ✅ Calculate spot price: WBTC/USD ÷ USDC/USD
+//             let spotPrice = wbtcPrice / usdcPrice;
+//             console.log(`🔹 Spot WBTC Price: ${spotPrice}`);
+
+//             // ✅ Adjust price by subtracting 0.010% (discounted buy price)
+//             let adjustedBuyPrice = spotPrice * (1 - 0.0001);
+//             console.log(`🔹 Adjusted Buy Price (after -0.010%): ${adjustedBuyPrice}`);
+
+//             // ✅ Calculate expected WBTC to receive (150,000 USDC ÷ adjusted price)
+//             let expectedWbtc = usdcAmount / adjustedBuyPrice;
+//             console.log(`✅ Expected WBTC to Receive: ${expectedWbtc}`);
+
+//             return { expectedWbtc, spotPrice }; // ✅ Return values for `executeSwap()`
+
+//         } catch (error) {
+//             console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries - 1}):`, error.message);
+//             retries--;
+//             if (retries > 0) await new Promise(resolve => setTimeout(resolve, delay));
+//         }
+//     }
+
+//     console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
+//     return null;
+// }
+
 // 📡 Check the USDC output when swapping WBTC back to USDC
 async function validateWbtcToUsdc(wbtcAmount) {
     console.log(`📡 Checking USDC output for ${wbtcAmount} WBTC...`);
+    const NETWORK_ID = 42161; // Arbitrum
+    const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
+    const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
 
-    const url = "https://api.1inch.dev/price/v1.1/42161/0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+    const tokenList = [WBTC, USDC].join(",");
+    const url = `https://api.1inch.dev/price/v1.1/${NETWORK_ID}/${tokenList}`;
+
     const config = {
         headers: { Authorization: `Bearer ${API_KEY}` },
         params: { currency: "USD" }
