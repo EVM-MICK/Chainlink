@@ -1473,7 +1473,7 @@ async function executeSwap(bestTrade) {
                 // ✅ Telegram Notification: Buy Order Filled
                 await sendTelegramTradeAlert({
                     title: "✅ Buy Order Filled!",
-                    message: `Buy order filled for ${filledWbtcAmount} WBTC. Proceeding with sell order`.
+                    message: `Buy order filled for ${filledWbtcAmount} WBTC. Proceeding with sell order`,
                 });
 
                 // ✅ Step 6: Calculate Sell Price & Submit Sell Order
