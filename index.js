@@ -1427,6 +1427,7 @@ async function executeSwap(bestTrade) {
     console.log(⚡ Executing Arbitrage Swap);
     console.log(BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC);
     console.log(SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC);
+    console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
 
     try {
         // ✅ Step 1: Encode routeData for Flash Loan
@@ -1437,7 +1438,7 @@ async function executeSwap(bestTrade) {
 
         // ✅ Step 2: Request Flash Loan
         console.log("🚀 Requesting Flash Loan...");
-        const flashLoanTx = await smartContract.fn_RequestFlashLoan(
+        const flashLoanTx = await arbitrumContract.fn_RequestFlashLoan(
             USDC,
             ethers.utils.parseUnits(buyAmount.toString(), 6),
             routeData    
@@ -1446,7 +1447,7 @@ async function executeSwap(bestTrade) {
         console.log("✅ Flash Loan Successfully Requested! Waiting for loan funds...");
 
         // ✅ Step 3: Listen for Funds Ready Event
-        smartContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
+        arbitrumContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
             console.log(✅ Tokens Approved: ${approvedAmount} ${approvedAsset});
 
             // ✅ Step 4: Create Buy Limit Order (USDC → WBTC)
@@ -1465,7 +1466,7 @@ async function executeSwap(bestTrade) {
             });
 
             // ✅ Step 5: Listen for Buy Order Fill Event
-            smartContract.once("OrderFilled", async (filledWbtcAmount) => {
+            arbitrumContract.once("OrderFilled", async (filledWbtcAmount) => {
                 console.log(📡 Buy Order Filled: ${filledWbtcAmount} WBTC);
 
                 // ✅ Telegram Notification: Buy Order Filled
@@ -1497,7 +1498,7 @@ async function executeSwap(bestTrade) {
                 });
 
                 // ✅ Step 7: Listen for Sell Order Fill Event
-                smartContract.once("OrderFilled", async (receivedUsdc) => {
+                arbitrumContract.once("OrderFilled", async (receivedUsdc) => {
                     console.log(📡 Sell Order Filled: ${receivedUsdc} USDC);
 
                     // ✅ Telegram Notification: Sell Order Filled
@@ -1508,7 +1509,7 @@ async function executeSwap(bestTrade) {
 
                     // ✅ Step 8: Repay Flash Loan
                     console.log("🔄 Repaying Flash Loan...");
-                    const repayTx = await smartContract.repayLoan(WALLET_ADDRESS);
+                    const repayTx = await arbitrumContract.repayLoan(WALLET_ADDRESS);
                     await repayTx.wait();
                     console.log("✅ Flash Loan Repaid Successfully!");
 
@@ -1522,7 +1523,7 @@ async function executeSwap(bestTrade) {
                 });
 
                 // ✅ Step 9: If Sell Order Fails, Retry Trade
-                smartContract.once("OrderFailed", async () => {
+                arbitrumContract.once("OrderFailed", async () => {
                     console.log("❌ Sell Order Execution Failed. Retrying...");
                     await sendTelegramTradeAlert({
                         title: "❌ Sell Order Failed!",
@@ -1533,7 +1534,7 @@ async function executeSwap(bestTrade) {
             });
 
             // ✅ Step 10: If Buy Order Fails, Retry Trade
-            smartContract.once("OrderFailed", async () => {
+            arbitrumContract.once("OrderFailed", async () => {
                 console.log("❌ Buy Order Execution Failed. Retrying...");
                 await sendTelegramTradeAlert({
                     title: "❌ Buy Order Failed!",
