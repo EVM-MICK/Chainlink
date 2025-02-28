@@ -1332,11 +1332,11 @@ async function executeSwap(bestTrade) {
             ]
         );
 
-        // ✅ Step 2: Request Flash Loan
+        // ✅ Step 2: Request Flash Loan  ethers.utils.parseUnits(buyAmount.toString(), 6),
         console.log("🚀 Requesting Flash Loan...");
         const flashLoanTx = await arbitrumContract.fn_RequestFlashLoan(
             USDC,
-            ethers.utils.parseUnits(buyAmount.toString(), 6),
+            ethers.toBigInt(ethers.parseUnits(buyAmount.toString(), 6)), // Corrected
             routeData    
         );
         await flashLoanTx.wait();
