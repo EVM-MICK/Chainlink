@@ -1325,8 +1325,8 @@ async function executeSwap(bestTrade) {
             [
              USDC,
              WBTC,
-            parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
-            parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
+           ethers.parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
+           ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
          ]
          );
 
