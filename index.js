@@ -1031,7 +1031,6 @@ async function getExpectedWbtc(usdcAmount) {
 }
 
 // 📡 Check the USDC output when swapping WBTC back to USDC
-
 async function validateWbtcToUsdc(wbtcAmount1) {
     console.log(`📡 Checking expected USDC output for ${wbtcAmount1} WBTC...`);
 
@@ -1054,8 +1053,8 @@ async function validateWbtcToUsdc(wbtcAmount1) {
         }
 
         const prices1 = response1.data;
-        const wbtcPrice1 = parseFloat(prices[WBTC1]);
-        const usdcPrice1 = parseFloat(prices[USDC1]);
+        const wbtcPrice1 = parseFloat(prices1[WBTC1]);
+        const usdcPrice1 = parseFloat(prices1[USDC1]);
 
         if (!wbtcPrice1 || !usdcPrice1) {
             throw new Error("Missing WBTC or USDC price data.");
