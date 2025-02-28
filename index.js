@@ -352,9 +352,9 @@ async function retryRequest(fn, retries = 5, delay = 1000) {
             return await fn(); // ✅ Attempt request
         } catch (err) {
             if (err.response?.status === 429) {
-                // ✅ Handle rate limiting (Retry-After Header)
+                // ✅ Handle rate-limiting (Retry-After Header)
                 const retryAfter = parseInt(err.response.headers['retry-after'], 10) || delay / 1000;
-                console.warn(`[WARN] Rate-limited by API. Waiting for ${retryAfter} seconds before retrying...`);
+                console.warn(`[WARN] Rate-limited by API. Retrying in ${retryAfter} seconds...`);
                 await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             } else if (attempt === retries) {
                 console.error("❌ Max retries reached. Request failed.");
@@ -1031,8 +1031,10 @@ async function getExpectedWbtc(usdcAmount) {
 }
 
 // 📡 Check the USDC output when swapping WBTC back to USDC
+
 async function validateWbtcToUsdc(wbtcAmount1) {
-    console.log(`📡 Checking USDC output for ${wbtcAmount1} WBTC...`);
+    console.log(`📡 Checking expected USDC output for ${wbtcAmount1} WBTC...`);
+
     const NETWORK_ID1 = 42161; // Arbitrum
     const USDC1 = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
     const WBTC1 = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
@@ -1045,49 +1047,42 @@ async function validateWbtcToUsdc(wbtcAmount1) {
         params: { currency: "USD" }
     };
 
-    let retries1 = 5;
-    let delay1 = 1000; // Start with 1-second delay
-
-    while (retries1 > 0) {
-        try {
-            // ✅ Fetch real-time WBTC & USDC prices
-            const response1 = await axios.get(url1, config1);
-            const prices1 = response1.data;
-         if (!prices1 || typeof prices1 !== "object") {
-                throw new Error("Invalid API response structure.");
-            }
-            
-              const wbtcPrice1 = parseFloat(prices1[WBTC1]); // ✅ Extract price directly
-              const usdcPrice1 = parseFloat(prices1[USDC1]);
-
-            if (!wbtcPrice1 || !usdcPrice1) throw new Error("Missing WBTC or USDC price data.");
-
-            console.log(`✅ WBTC Price: $${wbtcPrice1} | USDC Price: $${usdcPrice1}`);
-
-            // ✅ Calculate the spot price of WBTC in USDC
-            let spotPrice1 = wbtcPrice1 / usdcPrice1;
-            console.log(`🔹 Spot WBTC Price in USDC: ${spotPrice1}`);
-
-            // ✅ Add +0.16% increase for selling price
-            let adjustedSellPrice1 = spotPrice1 * (1 + 0.0016);
-            console.log(`🔹 Adjusted Sell Price (after +0.16%): ${adjustedSellPrice1}`);
-
-            // ✅ Calculate expected USDC to receive (WBTC amount × adjusted price)
-            let expectedUsdc1 = wbtcAmount1 * adjustedSellPrice1;
-            console.log(`✅ Expected USDC from WBTC: ${expectedUsdc1}`);
-
-            return expectedUsdc1;
-
-        } catch (error) {
-            console.error(`❌ Error fetching WBTC/USDC prices (Retries left: ${retries1 - 1}):`, error.message);
-            retries1--;
-            if (retries1 > 0) await new Promise(resolve1 => setTimeout(resolve1, delay1));
+    try {
+        const response1 = await retryRequest(() => axios.get(url1, config1));
+        if (!response1 || !response1.data || typeof response1.data !== "object") {
+            throw new Error("Invalid API response structure.");
         }
-    }
 
-    console.error("❌ Failed to fetch valid WBTC/USDC prices after multiple attempts.");
-    return null;
+        const prices1 = response1.data;
+        const wbtcPrice1 = parseFloat(prices[WBTC1]);
+        const usdcPrice1 = parseFloat(prices[USDC1]);
+
+        if (!wbtcPrice1 || !usdcPrice1) {
+            throw new Error("Missing WBTC or USDC price data.");
+        }
+
+        console.log(`✅ WBTC Price: $${wbtcPrice1} | USDC Price: $${usdcPrice1}`);
+
+        // ✅ Calculate spot price & adjusted sell price
+        let spotPrice1 = wbtcPrice1 / usdcPrice1;
+        let adjustedSellPrice1 = spotPrice1 * (1 + 0.0016); // Increase by 0.16%
+
+        console.log(`🔹 Spot Price: ${spotPrice1} USDC per WBTC`);
+        console.log(`🔹 Adjusted Sell Price: ${adjustedSellPrice1} USDC per WBTC`);
+
+        // ✅ Calculate expected USDC output
+        let expectedUsdc1 = wbtcAmount1 * adjustedSellPrice1;
+        console.log(`✅ Expected USDC from WBTC: ${expectedUsdc1}`);
+
+        return { expectedUsdc1, newSpotPrice: spotPrice1 }; // ✅ Return updated spot price
+
+    } catch (error) {
+        console.error(`❌ Failed to fetch WBTC/USDC price data: ${error.message}`);
+        return null;
+    }
 }
+
+
 
 // 🔄 Optimize WBTC Amount Until USDC Output is Profitable
 async function optimizeWbtcAmount(usdcCapital) {
@@ -1102,9 +1097,9 @@ async function optimizeWbtcAmount(usdcCapital) {
     // ✅ Return `expectedWbtc` and `spotPrice` without modification
     return { expectedWbtc, spotPrice };
 }
-
-// 🚀 Create and submit multiple limit orders for faster execution
+ 
 /**
+ 🚀 Create and submit multiple limit orders for faster execution
  * 🚀 Creates and submits a limit order on 1inch Fusion.
  * @param {string} fromToken - Token we are selling.
  * @param {string} toToken - Token we want to buy.
@@ -1112,27 +1107,48 @@ async function optimizeWbtcAmount(usdcCapital) {
  * @param {number} expectedReceive - Expected amount of `toToken` to receive.
  * @returns {Object} - Response data from 1inch API.
  */
-async function createLimitOrders(fromToken, toToken, amount, expectedReceive) {
+
+async function createLimitOrders(fromToken, toToken, amount, expectedReceive, spotPrice, isSellOrder = false) {
     console.log(`📡 Getting limit order quote: ${amount} ${fromToken} → ${toToken}`);
-     const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
-     const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
+    
+    const NETWORK_ID = 42161; // Arbitrum
+    const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
+    const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
+    let FromToken = fromToken.toLowerCase(),
+    let ToToken = toToken.toLowerCase(),
     const quoterUrl = `https://api.1inch.dev/fusion/quoter/v2.0/${NETWORK_ID}/quote/receive`;
     const relayerUrl = `https://api.1inch.dev/fusion/relayer/v2.0/${NETWORK_ID}/order/submit`;
 
     const config = { headers: { Authorization: `Bearer ${API_KEY}` } };
 
     try {
-        // ✅ Step 1: Get Quote for Limit Order
+        // ✅ Step 1: Determine Auction Price Range Based on Buy/Sell
+        let auctionStartAmount, auctionEndAmount;
+
+        if (isSellOrder) {
+            // 🚀 Selling WBTC → USDC (Ensure a higher price)
+            let sellPrice = spotPrice;  // Ensure above market price
+            auctionStartAmount = sellPrice;
+            auctionEndAmount = sellPrice + 20;   // Add $20 buffer for best rate
+        } else {
+            // 🚀 Buying USDC → WBTC (Ensure a lower price)
+            auctionStartAmount = spotPrice;      // Buy at market price
+            auctionEndAmount = spotPrice + 10;   // Allow up to $10 increase in worst case
+        }
+
+        console.log(`💰 Auction Start: ${auctionStartAmount}, Auction End: ${auctionEndAmount}`);
+
+        // ✅ Step 2: Get Quote for Limit Order
         const quoteBody = {
-            auctionDuration: 0,
-            auctionStartAmount: 0,
-            auctionEndAmount: 0,
-            points: ["string"]
+            auctionDuration: 300, // 5 minutes
+            auctionStartAmount: auctionStartAmount.toString(),
+            auctionEndAmount: auctionEndAmount.toString(),
+            points: []
         };
 
         const quoteParams = {
-            fromTokenAddress: fromToken,
-            toTokenAddress: toToken,
+            fromTokenAddress: FromToken,
+            toTokenAddress: ToToken,
             amount: ethers.utils.parseUnits(amount.toString(), 6).toString(),
             walletAddress: WALLET_ADDRESS,
             enableEstimate: true
@@ -1144,20 +1160,20 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive) {
         if (!quoteId) throw new Error("Failed to fetch quoteId from 1inch API.");
         console.log(`✅ Quote ID Received: ${quoteId}`);
 
-        // ✅ Step 2: Build and Sign Limit Order
+        // ✅ Step 3: Build and Sign Limit Order
         const salt = ethers.utils.hexlify(ethers.utils.randomBytes(32));
         const makingAmount = ethers.utils.parseUnits(amount.toString(), 6).toString();
         const takingAmount = ethers.utils.parseUnits(expectedReceive.toString(), 8).toString();
 
         const order = {
             salt,
-            makerAsset: fromToken,
-            takerAsset: toToken,
+            makerAsset: FromToken,
+            takerAsset: ToToken,
             maker: WALLET_ADDRESS,
             receiver: "0x0000000000000000000000000000000000000000",
             makingAmount,
             takingAmount,
-            makerTraits: "0"
+            makerTraits: "0x"
         };
 
         const signature = await signOrder(order, PRIVATE_KEY);
@@ -1169,7 +1185,7 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive) {
             quoteId
         };
 
-        // ✅ Step 3: Submit the Limit Order
+        // ✅ Step 4: Submit the Limit Order
         console.log(`📡 Submitting limit order for ${amount} ${fromToken} → ${toToken}...`);
         const relayerResponse = await axios.post(relayerUrl, orderData, config);
 
@@ -1210,7 +1226,6 @@ async function signOrder(order, privateKey) {
     return signature;
 }
 
-
 // 🔥 Detect Arbitrage Opportunity
 async function detectArbitrageOpportunities() {
     console.log("🔍 Detecting arbitrage opportunities on 1inch → Uniswap V3...");
@@ -1218,44 +1233,54 @@ async function detectArbitrageOpportunities() {
     try {
         // ✅ Step 1: Fetch expected WBTC amount for 150,000 USDC
         let marketData = await optimizeWbtcAmount(CAPITAL_USDC);
-        if (!marketData) return [];
+        if (!marketData || !marketData.expectedWbtc || !marketData.spotPrice) {
+            console.warn("⚠️ No valid WBTC data received from optimizeWbtcAmount.");
+            return [];
+        }
 
         let { expectedWbtc, spotPrice } = marketData;
-
         console.log(`✅ Expected WBTC: ${expectedWbtc}, Spot Price: ${spotPrice}`);
 
         // ✅ Step 2: Validate USDC output from selling WBTC
         let validationData = await validateWbtcToUsdc(expectedWbtc);
-        if (!validationData) return [];
+        if (!validationData || !validationData.expectedUsdc1 || !validationData.newSpotPrice) {
+            console.warn("⚠️ No valid USDC data received from validateWbtcToUsdc.");
+            return [];
+        }
 
-        let { expectedUsdc, newSpotPrice } = validationData;
-        console.log(`✅ Expected USDC: ${expectedUsdc}, New Spot Price: ${newSpotPrice}`);
+        let { expectedUsdc1, newSpotPrice } = validationData;
+        console.log(`✅ Expected USDC: ${expectedUsdc1}, New Spot Price: ${newSpotPrice}`);
 
-        // ✅ Ensure the updated spot price is not lower than the original spot price
-        if (newSpotPrice > spotPrice) {
+        // ✅ Ensure new spot price is valid and not lower than original spot price
+        if (newSpotPrice && spotPrice && newSpotPrice > spotPrice) {
             console.log(`🔄 Updating Spot Price to Latest: ${newSpotPrice} (Was: ${spotPrice})`);
             spotPrice = newSpotPrice;
         }
 
-        // ✅ Step 3: Check if profit is above $150
+        // ✅ Step 3: Ensure the trade is profitable ($150 minimum profit)
+        if (!expectedUsdc || expectedUsdc <= CAPITAL_USDC) {
+            console.warn("⚠️ No profitable trade found. Skipping.");
+            return [];
+        }
+
         let profit = expectedUsdc - CAPITAL_USDC;
         if (profit < 150) {
-            console.log("⚠️ Trade not profitable. Skipping.");
+            console.warn(`⚠️ Profit too low: $${profit.toFixed(2)}. Skipping trade.`);
             return [];
         }
 
         console.log(`🚀 Profitable Trade Found! Expected Profit: $${profit.toFixed(2)}`);
 
-        // ✅ Step 4: Return trade details for execution
+        // ✅ Step 4: Return valid trade details
         return [{
             token: "WBTC",
             buyOn: "1inch-limit Order",
             sellOn: "1inch-limit Order",
-            buyAmount: CAPITAL_USDC.toFixed(2),
-            sellAmount: expectedUsdc.toFixed(2),
-            profit: profit.toFixed(2),
-            optimizedWbtcAmount: expectedWbtc.toFixed(8),
-            spotPrice: spotPrice.toFixed(2)
+            buyAmount: parseFloat(CAPITAL_USDC).toFixed(2),
+            sellAmount: parseFloat(expectedUsdc).toFixed(2),
+            profit: parseFloat(profit).toFixed(2),
+            optimizedWbtcAmount: parseFloat(expectedWbtc).toFixed(8),
+            spotPrice: parseFloat(spotPrice).toFixed(2)
         }];
 
     } catch (error) {
@@ -1315,7 +1340,7 @@ async function executeSwap(bestTrade) {
 
             // ✅ Step 3: Create Buy Limit Order (USDC → WBTC)
             console.log(`📡 Submitting Buy Limit Order for ${optimizedWbtcAmount} WBTC...`);
-            const buyOrderResponse = await createLimitOrders(USDC, WBTC, buyAmount, optimizedWbtcAmount);
+            const buyOrderResponse = await createLimitOrders(USDC, WBTC, buyAmount, optimizedWbtcAmount, spotPrice, false);
             if (!buyOrderResponse) {
                 console.error("❌ Failed to submit buy limit order.");
                 return false;
@@ -1340,13 +1365,13 @@ async function executeSwap(bestTrade) {
 
                 // ✅ Step 6: Ensure Sell Order is Placed Above Spot Price
                 let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016; // Ensure it's above market price
-                let expectedUsdc = sellPrice * filledWbtcAmount;
+                let expectedUsdc1 = sellPrice * filledWbtcAmount;
 
                 console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC (Above ${spotPrice})`);
 
                 // ✅ Step 7: Submit Sell Limit Order (WBTC → USDC)
                 console.log("📡 Submitting Sell Limit Order...");
-                const sellOrderResponse = await createLimitOrders(WBTC, USDC, filledWbtcAmount, expectedUsdc);
+                const sellOrderResponse = await createLimitOrders(WBTC, USDC, filledWbtcAmount, expectedUsdc1, sellPrice, true);
                 if (!sellOrderResponse) {
                     console.error("❌ Failed to submit sell limit order.");
                     return false;
@@ -1375,8 +1400,8 @@ async function executeSwap(bestTrade) {
                         buyOn: "1inch-limit Order",
                         sellOn: "1inch-limit Order",
                         buyAmount,
-                        sellAmount: finalUsdcReceived.toFixed(2),
-                        profit: (finalUsdcReceived - buyAmount).toFixed(2)
+                        sellAmount: parseFloat(finalUsdcReceived).toFixed(2),
+                        profit: parseFloat(finalUsdcReceived - buyAmount).toFixed(2)
                     });
 
                     return true;
@@ -1403,7 +1428,6 @@ async function executeSwap(bestTrade) {
     }
 }
 
-
 // 🔹 Generate Swap Calldata for Smart Contract Execution
 async function generateSwapCalldata(fromToken, toToken, amount, dex) {
     try {
@@ -1422,65 +1446,7 @@ async function generateSwapCalldata(fromToken, toToken, amount, dex) {
     }
 }
 
-// async function executeFlashLoanAndSwap(dex, fromToken, toToken, amount, protocolID) {
-//     console.log(`🚀 Generating calldata for ${dex} swap: ${amount} ${fromToken} → ${toToken} via ${protocolID}`);
-
-//     // ✅ List of all possible protocols on Arbitrum
-//     const ALL_PROTOCOLS = [
-//         "ARBITRUM_BALANCER_V2", "ARBITRUM_SUSHISWAP", "ARBITRUM_UNISWAP_V3", "ARBITRUM_CURVE",
-//         "ARBITRUM_CURVE_V2", "ARBITRUM_ONE_INCH_LIMIT_ORDER", "ARBITRUM_ONE_INCH_LIMIT_ORDER_V2",
-//         "ARBITRUM_ONE_INCH_LIMIT_ORDER_V3", "ARBITRUM_ONE_INCH_LIMIT_ORDER_V4", "ARBITRUM_DODO",
-//         "ARBITRUM_DODO_V2", "ARBITRUM_DXSWAP", "ARBITRUM_GMX", "ARBITRUM_SYNAPSE", "ARBITRUM_SADDLE",
-//         "ARBITRUM_KYBERSWAP_ELASTIC", "ARBITRUM_KYBER_DMM_STATIC", "ARBITRUM_AAVE_V3", "ARBITRUM_ELK",
-//         "ARBITRUM_WOOFI_V2", "ARBITRUM_CAMELOT", "ARBITRUM_TRADERJOE", "ARBITRUM_TRADERJOE_V2",
-//         "ARBITRUM_TRADERJOE_V2_2", "ARBITRUM_SWAPFISH", "ARBITRUM_ZYBER", "ARBITRUM_ZYBER_STABLE",
-//         "ARBITRUM_SOLIDLIZARD", "ARBITRUM_ZYBER_V3", "ARBITRUM_MYCELIUM", "ARBITRUM_TRIDENT",
-//         "ARBITRUM_SHELL_OCEAN", "ARBITRUM_RAMSES", "ARBITRUM_TRADERJOE_V2_1", "ARBITRUM_NOMISWAPEPCS",
-//         "ARBITRUM_CAMELOT_V3", "ARBITRUM_WOMBATSWAP", "ARBITRUM_CHRONOS", "ARBITRUM_LIGHTER",
-//         "ARBITRUM_ARBIDEX", "ARBITRUM_ARBIDEX_V3", "ARBSWAP", "ARBSWAP_STABLE", "ARBITRUM_SUSHISWAP_V3",
-//         "ARBITRUM_RAMSES_V2", "ARBITRUM_LEVEL_FINANCE", "ARBITRUM_CHRONOS_V3", "ARBITRUM_PANCAKESWAP_V3",
-//         "ARBITRUM_PMM11", "ARBITRUM_DODO_V3", "ARBITRUM_SMARDEX", "ARBITRUM_INTEGRAL",
-//         "ARBITRUM_DFX_FINANCE_V3", "ARBITRUM_CURVE_STABLE_NG", "ARBITRUM_VIRTUSWAP",
-//         "ARBITRUM_CURVE_V2_TRICRYPTO_NG", "ARBITRUM_CURVE_V2_TWOCRYPTO_NG", "ARBITRUM_BGD_AAVE_STATIC",
-//         "ARBITRUM_SOLIDLY_V3", "ARBITRUM_ANGLE", "ARBITRUM_MAVERICK_V2", "ARBITRUM_UNISWAP_V4",
-//         "ARBITRUM_FLUID_DEX_T1"
-//     ];
-
-//     // ✅ Dynamically exclude all protocols **except** the selected one
-//     const excludedProtocols = ALL_PROTOCOLS.filter(p => p !== protocolID).join(',');
-
-//     try {
-//         // ✅ Convert amount to correct decimal format
-//         const decimals = TOKEN_DECIMALS[fromToken] || 18; // Default to 18 decimals if missing
-//         const amountInWei = ethers.utils.parseUnits(amount.toString(), decimals).toString();
-
-//         console.log(`🔹 Converted Amount to Wei: ${amountInWei}`);
-
-//         // ✅ Fetch calldata from 1inch Swap API
-//         const response = await axios.get(`https://api.1inch.dev/swap/v6.0/42161/swap`, {
-//             headers: { Authorization: `Bearer ${API_KEY}` },
-//             params: {
-//                 src: fromToken,
-//                 dst: toToken,
-//                 amount: amountInWei,
-//                 excludedProtocols: excludedProtocols, // ✅ Exclude all except selected protocol
-//                 includeGas: true,
-//                 slippage: 1
-//             }
-//         });
-
-//         console.log(`✅ Successfully generated calldata for ${dex}:`, response.data.tx.data);
-//         return response.data.tx.data; // ✅ Return calldata for smart contract execution
-
-//     } catch (error) {
-//         console.error(`❌ Failed to generate calldata for ${dex}:`, error.response?.data || error.message);
-//         return null;
-//     }
-// }
-
-
-// 🔥 **Swap Execution & Loan Repayment Function**
-
+// 🔥 **Swap Execution & Loan Repayment Function** 
 async function notifyMonitoringSystem(message) {
   const monitoringServiceUrl = process.env.MONITORING_SERVICE_URL;
 
