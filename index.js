@@ -1114,8 +1114,8 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive, sp
     const NETWORK_ID = 42161; // Arbitrum
     const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
     const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
-    const FromToken = fromToken.toLowerCase(),
-    const ToToken = toToken.toLowerCase(),
+    const FromToken = fromToken.toLowerCase();
+    const ToToken = toToken.toLowerCase();
     const quoterUrl = `https://api.1inch.dev/fusion/quoter/v2.0/${NETWORK_ID}/quote/receive`;
     const relayerUrl = `https://api.1inch.dev/fusion/relayer/v2.0/${NETWORK_ID}/order/submit`;
 
