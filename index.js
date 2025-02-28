@@ -1463,7 +1463,7 @@ async function executeSwap(bestTrade) {
             // ✅ Telegram Notification: Buy Limit Order Submitted
             await sendTelegramTradeAlert({
                 title: "✅ Buy Limit Order Submitted!",
-                message: `Submitted buy limit order for ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC. Waiting for order fill`.
+                message: `Submitted buy limit order for ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC. Waiting for order fill`,
             });
 
             // ✅ Step 5: Listen for Buy Order Fill Event
@@ -1494,7 +1494,7 @@ async function executeSwap(bestTrade) {
                 // ✅ Telegram Notification: Sell Limit Order Submitted
                 await sendTelegramTradeAlert({
                     title: "✅ Sell Limit Order Submitted!",
-                    message: `Submitted sell limit order for ${filledWbtcAmount} WBTC → ${expectedUsdc} USDC. Waiting for order fill`.
+                    message: `Submitted sell limit order for ${filledWbtcAmount} WBTC → ${expectedUsdc} USDC. Waiting for order fill`,
                 });
 
                 // ✅ Step 7: Listen for Sell Order Fill Event
@@ -1503,7 +1503,7 @@ async function executeSwap(bestTrade) {
                     // ✅ Telegram Notification: Sell Order Filled
                     await sendTelegramTradeAlert({
                         title: "✅ Sell Order Filled!",
-                        message: `Sell order filled for ${receivedUsdc} USDC. Proceeding with loan repayment`.
+                        message: `Sell order filled for ${receivedUsdc} USDC. Proceeding with loan repayment`,
                     });
 
                     // ✅ Step 8: Repay Flash Loan
@@ -1515,7 +1515,7 @@ async function executeSwap(bestTrade) {
                     // ✅ Telegram Notification: Flash Loan Repaid
                     await sendTelegramTradeAlert({
                         title: "✅ Flash Loan Repaid!",
-                        message: `Flash loan repaid. Profit: ${(receivedUsdc - buyAmount).toFixed(2)} USDC`.
+                        message: `Flash loan repaid. Profit: ${(receivedUsdc - buyAmount).toFixed(2)} USDC`,
                     });
 
                     return true;
@@ -1526,7 +1526,7 @@ async function executeSwap(bestTrade) {
                     console.log("❌ Sell Order Execution Failed. Retrying...");
                     await sendTelegramTradeAlert({
                         title: "❌ Sell Order Failed!",
-                        message: "Sell order failed. Retrying the arbitrage trade..."
+                        message: "Sell order failed. Retrying the arbitrage trade...",
                     });
                     await executeArbitrage();
                 });
@@ -1537,7 +1537,7 @@ async function executeSwap(bestTrade) {
                 console.log("❌ Buy Order Execution Failed. Retrying...");
                 await sendTelegramTradeAlert({
                     title: "❌ Buy Order Failed!",
-                    message: "Buy order failed. Retrying the arbitrage trade..."
+                    message: "Buy order failed. Retrying the arbitrage trade...",
                 });
                 await executeArbitrage();
             });
