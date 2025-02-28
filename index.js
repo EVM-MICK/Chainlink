@@ -7,7 +7,7 @@ const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
-const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
+const {  parseUnits, AbiCoder, ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
 const cron = require("node-cron");
 const { promisify } = require("util");
 const pkg = require("telegraf");
@@ -1325,8 +1325,8 @@ async function executeSwap(bestTrade) {
             [
              USDC,
              WBTC,
-             ethers.parseUnits(buyAmount.toString(), 6), // Convert to uint256
-             ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // Assuming WBTC has 8 decimals
+            parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
+            parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
          ]
          );
 
