@@ -1321,14 +1321,14 @@ async function executeSwap(bestTrade) {
 
     try {
         // ✅ Step 1: Encode routeData for Flash Loan
-           const abiCoder = new ethers.AbiCoder();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder(); // Corrected for Ethers v6
         const routeData = abiCoder.encode(
             ["address", "address", "uint256", "uint256"],
             [
                 USDC,
                 WBTC,
-                ethers.parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
-                ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
+                ethers.toBigInt(ethers.parseUnits(buyAmount.toString(), 6)), // Corrected
+                ethers.toBigInt(ethers.parseUnits(optimizedWbtcAmount.toString(), 8)) // Corrected
             ]
         );
 
