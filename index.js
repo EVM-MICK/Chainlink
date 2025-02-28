@@ -1425,8 +1425,8 @@ async function executeSwap(bestTrade) {
     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
 
     console.log(`⚡ Executing Arbitrage Swap`);
-    console.log(BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC);
-    console.log(SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC);
+    console.log(`BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC`);
+    console.log(`SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC`);
     console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
 
     try {
@@ -1448,7 +1448,7 @@ async function executeSwap(bestTrade) {
 
         // ✅ Step 3: Listen for Funds Ready Event
         arbitrumContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
-            console.log(✅ Tokens Approved: ${approvedAmount} ${approvedAsset});
+             console.log(`✅ Tokens Approved: ${approvedAmount} ${approvedAsset}`);
 
             // ✅ Step 4: Create Buy Limit Order (USDC → WBTC)
             const buyOrderResponse = await createLimitOrders(
@@ -1467,7 +1467,7 @@ async function executeSwap(bestTrade) {
 
             // ✅ Step 5: Listen for Buy Order Fill Event
             arbitrumContract.once("OrderFilled", async (filledWbtcAmount) => {
-                console.log(📡 Buy Order Filled: ${filledWbtcAmount} WBTC);
+                console.log(`📡 Buy Order Filled: ${filledWbtcAmount} WBTC`);
 
                 // ✅ Telegram Notification: Buy Order Filled
                 await sendTelegramTradeAlert({
@@ -1480,8 +1480,7 @@ async function executeSwap(bestTrade) {
                 let newSpotPrice = updatedData.spotPrice;
                 let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016;  // Ensure sell price is above current spot price
                 let expectedUsdc = sellPrice * filledWbtcAmount;
-
-                console.log(🔄 Setting Sell Price: ${sellPrice} USDC per WBTC);
+                console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC`);
 
                 const sellOrderResponse = await createLimitOrders(
                     WBTC, USDC, filledWbtcAmount, expectedUsdc, sellPrice, true
@@ -1499,8 +1498,7 @@ async function executeSwap(bestTrade) {
 
                 // ✅ Step 7: Listen for Sell Order Fill Event
                 arbitrumContract.once("OrderFilled", async (receivedUsdc) => {
-                    console.log(📡 Sell Order Filled: ${receivedUsdc} USDC);
-
+                    console.log(`📡 Sell Order Filled: ${receivedUsdc} USDC`);
                     // ✅ Telegram Notification: Sell Order Filled
                     await sendTelegramTradeAlert({
                         title: "✅ Sell Order Filled!",
