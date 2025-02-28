@@ -1228,7 +1228,7 @@ async function signOrder(order, privateKey) {
 
 // 🔥 Detect Arbitrage Opportunity
 async function detectArbitrageOpportunities() {
-    console.log("🔍 Detecting arbitrage opportunities on 1inch → Uniswap V3...");
+    console.log("🔍 Detecting arbitrage opportunities on 1inch-limit Order → 1inch-limit Order...");
 
     try {
         // ✅ Step 1: Fetch expected WBTC amount for 150,000 USDC
@@ -1258,12 +1258,12 @@ async function detectArbitrageOpportunities() {
         }
 
         // ✅ Step 3: Ensure the trade is profitable ($150 minimum profit)
-        if (!expectedUsdc || expectedUsdc <= CAPITAL_USDC) {
+        if (!expectedUsdc1 || expectedUsdc1 <= CAPITAL_USDC) {
             console.warn("⚠️ No profitable trade found. Skipping.");
             return [];
         }
 
-        let profit = expectedUsdc - CAPITAL_USDC;
+        let profit = expectedUsdc1 - CAPITAL_USDC;
         if (profit < 150) {
             console.warn(`⚠️ Profit too low: $${profit.toFixed(2)}. Skipping trade.`);
             return [];
