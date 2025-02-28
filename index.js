@@ -1320,10 +1320,16 @@ async function executeSwap(bestTrade) {
 
     try {
         // ✅ Step 1: Encode routeData for Flash Loan
-      const routeData = ethers.AbiCoder.defaultAbiCoder().encode(
-         ["address", "address", "uint256", "uint256"],
-         [USDC, WBTC, buyAmount, optimizedWbtcAmount]
+            const routeData = ethers.AbiCoder.defaultAbiCoder().encode(
+            ["address", "address", "uint256", "uint256"],
+            [
+             USDC,
+             WBTC,
+             ethers.parseUnits(buyAmount.toString(), 6), // Convert to uint256
+             ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // Assuming WBTC has 8 decimals
+         ]
          );
+
         // ✅ Step 2: Request Flash Loan
         console.log("🚀 Requesting Flash Loan...");
         const flashLoanTx = await arbitrumContract.fn_RequestFlashLoan(
