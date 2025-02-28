@@ -1424,7 +1424,7 @@ function convertFromWei(amountWei, token) {
 async function executeSwap(bestTrade) {
     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
 
-    console.log(⚡ Executing Arbitrage Swap);
+    console.log(`⚡ Executing Arbitrage Swap`);
     console.log(BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC);
     console.log(SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC);
     console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
