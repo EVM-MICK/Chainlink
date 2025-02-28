@@ -1277,7 +1277,7 @@ async function detectArbitrageOpportunities() {
             buyOn: "1inch-limit Order",
             sellOn: "1inch-limit Order",
             buyAmount: parseFloat(CAPITAL_USDC).toFixed(2),
-            sellAmount: parseFloat(expectedUsdc).toFixed(2),
+            sellAmount: parseFloat(expectedUsdc1).toFixed(2),
             profit: parseFloat(profit).toFixed(2),
             optimizedWbtcAmount: parseFloat(expectedWbtc).toFixed(8),
             spotPrice: parseFloat(spotPrice).toFixed(2)
