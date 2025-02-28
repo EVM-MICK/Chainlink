@@ -1114,8 +1114,8 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive, sp
     const NETWORK_ID = 42161; // Arbitrum
     const WBTC = "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f".toLowerCase();
     const USDC = "0xaf88d065e77c8cc2239327c5edb3a432268e5831".toLowerCase();
-    let FromToken = fromToken.toLowerCase(),
-    let ToToken = toToken.toLowerCase(),
+    const FromToken = fromToken.toLowerCase(),
+    const ToToken = toToken.toLowerCase(),
     const quoterUrl = `https://api.1inch.dev/fusion/quoter/v2.0/${NETWORK_ID}/quote/receive`;
     const relayerUrl = `https://api.1inch.dev/fusion/relayer/v2.0/${NETWORK_ID}/order/submit`;
 
@@ -1127,7 +1127,7 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive, sp
 
         if (isSellOrder) {
             // 🚀 Selling WBTC → USDC (Ensure a higher price)
-            let sellPrice = spotPrice;  // Ensure above market price
+            let sellPrice = spotPrice * (1 + 0.0016);  // Ensure above market price
             auctionStartAmount = sellPrice;
             auctionEndAmount = sellPrice + 20;   // Add $20 buffer for best rate
         } else {
@@ -1313,120 +1313,243 @@ function convertFromWei(amountWei, token) {
 /**
  * 🔥 **Flash Loan Execution Function  🔥 Execute Swap using Flash Loan & Limit Orders**
  */
+// async function executeSwap(bestTrade) {
+//     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
+
+//     console.log(`⚡ Executing Arbitrage Swap`);
+//     console.log(`BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC`);
+//     console.log(`SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC`);
+//     console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
+
+//     try {
+//         // ✅ Step 1: Prepare routeData for Flash Loan
+//         const routeData = ethers.utils.defaultAbiCoder.encode(
+//             ["address", "address", "uint256", "uint256"],
+//             [USDC, WBTC, buyAmount, optimizedWbtcAmount]
+//         );
+
+//         // ✅ Step 2: Request Flash Loan
+//         console.log("🚀 Requesting Flash Loan from smart contract...");
+//         const flashLoanTx = await smartContract.fn_RequestFlashLoan(
+//             USDC,
+//             ethers.utils.parseUnits(buyAmount.toString(), 6),
+//             routeData  // ✅ Send encoded trade parameters
+//         );
+//         await flashLoanTx.wait();
+//         console.log("✅ Flash Loan Successfully Requested! Waiting for loan funds...");
+
+//         // ✅ Step 3: Listen for Flash Loan Event
+//         smartContract.once("FlashLoanReceived", async (asset, amount, premium, initiator) => {
+//             console.log(`📡 Flash Loan Received: ${ethers.utils.formatUnits(amount, 6)} USDC`);
+
+//             // ✅ Step 4: Wait for Approval Event (Funds Ready)
+//             smartContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
+//                 console.log(`✅ Tokens Approved for 1inch: ${approvedAmount} ${approvedAsset}`);
+
+//                 // ✅ Step 5: Create Buy Limit Order (USDC → WBTC)
+//                 console.log(`📡 Submitting Buy Limit Order for ${optimizedWbtcAmount} WBTC...`);
+//                 const buyOrderResponse = await createLimitOrders(
+//                     USDC, WBTC, buyAmount, optimizedWbtcAmount, spotPrice, false
+//                 );
+//                 if (!buyOrderResponse) {
+//                     console.error("❌ Failed to submit buy limit order.");
+//                     return false;
+//                 }
+//                 console.log("✅ Buy Limit Order Submitted Successfully! Waiting for execution...");
+
+//                 // ✅ Step 6: Listen for Buy Order Fill Event
+//                 smartContract.once("OrderFilled", async (filledWbtcAmount) => {
+//                     console.log(`📡 Buy Order Filled: ${filledWbtcAmount} WBTC`);
+
+//                     // ✅ Step 7: Fetch Spot Price Before Selling
+//                     let updatedData = await optimizeWbtcAmount(buyAmount);
+//                     if (!updatedData) {
+//                         console.error("❌ Failed to fetch updated market data.");
+//                         return false;
+//                     }
+//                     let newSpotPrice = updatedData.spotPrice;
+//                     let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016;
+//                     let expectedUsdc1 = sellPrice * filledWbtcAmount;
+
+//                     console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC`);
+
+//                     // ✅ Step 8: Submit Sell Limit Order (WBTC → USDC)
+//                     console.log("📡 Submitting Sell Limit Order...");
+//                     const sellOrderResponse = await createLimitOrders(
+//                         WBTC, USDC, filledWbtcAmount, expectedUsdc1, sellPrice, true
+//                     );
+//                     if (!sellOrderResponse) {
+//                         console.error("❌ Failed to submit sell limit order.");
+//                         return false;
+//                     }
+
+//                     // ✅ Step 9: Listen for Sell Order Fill Event
+//                     smartContract.once("OrderFilled", async (receivedUsdc) => {
+//                         console.log(`📡 Sell Order Filled: ${receivedUsdc} USDC`);
+
+//                         // ✅ Step 10: Ensure Profitability & Repay Flash Loan
+//                         let finalUsdcReceived = parseFloat(receivedUsdc);
+//                         if (finalUsdcReceived < buyAmount) {
+//                             console.log("❌ Not enough USDC received. Trade Reverted.");
+//                             return false;
+//                         }
+
+//                         console.log(`✅ Arbitrage Trade Completed! Profit: $${finalUsdcReceived - buyAmount}`);
+
+//                         return true;
+//                     });
+
+//                     // ✅ Step 11: If Sell Order Fails, Retry Trade
+//                     smartContract.once("OrderFailed", async () => {
+//                         console.log("❌ Order Execution Failed. Retrying...");
+//                         await executeSwap(bestTrade);
+//                     });
+//                 });
+
+//                 // ✅ Step 12: If Buy Order Fails, Retry Trade
+//                 smartContract.once("OrderFailed", async () => {
+//                     console.log("❌ Buy Order Failed. Retrying...");
+//                     await executeSwap(bestTrade);
+//                 });
+//             });
+//         });
+
+//     } catch (error) {
+//         console.error("❌ Error executing arbitrage trade:", error);
+//         await sendTelegramMessage("🚨 **Critical Error:** Flashloan execution failed. Manual intervention required.");
+//         return false;
+//     }
+// }
 
 async function executeSwap(bestTrade) {
     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
 
-    console.log(`⚡ Executing Arbitrage Swap`);
-    console.log(`BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC`);
-    console.log(`SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC`);
-    console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
+    console.log(⚡ Executing Arbitrage Swap);
+    console.log(BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC);
+    console.log(SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC);
 
     try {
-        // ✅ Step 1: Request Flash Loan
-        console.log("🚀 Requesting Flash Loan from smart contract...");
-        const buyCalldata = "0x"; // No calldata needed for limit orders
+        // ✅ Step 1: Encode routeData for Flash Loan
+        const routeData = ethers.utils.defaultAbiCoder.encode(
+            ["address", "address", "uint256", "uint256"],
+            [USDC, WBTC, buyAmount, optimizedWbtcAmount]
+        );
+
+        // ✅ Step 2: Request Flash Loan
+        console.log("🚀 Requesting Flash Loan...");
         const flashLoanTx = await smartContract.fn_RequestFlashLoan(
             USDC,
             ethers.utils.parseUnits(buyAmount.toString(), 6),
-            buyCalldata
+            routeData    
         );
         await flashLoanTx.wait();
         console.log("✅ Flash Loan Successfully Requested! Waiting for loan funds...");
 
-        // ✅ Step 2: Listen for Flash Loan Event
-        smartContract.once("FlashLoanReceived", async (asset, amount, premium, initiator) => {
-            console.log(`📡 Flash Loan Received: ${ethers.utils.formatUnits(amount, 6)} USDC with premium ${ethers.utils.formatUnits(premium, 6)}`);
+        // ✅ Step 3: Listen for Funds Ready Event
+        smartContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
+            console.log(✅ Tokens Approved: ${approvedAmount} ${approvedAsset});
 
-            // ✅ Step 3: Create Buy Limit Order (USDC → WBTC)
-            console.log(`📡 Submitting Buy Limit Order for ${optimizedWbtcAmount} WBTC...`);
-            const buyOrderResponse = await createLimitOrders(USDC, WBTC, buyAmount, optimizedWbtcAmount, spotPrice, false);
+            // ✅ Step 4: Create Buy Limit Order (USDC → WBTC)
+            const buyOrderResponse = await createLimitOrders(
+                USDC, WBTC, buyAmount, optimizedWbtcAmount, spotPrice, false
+            );
             if (!buyOrderResponse) {
                 console.error("❌ Failed to submit buy limit order.");
                 return false;
             }
-            console.log("✅ Buy Limit Order Submitted Successfully! Waiting for execution...");
 
-            // ✅ Step 4: Listen for Buy Order Fill Event
+            // ✅ Telegram Notification: Buy Limit Order Submitted
+            await sendTelegramTradeAlert({
+                title: "✅ Buy Limit Order Submitted!",
+                message: Submitted buy limit order for ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC. Waiting for order fill.
+            });
+
+            // ✅ Step 5: Listen for Buy Order Fill Event
             smartContract.once("OrderFilled", async (filledWbtcAmount) => {
-                console.log(`📡 Buy Order Filled: ${filledWbtcAmount} WBTC`);
+                console.log(📡 Buy Order Filled: ${filledWbtcAmount} WBTC);
+
+                // ✅ Telegram Notification: Buy Order Filled
                 await sendTelegramTradeAlert({
                     title: "✅ Buy Order Filled!",
-                    message: `Bought ${filledWbtcAmount} WBTC successfully. Preparing to sell for USDC.`
+                    message: Buy order filled for ${filledWbtcAmount} WBTC. Proceeding with sell order.
                 });
 
-                // ✅ Step 5: Fetch Current Spot Price Before Selling
+                // ✅ Step 6: Calculate Sell Price & Submit Sell Order
                 let updatedData = await optimizeWbtcAmount(buyAmount);
-                if (!updatedData) {
-                    console.error("❌ Failed to fetch updated market data.");
-                    return false;
-                }
                 let newSpotPrice = updatedData.spotPrice;
+                let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016;  // Ensure sell price is above current spot price
+                let expectedUsdc = sellPrice * filledWbtcAmount;
 
-                // ✅ Step 6: Ensure Sell Order is Placed Above Spot Price
-                let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016; // Ensure it's above market price
-                let expectedUsdc1 = sellPrice * filledWbtcAmount;
+                console.log(🔄 Setting Sell Price: ${sellPrice} USDC per WBTC);
 
-                console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC (Above ${spotPrice})`);
-
-                // ✅ Step 7: Submit Sell Limit Order (WBTC → USDC)
-                console.log("📡 Submitting Sell Limit Order...");
-                const sellOrderResponse = await createLimitOrders(WBTC, USDC, filledWbtcAmount, expectedUsdc1, sellPrice, true);
+                const sellOrderResponse = await createLimitOrders(
+                    WBTC, USDC, filledWbtcAmount, expectedUsdc, sellPrice, true
+                );
                 if (!sellOrderResponse) {
                     console.error("❌ Failed to submit sell limit order.");
                     return false;
                 }
 
-                // ✅ Step 8: Listen for Sell Order Fill Event
+                // ✅ Telegram Notification: Sell Limit Order Submitted
+                await sendTelegramTradeAlert({
+                    title: "✅ Sell Limit Order Submitted!",
+                    message: Submitted sell limit order for ${filledWbtcAmount} WBTC → ${expectedUsdc} USDC. Waiting for order fill.
+                });
+
+                // ✅ Step 7: Listen for Sell Order Fill Event
                 smartContract.once("OrderFilled", async (receivedUsdc) => {
-                    console.log(`📡 Sell Order Filled: ${receivedUsdc} USDC`);
+                    console.log(📡 Sell Order Filled: ${receivedUsdc} USDC);
+
+                    // ✅ Telegram Notification: Sell Order Filled
                     await sendTelegramTradeAlert({
                         title: "✅ Sell Order Filled!",
-                        message: `Sold WBTC for ${receivedUsdc} USDC. Repaying flash loan...`
+                        message: Sell order filled for ${receivedUsdc} USDC. Proceeding with loan repayment.
                     });
 
-                    // ✅ Step 9: Ensure Profitability & Repay Flash Loan
-                    let finalUsdcReceived = parseFloat(receivedUsdc);
-                    if (finalUsdcReceived < buyAmount) {
-                        console.log("❌ Not enough USDC received. Trade Reverted.");
-                        return false;
-                    }
+                    // ✅ Step 8: Repay Flash Loan
+                    console.log("🔄 Repaying Flash Loan...");
+                    const repayTx = await smartContract.repayLoan(WALLET_ADDRESS);
+                    await repayTx.wait();
+                    console.log("✅ Flash Loan Repaid Successfully!");
 
-                    console.log(`✅ Arbitrage Trade Completed Successfully! Profit: $${finalUsdcReceived - buyAmount}`);
-
-                    // ✅ Step 10: Notify Telegram & Return Success
+                    // ✅ Telegram Notification: Flash Loan Repaid
                     await sendTelegramTradeAlert({
-                        token: "WBTC",
-                        buyOn: "1inch-limit Order",
-                        sellOn: "1inch-limit Order",
-                        buyAmount,
-                        sellAmount: parseFloat(finalUsdcReceived).toFixed(2),
-                        profit: parseFloat(finalUsdcReceived - buyAmount).toFixed(2)
+                        title: "✅ Flash Loan Repaid!",
+                        message: Flash loan repaid. Profit: ${(receivedUsdc - buyAmount).toFixed(2)} USDC.
                     });
 
                     return true;
                 });
 
-                // ✅ Step 11: If Sell Order Fails, Retry Trade
+                // ✅ Step 9: If Sell Order Fails, Retry Trade
                 smartContract.once("OrderFailed", async () => {
-                    console.log("❌ Order Execution Failed. Retrying...");
-                    await executeSwap(bestTrade);
+                    console.log("❌ Sell Order Execution Failed. Retrying...");
+                    await sendTelegramTradeAlert({
+                        title: "❌ Sell Order Failed!",
+                        message: Sell order failed. Retrying the arbitrage trade...
+                    });
+                    await executeArbitrage();
                 });
             });
 
-            // ✅ Step 12: If Buy Order Fails, Retry Trade
+            // ✅ Step 10: If Buy Order Fails, Retry Trade
             smartContract.once("OrderFailed", async () => {
-                console.log("❌ Buy Order Failed. Retrying...");
-                await executeSwap(bestTrade);
+                console.log("❌ Buy Order Execution Failed. Retrying...");
+                await sendTelegramTradeAlert({
+                    title: "❌ Buy Order Failed!",
+                    message: Buy order failed. Retrying the arbitrage trade...
+                });
+                await executeArbitrage();
             });
         });
 
     } catch (error) {
         console.error("❌ Error executing arbitrage trade:", error);
-        await sendTelegramMessage("🚨 **Critical Error:** Flashloan execution failed. Manual intervention required.");
+        await sendTelegramMessage("🚨 *Critical Error:* Flashloan execution failed. Manual intervention required.");
         return false;
     }
 }
+
 
 // 🔹 Generate Swap Calldata for Smart Contract Execution
 async function generateSwapCalldata(fromToken, toToken, amount, dex) {
