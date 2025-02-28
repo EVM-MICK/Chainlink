@@ -7,7 +7,8 @@ const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
-const {  parseUnits, AbiCoder, ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
+//const {  parseUnits, AbiCoder, ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
+const ethers = require("ethers");
 const cron = require("node-cron");
 const { promisify } = require("util");
 const pkg = require("telegraf");
@@ -1320,15 +1321,16 @@ async function executeSwap(bestTrade) {
 
     try {
         // ✅ Step 1: Encode routeData for Flash Loan
-            const routeData = ethers.AbiCoder.defaultAbiCoder().encode(
+           const abiCoder = new ethers.AbiCoder();
+        const routeData = abiCoder.encode(
             ["address", "address", "uint256", "uint256"],
             [
-             USDC,
-             WBTC,
-           ethers.parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
-           ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
-         ]
-         );
+                USDC,
+                WBTC,
+                ethers.parseUnits(buyAmount.toString(), 6), // USDC (6 decimals)
+                ethers.parseUnits(optimizedWbtcAmount.toString(), 8) // WBTC (8 decimals)
+            ]
+        );
 
         // ✅ Step 2: Request Flash Loan
         console.log("🚀 Requesting Flash Loan...");
