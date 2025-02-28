@@ -1,14 +1,10 @@
 const dotenv = require("dotenv");
 require("dotenv").config();
-
-//dotenv.config(); // ✅ Load environment variables early
-//const fetch = require("node-fetch"); // Ensure you have node-fetch installed
 const express = require("express");
 const axios = require("axios");
 const Web3 = require("web3");
 const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
-//const PQueue = require("p-queue");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const { ethers, Wallet, JsonRpcProvider, Contract } = require("ethers");
@@ -1313,113 +1309,6 @@ function convertFromWei(amountWei, token) {
 /**
  * 🔥 **Flash Loan Execution Function  🔥 Execute Swap using Flash Loan & Limit Orders**
  */
-// async function executeSwap(bestTrade) {
-//     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
-
-//     console.log(`⚡ Executing Arbitrage Swap`);
-//     console.log(`BUY: ${buyAmount} USDC → ${optimizedWbtcAmount} WBTC`);
-//     console.log(`SELL: ${optimizedWbtcAmount} WBTC → ${sellAmount} USDC`);
-//     console.log(`📊 Initial Spot Price: ${spotPrice} USDC per WBTC`);
-
-//     try {
-//         // ✅ Step 1: Prepare routeData for Flash Loan
-//         const routeData = ethers.utils.defaultAbiCoder.encode(
-//             ["address", "address", "uint256", "uint256"],
-//             [USDC, WBTC, buyAmount, optimizedWbtcAmount]
-//         );
-
-//         // ✅ Step 2: Request Flash Loan
-//         console.log("🚀 Requesting Flash Loan from smart contract...");
-//         const flashLoanTx = await smartContract.fn_RequestFlashLoan(
-//             USDC,
-//             ethers.utils.parseUnits(buyAmount.toString(), 6),
-//             routeData  // ✅ Send encoded trade parameters
-//         );
-//         await flashLoanTx.wait();
-//         console.log("✅ Flash Loan Successfully Requested! Waiting for loan funds...");
-
-//         // ✅ Step 3: Listen for Flash Loan Event
-//         smartContract.once("FlashLoanReceived", async (asset, amount, premium, initiator) => {
-//             console.log(`📡 Flash Loan Received: ${ethers.utils.formatUnits(amount, 6)} USDC`);
-
-//             // ✅ Step 4: Wait for Approval Event (Funds Ready)
-//             smartContract.once("FundsReadyForLimitOrder", async (approvedAsset, approvedAmount) => {
-//                 console.log(`✅ Tokens Approved for 1inch: ${approvedAmount} ${approvedAsset}`);
-
-//                 // ✅ Step 5: Create Buy Limit Order (USDC → WBTC)
-//                 console.log(`📡 Submitting Buy Limit Order for ${optimizedWbtcAmount} WBTC...`);
-//                 const buyOrderResponse = await createLimitOrders(
-//                     USDC, WBTC, buyAmount, optimizedWbtcAmount, spotPrice, false
-//                 );
-//                 if (!buyOrderResponse) {
-//                     console.error("❌ Failed to submit buy limit order.");
-//                     return false;
-//                 }
-//                 console.log("✅ Buy Limit Order Submitted Successfully! Waiting for execution...");
-
-//                 // ✅ Step 6: Listen for Buy Order Fill Event
-//                 smartContract.once("OrderFilled", async (filledWbtcAmount) => {
-//                     console.log(`📡 Buy Order Filled: ${filledWbtcAmount} WBTC`);
-
-//                     // ✅ Step 7: Fetch Spot Price Before Selling
-//                     let updatedData = await optimizeWbtcAmount(buyAmount);
-//                     if (!updatedData) {
-//                         console.error("❌ Failed to fetch updated market data.");
-//                         return false;
-//                     }
-//                     let newSpotPrice = updatedData.spotPrice;
-//                     let sellPrice = Math.max(spotPrice, newSpotPrice) * 1.0016;
-//                     let expectedUsdc1 = sellPrice * filledWbtcAmount;
-
-//                     console.log(`🔄 Setting Sell Price: ${sellPrice} USDC per WBTC`);
-
-//                     // ✅ Step 8: Submit Sell Limit Order (WBTC → USDC)
-//                     console.log("📡 Submitting Sell Limit Order...");
-//                     const sellOrderResponse = await createLimitOrders(
-//                         WBTC, USDC, filledWbtcAmount, expectedUsdc1, sellPrice, true
-//                     );
-//                     if (!sellOrderResponse) {
-//                         console.error("❌ Failed to submit sell limit order.");
-//                         return false;
-//                     }
-
-//                     // ✅ Step 9: Listen for Sell Order Fill Event
-//                     smartContract.once("OrderFilled", async (receivedUsdc) => {
-//                         console.log(`📡 Sell Order Filled: ${receivedUsdc} USDC`);
-
-//                         // ✅ Step 10: Ensure Profitability & Repay Flash Loan
-//                         let finalUsdcReceived = parseFloat(receivedUsdc);
-//                         if (finalUsdcReceived < buyAmount) {
-//                             console.log("❌ Not enough USDC received. Trade Reverted.");
-//                             return false;
-//                         }
-
-//                         console.log(`✅ Arbitrage Trade Completed! Profit: $${finalUsdcReceived - buyAmount}`);
-
-//                         return true;
-//                     });
-
-//                     // ✅ Step 11: If Sell Order Fails, Retry Trade
-//                     smartContract.once("OrderFailed", async () => {
-//                         console.log("❌ Order Execution Failed. Retrying...");
-//                         await executeSwap(bestTrade);
-//                     });
-//                 });
-
-//                 // ✅ Step 12: If Buy Order Fails, Retry Trade
-//                 smartContract.once("OrderFailed", async () => {
-//                     console.log("❌ Buy Order Failed. Retrying...");
-//                     await executeSwap(bestTrade);
-//                 });
-//             });
-//         });
-
-//     } catch (error) {
-//         console.error("❌ Error executing arbitrage trade:", error);
-//         await sendTelegramMessage("🚨 **Critical Error:** Flashloan execution failed. Manual intervention required.");
-//         return false;
-//     }
-// }
 
 async function executeSwap(bestTrade) {
     const { buyAmount, sellAmount, optimizedWbtcAmount, spotPrice } = bestTrade;
@@ -1431,10 +1320,15 @@ async function executeSwap(bestTrade) {
 
     try {
         // ✅ Step 1: Encode routeData for Flash Loan
-        const routeData = ethers.utils.defaultAbiCoder.encode(
-            ["address", "address", "uint256", "uint256"],
-            [USDC, WBTC, buyAmount, optimizedWbtcAmount]
-        );
+        // const routeData = ethers.utils.defaultAbiCoder.encode(
+        //     ["address", "address", "uint256", "uint256"],
+        //     [USDC, WBTC, buyAmount, optimizedWbtcAmount]
+        // );
+           const abiCoder = new ethers.utils.AbiCoder();
+           const routeData = abiCoder.encode(
+               ["address", "address", "uint256", "uint256"],
+               [USDC, WBTC, buyAmount, optimizedWbtcAmount]
+      );
 
         // ✅ Step 2: Request Flash Loan
         console.log("🚀 Requesting Flash Loan...");
