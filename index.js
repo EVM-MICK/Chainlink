@@ -1166,7 +1166,7 @@ async function createLimitOrders(fromToken, toToken, amount, expectedReceive, sp
             makerAsset: FromToken,
             takerAsset: ToToken,
             maker: WALLET_ADDRESS,
-            receiver: "0xdcf1be3d2e5e7b4168a0ce9a158af0799c055eb3",
+            receiver: "0xDcf1Be3D2e5e7b4168A0CE9a158Af0799C055EB3",
             makingAmount,
             takingAmount,
             makerTraits: "0x",
