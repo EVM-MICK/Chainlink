@@ -73,16 +73,19 @@ const ERC20_ABI = [
 ];
 
 // Define contract addresses POLYGON_CONTRACT_ADDRESS ARBITRUM_CONTRACT_ADDRESS
+// ENV variable to set BASE_WS, baseSmartContract.json
 const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
+const BASE_CONTRACT_ADDRESS = process.env.BASE_SMART_CONTRACT;
+const providerBase = new ethers.WebSocketProvider(process.env.BASE_WS);
+const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, providerBase);
+const walletBase = new ethers.Wallet(process.env.PRIVATE_KEY, providerBase);
+const BASE_ABI = safeLoadJson(baseAbiPath);
+const baseAbiPath = path.join(__dirname, "baseSmartContract.json");
+const DAILY_PROFIT_TARGET = ethers.parseUnits("5000", 6); // 5000 USDC
 const WALLET_ADDRESS = process.env.WALLET_ADDRESS_MAIN;
-// Define providers and wallets for both networks;
-// const providerPolygon = new ethers.JsonRpcProvider(process.env.POLYGON_RPC);
-// const providerArbitrum = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC);
-
 const providerPolygon = new ethers.WebSocketProvider(process.env.POLYGON_WS);
 const providerArbitrum = new ethers.WebSocketProvider(process.env.ARBITRUM_WS);
-
 const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
 
@@ -1572,6 +1575,86 @@ async function executeArbitrage() {
     }
 }
 
+/**
+ * Listens for smart contract events and sends Telegram notifications
+ */
+function setupEventListeners() {
+    BaseContract.on("FlashLoanRequested", async (amount) => {
+        await sendTelegramMessage(`📢 Flash Loan Requested: ${ethers.formatUnits(amount, 6)} USDC`);
+    });
+
+    BaseContract.on("FlashLoanReceived", async (amount, newCollateral) => {
+        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | Updated Collateral: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+    });
+
+    BaseContract.on("BorrowRequested", async (amount) => {
+        await sendTelegramMessage(`💳 Borrowing ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
+    });
+
+    BaseContract.on("FlashLoanRepaid", async (amount, remainingBalance) => {
+        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(amount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
+    });
+
+    BaseContract.on("ProfitAddedToCollateral", async (newCollateral) => {
+        await sendTelegramMessage(`✅ Profit Added to Collateral! New Collateral: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+    });
+
+    BaseContract.on("ProfitTargetReached", async (balance) => {
+        await sendTelegramMessage(`🎯 Profit Target Reached! Withdrawable Balance: ${ethers.formatUnits(balance, 6)} USDC`);
+        const tx = await BaseContract.checkAndWithdrawProfit();
+        await tx.wait();
+        await sendTelegramMessage(`💰 Profit Withdrawn! Sent ${ethers.formatUnits(balance, 6)} USDC to Owner.`);
+    });
+
+    BaseContract.on("RecursiveProcessRestarting", async () => {
+        await sendTelegramMessage("🔄 Restarting Recursive Lending Process...");
+    });
+
+    BaseContract.on("ErrorOccurred", async (reason) => {
+        await sendTelegramMessage(`❌ Error: ${reason}`);
+    });
+}
+
+
+/**
+ * Executes the lending strategy and manages collateral
+ */
+async function monitorAndExecuteStrategy() {
+    try {
+        console.log("🔄 Checking Lending Data...");
+        const [collateral, borrowed, liquidity] = await BaseContract.getLendingData();
+
+        console.log(`💰 Collateral: ${ethers.formatUnits(collateral, 6)} USDC`);
+        console.log(`💳 Borrowed: ${ethers.formatUnits(borrowed, 6)} USDC`);
+        console.log(`💧 Available Liquidity: ${ethers.formatUnits(liquidity, 6)} USDC`);
+
+        if (borrowed > (collateral * 0.7)) {
+            console.log("⚠️ Over-Borrowed! Repaying Excess Loan...");
+            const tx = await BaseContract.repayExcessLoan();
+            await tx.wait();
+            console.log("✅ Excess Loan Repaid!");
+            await sendTelegramMessage("⚠️ Over-Borrowed! Repaying Excess Loan...");
+        } else {
+            console.log("🚀 Executing Recursive Flash Loan...");
+            const flashLoanAmount = await BaseContract.calculateFlashLoanAmount();
+            const tx = await BaseContract.startRecursiveLending({ value: flashLoanAmount });
+            await tx.wait();
+            console.log("✅ Strategy Execution Completed!");
+            await sendTelegramMessage("🚀 Executing Recursive Flash Loan...");
+        }
+    } catch (error) {
+        console.error("❌ Error executing strategy:", error);
+        await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
+    }
+
+    // 🔁 Schedule next execution after 30 seconds
+    setTimeout(monitorAndExecuteStrategy, 30000);
+}
+
+// Start event listeners and recursive execution
+setupEventListeners();
+monitorAndExecuteStrategy();
+
 
 // 🚀 Start the Bot
-executeArbitrage();
+//executeArbitrage();
