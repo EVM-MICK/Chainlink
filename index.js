@@ -1625,14 +1625,14 @@ async function monitorAndExecuteStrategy() {
         // ✅ Convert values from BigInt to Number for calculations getLendingData()
         const collateral = Number(ethers.formatUnits(totalCollateral1, 6)); 
         const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6)); 
-        const moonweltotalBorrowed = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
+        const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
         const liquidity = Number(ethers.formatUnits(availableLiquidity, 6)); 
         const totalSupplied = Number(ethers.formatUnits(totalSupplied, 6));
         const creditRemaining = Number(creditRemaining) / 100; // ✅ Convert basis points to percentage
 
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
-        console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed} USDC`);
+        console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed1} USDC`);
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`); // ✅ Now correctly displays as percentage
