@@ -1678,7 +1678,7 @@ async function monitorAndExecuteStrategy() {
                 flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
             }
 
-            const tx = await BaseContract.startRecursiveLending();
+            const tx = await BaseContract.startRecursiveLending({ value: flashLoanAmount });
             await tx.wait();
             
             console.log("✅ Strategy Execution Completed!");
