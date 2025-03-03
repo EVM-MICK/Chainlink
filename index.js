@@ -1613,20 +1613,56 @@ function setupEventListeners() {
     });
 }
 
-
 /**
  * Executes the lending strategy and manages collateral
  */
 async function monitorAndExecuteStrategy() {
     try {
         console.log("🔄 Checking Lending Data...");
-        const [collateral, borrowed, liquidity] = await BaseContract.getLendingData();
+        
+        // ✅ Get lending data from the contract
+        const [collateralRaw, borrowedRaw, moonweltotalBorrowedRaw, liquidityRaw, totalSuppliedRaw, creditRemainingRaw] = 
+            await BaseContract.getLendingData();
 
-        console.log(`💰 Collateral: ${ethers.formatUnits(collateral, 6)} USDC`);
-        console.log(`💳 Borrowed: ${ethers.formatUnits(borrowed, 6)} USDC`);
-        console.log(`💧 Available Liquidity: ${ethers.formatUnits(liquidity, 6)} USDC`);
+        // ✅ Convert values from BigInt to Number for calculations
+        const collateral = Number(ethers.formatUnits(collateralRaw, 6)); 
+        const borrowed = Number(ethers.formatUnits(borrowedRaw, 6)); 
+        const moonweltotalBorrowed = Number(ethers.formatUnits(moonweltotalBorrowedRaw, 6)); 
+        const liquidity = Number(ethers.formatUnits(liquidityRaw, 6)); 
+        const totalSupplied = Number(ethers.formatUnits(totalSuppliedRaw, 6));
+        const creditRemaining = Number(ethers.formatUnits(creditRemainingRaw, 2)); // Assuming 2 decimal places for %
 
-        if (borrowed > (collateral * 0.7)) {
+        console.log(`💰 Collateral: ${collateral} USDC`);
+        console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
+        console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed} USDC`);
+        console.log(`💧 Available Liquidity: ${liquidity} USDC`);
+        console.log(`📉 Total Supplied: ${totalSupplied} USDC`);
+        console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
+
+        // ✅ If no collateral, initialize position with 100 USDC
+        if (collateral === 0) {
+            console.log("⚠️ No collateral found! Supplying initial $100 USDC...");
+            await sendTelegramMessage("⚠️ No collateral found! Supplying initial $100 USDC...");
+            
+            const tx = await BaseContract.startRecursiveLending();
+            await tx.wait();
+            
+            console.log("✅ Initial deposit supplied and Flash Loan process started!");
+            return;
+        }
+
+        // ✅ Ensure Credit Remaining is healthy (> 83%) to avoid liquidation risk
+        if (creditRemaining < 83) {
+            console.log("⚠️ Warning! Low Credit Remaining: " + creditRemaining + "% - Pausing Strategy...");
+            await sendTelegramMessage(`⚠️ Warning! Low Credit Remaining: ${creditRemaining}% - Pausing Strategy...`);
+            return;
+        }
+
+        // ✅ Calculate 70% of collateral as safe borrowing limit
+        const safeBorrowLimit = ethers.toBigInt(Math.floor(collateral * 0.7 * 10 ** 6));
+
+        // ✅ Check if borrowed amount exceeds 70% of collateral
+        if (ethers.toBigInt(borrowedRaw) > safeBorrowLimit) {
             console.log("⚠️ Over-Borrowed! Repaying Excess Loan...");
             const tx = await BaseContract.repayExcessLoan();
             await tx.wait();
@@ -1634,9 +1670,17 @@ async function monitorAndExecuteStrategy() {
             await sendTelegramMessage("⚠️ Over-Borrowed! Repaying Excess Loan...");
         } else {
             console.log("🚀 Executing Recursive Flash Loan...");
-            const flashLoanAmount = await BaseContract.calculateFlashLoanAmount();
-            const tx = await BaseContract.startRecursiveLending({ value: flashLoanAmount });
+            
+            // ✅ Fetch flash loan amount only if collateral > $100
+            let flashLoanAmount = 0;
+            if (collateral > 100) {
+                const flashLoanAmountRaw = await BaseContract.calculateFlashLoanAmount();
+                flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
+            }
+
+            const tx = await BaseContract.startRecursiveLending();
             await tx.wait();
+            
             console.log("✅ Strategy Execution Completed!");
             await sendTelegramMessage("🚀 Executing Recursive Flash Loan...");
         }
@@ -1649,10 +1693,9 @@ async function monitorAndExecuteStrategy() {
     setTimeout(monitorAndExecuteStrategy, 30000);
 }
 
-// Start event listeners and recursive execution
+// ✅ Start event listeners and recursive execution
 setupEventListeners();
 monitorAndExecuteStrategy();
-
 
 // 🚀 Start the Bot
 //executeArbitrage();
