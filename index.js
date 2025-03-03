@@ -1621,16 +1621,14 @@ async function monitorAndExecuteStrategy() {
         console.log("🔄 Checking Lending Data...");
         
         // ✅ Get lending data from the contract
-        const [collateralRaw, borrowedRaw, moonweltotalBorrowedRaw, liquidityRaw, totalSuppliedRaw, creditRemainingRaw] = 
-            await BaseContract.getLendingData();
-
-        // ✅ Convert values from BigInt to Number for calculations
-        const collateral = Number(ethers.formatUnits(collateralRaw, 6)); 
-        const borrowed = Number(ethers.formatUnits(borrowedRaw, 6)); 
-        const moonweltotalBorrowed = Number(ethers.formatUnits(moonweltotalBorrowedRaw, 6)); 
-        const liquidity = Number(ethers.formatUnits(liquidityRaw, 6)); 
-        const totalSupplied = Number(ethers.formatUnits(totalSuppliedRaw, 6));
-        const creditRemaining = Number(creditRemainingRaw) / 100; // ✅ Convert basis points to percentage
+        const [totalCollateral1, totalBorrowed1, moonweltotalBorrowed, availableLiquidity, totalSupplied, creditRemaining] = await BaseContract.getLendingData();
+        // ✅ Convert values from BigInt to Number for calculations getLendingData()
+        const collateral = Number(ethers.formatUnits(totalCollateral1, 6)); 
+        const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6)); 
+        const moonweltotalBorrowed = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
+        const liquidity = Number(ethers.formatUnits(availableLiquidity, 6)); 
+        const totalSupplied = Number(ethers.formatUnits(totalSupplied, 6));
+        const creditRemaining = Number(creditRemaining) / 100; // ✅ Convert basis points to percentage
 
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
@@ -1662,7 +1660,7 @@ async function monitorAndExecuteStrategy() {
         const safeBorrowLimit = ethers.toBigInt(Math.floor(collateral * 0.7 * 10 ** 6));
 
         // ✅ Check if borrowed amount exceeds 70% of collateral
-        if (ethers.toBigInt(borrowedRaw) > safeBorrowLimit) {
+        if (ethers.toBigInt(totalBorrowed1) > safeBorrowLimit) {
             console.log("⚠️ Over-Borrowed! Repaying Excess Loan...");
             const tx = await BaseContract.repayExcessLoan();
             await tx.wait();
