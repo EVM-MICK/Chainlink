@@ -36,7 +36,7 @@ const privateKey = process.env.PRIVATE_KEY;
 //const __dirname = path.resolve();
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
 const arbitrumAbiPath = path.join(__dirname, "ArbitrumSmartContract.json");
-
+const baseAbiPath = path.join(__dirname, "baseSmartContract.json");
 
 // ✅ Safely Read and Parse JSON Files
 function safeLoadJson(filePath) {
@@ -53,6 +53,7 @@ function safeLoadJson(filePath) {
 // ✅ Load Smart Contract ABIs
 const POLYGON_ABI = safeLoadJson(polygonAbiPath);
 const ARBITRUM_ABI = safeLoadJson(arbitrumAbiPath);
+const BASE_ABI = safeLoadJson(baseAbiPath);
 if (!POLYGON_ABI || !ARBITRUM_ABI) {
     console.error("🚨 Missing or invalid ABI files. Please check your JSON files.");
     process.exit(1); // Stop execution to prevent errors later
@@ -77,22 +78,19 @@ const ERC20_ABI = [
 const POLYGON_CONTRACT_ADDRESS = process.env.POLYGON_SMART_CONTRACT;
 const ARBITRUM_CONTRACT_ADDRESS = process.env.ARBITRUM_SMART_CONTRACT;
 const BASE_CONTRACT_ADDRESS = process.env.BASE_SMART_CONTRACT;
-const providerBase = new ethers.WebSocketProvider(process.env.BASE_WS);
-const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, providerBase);
-const walletBase = new ethers.Wallet(process.env.PRIVATE_KEY, providerBase);
-const BASE_ABI = safeLoadJson(baseAbiPath);
-const baseAbiPath = path.join(__dirname, "baseSmartContract.json");
 const DAILY_PROFIT_TARGET = ethers.parseUnits("5000", 6); // 5000 USDC
 const WALLET_ADDRESS = process.env.WALLET_ADDRESS_MAIN;
 const providerPolygon = new ethers.WebSocketProvider(process.env.POLYGON_WS);
 const providerArbitrum = new ethers.WebSocketProvider(process.env.ARBITRUM_WS);
+const providerBase = new ethers.WebSocketProvider(process.env.BASE_WS);
 const walletPolygon = new ethers.Wallet(process.env.PRIVATE_KEY, providerPolygon);
 const walletArbitrum = new ethers.Wallet(process.env.PRIVATE_KEY, providerArbitrum);
-
+const walletBase = new ethers.Wallet(process.env.PRIVATE_KEY, providerBase);
 // Load Smart Contracts for both networks polygonContract arbitrumContract
 const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
+const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, providerBase);
 const SMART_CONTRACT_ABI = [
   // Add your contract ABI here
 ];
