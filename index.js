@@ -90,7 +90,7 @@ const walletBase = new ethers.Wallet(process.env.PRIVATE_KEY, providerBase);
 const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
-const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, providerBase);
+const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, walletBase);
 const SMART_CONTRACT_ABI = [
   // Add your contract ABI here
 ];
@@ -1630,14 +1630,14 @@ async function monitorAndExecuteStrategy() {
         const moonweltotalBorrowed = Number(ethers.formatUnits(moonweltotalBorrowedRaw, 6)); 
         const liquidity = Number(ethers.formatUnits(liquidityRaw, 6)); 
         const totalSupplied = Number(ethers.formatUnits(totalSuppliedRaw, 6));
-        const creditRemaining = Number(ethers.formatUnits(creditRemainingRaw, 2)); // Assuming 2 decimal places for %
+        const creditRemaining = Number(creditRemainingRaw) / 100; // ✅ Convert basis points to percentage
 
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
         console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed} USDC`);
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied} USDC`);
-        console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
+        console.log(`🛡️ Credit Remaining: ${creditRemaining}%`); // ✅ Now correctly displays as percentage
 
         // ✅ If no collateral, initialize position with 100 USDC
         if (collateral === 0) {
