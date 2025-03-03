@@ -1627,15 +1627,15 @@ async function monitorAndExecuteStrategy() {
         const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6)); 
         const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
         const liquidity = Number(ethers.formatUnits(availableLiquidity, 6)); 
-        const totalSupplied = Number(ethers.formatUnits(totalSupplied, 6));
-        const creditRemaining = Number(creditRemaining) / 100; // ✅ Convert basis points to percentage
+        const totalSupplied1 = Number(ethers.formatUnits(totalSupplied, 6));
+        const creditRemaining1 = Number(creditRemaining) / 100; // ✅ Convert basis points to percentage
 
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
         console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed1} USDC`);
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
-        console.log(`📉 Total Supplied: ${totalSupplied} USDC`);
-        console.log(`🛡️ Credit Remaining: ${creditRemaining}%`); // ✅ Now correctly displays as percentage
+        console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
+        console.log(`🛡️ Credit Remaining: ${creditRemaining1}%`); // ✅ Now correctly displays as percentage
 
         // ✅ If no collateral, initialize position with 100 USDC
         if (collateral === 0) {
