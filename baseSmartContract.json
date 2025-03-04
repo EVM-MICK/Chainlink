@@ -154,6 +154,19 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "newCollateral",
+				"type": "uint256"
+			}
+		],
+		"name": "CollateralUpdated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "balance",
 				"type": "uint256"
 			}
