@@ -1581,27 +1581,32 @@ function setupEventListeners() {
         await sendTelegramMessage(`📢 Flash Loan Requested: ${ethers.formatUnits(amount, 6)} USDC`);
     });
 
-    BaseContract.on("FlashLoanReceived", async (amount, newCollateral) => {
-        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | Updated Collateral: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+    BaseContract.on("FlashLoanReceived", async (amount, currentCollateral) => {
+        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | Current Collateral: ${ethers.formatUnits(currentCollateral, 6)} USDC`);
+    });
+
+    BaseContract.on("CollateralUpdated", async (newCollateral) => {
+        await sendTelegramMessage(`🔄 Collateral Updated After Minting: ${ethers.formatUnits(newCollateral, 6)} USDC`);
     });
 
     BaseContract.on("BorrowRequested", async (amount) => {
         await sendTelegramMessage(`💳 Borrowing ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
     });
 
+    BaseContract.on("CollateralAfterBorrow", async (collateralAfterBorrow) => {
+        await sendTelegramMessage(`📉 Collateral After Borrowing: ${ethers.formatUnits(collateralAfterBorrow, 6)} USDC`);
+    });
+
     BaseContract.on("FlashLoanRepaid", async (amount, remainingBalance) => {
         await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(amount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
-    BaseContract.on("ProfitAddedToCollateral", async (newCollateral) => {
-        await sendTelegramMessage(`✅ Profit Added to Collateral! New Collateral: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+    BaseContract.on("RemainingBalanceAfterRepay", async (remainingBalanceAfterRepay) => {
+        await sendTelegramMessage(`✅ Remaining Balance After Repay: ${ethers.formatUnits(remainingBalanceAfterRepay, 6)} USDC`);
     });
 
-    BaseContract.on("ProfitTargetReached", async (balance) => {
-        await sendTelegramMessage(`🎯 Profit Target Reached! Withdrawable Balance: ${ethers.formatUnits(balance, 6)} USDC`);
-        const tx = await BaseContract.checkAndWithdrawProfit();
-        await tx.wait();
-        await sendTelegramMessage(`💰 Profit Withdrawn! Sent ${ethers.formatUnits(balance, 6)} USDC to Owner.`);
+    BaseContract.on("ProfitAddedToCollateral", async (finalCollateral) => {
+        await sendTelegramMessage(`✅ Profit Added to Collateral! New Collateral: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
 
     BaseContract.on("RecursiveProcessRestarting", async () => {
