@@ -141,6 +141,19 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "collateralAfterBorrow",
+				"type": "uint256"
+			}
+		],
+		"name": "CollateralAfterBorrow",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "balance",
 				"type": "uint256"
 			}
@@ -377,6 +390,19 @@
 			}
 		],
 		"name": "Redeem",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "remainingBalanceAfterRepay",
+				"type": "uint256"
+			}
+		],
+		"name": "RemainingBalanceAfterRepay",
 		"type": "event"
 	},
 	{
