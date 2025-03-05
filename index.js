@@ -1576,7 +1576,11 @@ async function executeArbitrage() {
 /**
  * Listens for smart contract events and sends Telegram notifications
  */
-function setupEventListeners() {
+
+function setupEventListeners(BaseContract) {
+    console.log("📡 Setting up event listeners...");
+
+    // ✅ Flash Loan Events
     BaseContract.on("FlashLoanRequested", async (amount) => {
         await sendTelegramMessage(`📢 Flash Loan Requested: ${ethers.formatUnits(amount, 6)} USDC`);
     });
@@ -1585,30 +1589,78 @@ function setupEventListeners() {
         await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | Current Collateral: ${ethers.formatUnits(currentCollateral, 6)} USDC`);
     });
 
+    BaseContract.on("FlashLoanRepaid", async (amount, remainingBalance) => {
+        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(amount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
+    });
+
+    BaseContract.on("FlashLoanCalculated", async (flashLoanAmount, borrowAmount, reinvestAmount, profitExtracted) => {
+        await sendTelegramMessage(
+            `📝 Flash Loan Calculated:\n` +
+            `🔹 Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n` +
+            `🔹 Borrow Amount: ${ethers.formatUnits(borrowAmount, 6)} USDC\n` +
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestAmount, 6)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC`
+        );
+    });
+
+    BaseContract.on("FlashLoanProcessed", async (flashLoanAmount, finalBorrowAmount, profitExtracted, reinvestedAmount) => {
+        await sendTelegramMessage(
+            `📊 Flash Loan Processed:\n` +
+            `🔹 Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n` +
+            `🔹 Final Borrowed: ${ethers.formatUnits(finalBorrowAmount, 6)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC\n` +
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount, 6)} USDC`
+        );
+    });
+
+    // ✅ Collateral & Borrow Events
     BaseContract.on("CollateralUpdated", async (newCollateral) => {
-        await sendTelegramMessage(`🔄 Collateral Updated After Minting: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+        await sendTelegramMessage(`🔄 Collateral Updated: ${ethers.formatUnits(newCollateral, 6)} USDC`);
     });
 
     BaseContract.on("BorrowRequested", async (amount) => {
-        await sendTelegramMessage(`💳 Borrowing ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
+        await sendTelegramMessage(`💳 Borrowing: ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
     });
 
     BaseContract.on("CollateralAfterBorrow", async (collateralAfterBorrow) => {
         await sendTelegramMessage(`📉 Collateral After Borrowing: ${ethers.formatUnits(collateralAfterBorrow, 6)} USDC`);
     });
 
-    BaseContract.on("FlashLoanRepaid", async (amount, remainingBalance) => {
-        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(amount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
-    });
-
     BaseContract.on("RemainingBalanceAfterRepay", async (remainingBalanceAfterRepay) => {
-        await sendTelegramMessage(`✅ Remaining Balance After Repay: ${ethers.formatUnits(remainingBalanceAfterRepay, 6)} USDC`);
+        await sendTelegramMessage(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalanceAfterRepay, 6)} USDC`);
     });
 
     BaseContract.on("ProfitAddedToCollateral", async (finalCollateral) => {
-        await sendTelegramMessage(`✅ Profit Added to Collateral! New Collateral: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
+        await sendTelegramMessage(`✅ Profit Added to Collateral: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
 
+    // ✅ Profit & Reinvestment Events
+    BaseContract.on("ProfitReinvested", async (reinvestedAmount, profitExtracted) => {
+        await sendTelegramMessage(
+            `💹 Profit Reinvested:\n` +
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount, 6)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC`
+        );
+    });
+
+    BaseContract.on("ProfitWithdrawn", async (amount) => {
+        await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
+    });
+
+    // ✅ Borrow Retry & Failure Handling
+    BaseContract.on("BorrowRetryTriggered", async (attempt, retryBorrowPercent) => {
+        await sendTelegramMessage(`🔄 Borrow Retry Attempt #${attempt} at ${retryBorrowPercent}%`);
+    });
+
+    BaseContract.on("BorrowFailed", async (attemptedBorrow) => {
+        await sendTelegramMessage(`❌ Borrow Failed: ${ethers.formatUnits(attemptedBorrow, 6)} USDC`);
+    });
+
+    BaseContract.on("FullCollateralWithdrawn", async (amount) => {
+        await sendTelegramMessage(`🚨 Full Collateral Withdrawn: ${ethers.formatUnits(amount, 6)} USDC. Process Halted.`);
+    });
+
+    // ✅ Process Restart & Error Handling
     BaseContract.on("RecursiveProcessRestarting", async () => {
         await sendTelegramMessage("🔄 Restarting Recursive Lending Process...");
     });
@@ -1616,6 +1668,8 @@ function setupEventListeners() {
     BaseContract.on("ErrorOccurred", async (reason) => {
         await sendTelegramMessage(`❌ Error: ${reason}`);
     });
+
+    console.log("✅ Event listeners initialized successfully.");
 }
 
 /**
