@@ -1732,13 +1732,12 @@ async function monitorAndExecuteStrategy() {
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
     }
     
-     setupEventListeners(BaseContract);
     // 🔁 Schedule next execution after 30 seconds
     setTimeout(monitorAndExecuteStrategy, 30000);  
 }
 
 // ✅ Start event listeners and recursive execution
 monitorAndExecuteStrategy();
-
+setupEventListeners(BaseContract);
 // 🚀 Start the Bot
 //executeArbitrage();
