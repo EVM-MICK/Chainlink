@@ -54,7 +54,7 @@ function safeLoadJson(filePath) {
 const POLYGON_ABI = safeLoadJson(polygonAbiPath);
 const ARBITRUM_ABI = safeLoadJson(arbitrumAbiPath);
 const BASE_ABI = safeLoadJson(baseAbiPath);
-if (!POLYGON_ABI || !ARBITRUM_ABI) {
+if (!POLYGON_ABI || !ARBITRUM_ABI || !BASE_ABI) {
     console.error("🚨 Missing or invalid ABI files. Please check your JSON files.");
     process.exit(1); // Stop execution to prevent errors later
 }
