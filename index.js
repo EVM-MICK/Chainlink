@@ -1625,7 +1625,7 @@ function setupEventListeners(BaseContract) {
         );
     });
 
-    BaseContract.on("ProfitWithdrawn", async (amount) => {
+    BaseContract.on("ProfitWithdrawn(uint256)", async (amount) => {
         await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
     });
 
