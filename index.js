@@ -1731,13 +1731,13 @@ async function monitorAndExecuteStrategy() {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
     }
-
+    
+     setupEventListeners(BaseContract);
     // 🔁 Schedule next execution after 30 seconds
-    setTimeout(monitorAndExecuteStrategy, 30000);
+    setTimeout(monitorAndExecuteStrategy, 30000);  
 }
 
 // ✅ Start event listeners and recursive execution
-setupEventListeners(BaseContract);
 monitorAndExecuteStrategy();
 
 // 🚀 Start the Bot
