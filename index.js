@@ -66,7 +66,7 @@ const sdk = new SDK({
     blockchainProvider: new PrivateKeyProviderConnector(privateKey, new Web3(process.env.INFURA_URL)), // ✅ Ensures `web3` is defined
 });
 
-dotenv.config();
+//dotenv.config();
 const { Telegraf } = pkg;
 const INFURA_URL = process.env.INFURA_URL;
 const ERC20_ABI = [
