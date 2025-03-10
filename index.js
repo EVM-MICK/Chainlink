@@ -1577,17 +1577,16 @@ async function executeArbitrage() {
  * Listens for smart contract events and sends Telegram notifications
  */
 // ✅ Set up event listeners for the contract
-function setupEventListeners() {
-
+function setupEventListeners(baseContract) {
     console.log("📡 Setting up event listeners...");
 
     // ✅ Flash Loan Events
-    baseContract.on("FlashLoanReceived", async (amount, currentCollateral) => {
-        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | New Collateral: ${ethers.formatUnits(currentCollateral, 6)} USDC`);
+    baseContract.on("FlashLoanReceived", async (amount, newCollateral) => {
+        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC\n🔹 New Collateral: ${ethers.formatUnits(newCollateral, 6)} USDC`);
     });
 
     baseContract.on("FlashLoanRepaid", async (flashLoanAmount, remainingBalance) => {
-        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
+        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n🔹 Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
     // ✅ Borrowing & Collateral Events
@@ -1625,9 +1624,21 @@ function setupEventListeners() {
         await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
     });
 
-    // ✅ mToken Rewards & Yield Events
+    // ✅ Reward Tracking: mToken, USDC & WELL
     baseContract.on("mTokenRewardsRedeemed", async (usdcAmount) => {
         await sendTelegramMessage(`🎁 mToken Rewards Redeemed: ${ethers.formatUnits(usdcAmount, 6)} USDC`);
+    });
+
+    baseContract.on("RewardsWithdrawn", async (owner, amount, tokenType) => {
+        await sendTelegramMessage(`🎉 Rewards Withdrawn:\n🔹 Amount: ${ethers.formatUnits(amount, 6)} ${tokenType}\n🔹 Sent to: ${owner}`);
+    });
+
+    baseContract.on("CurrentRewardState", async (totalUSDCRewards, totalWELLRewards) => {
+        await sendTelegramMessage(
+            `📊 Current Reward Status:\n` +
+            `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards, 6)} USDC\n` +
+            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards, 6)} WELL`
+        );
     });
 
     // ✅ Process Management & Failures
