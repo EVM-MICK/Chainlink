@@ -1577,11 +1577,7 @@ async function executeArbitrage() {
  * Listens for smart contract events and sends Telegram notifications
  */
 // ✅ Set up event listeners for the contract
-function setupEventListeners(baseContract) {
-    if (!baseContract) {
-        console.error("❌ Error: BaseContract is undefined. Cannot attach event listeners.");
-        return;
-    }
+function setupEventListeners() {
 
     console.log("📡 Setting up event listeners...");
 
@@ -1739,7 +1735,7 @@ async function monitorAndExecuteStrategy() {
 }
 
 // ✅ Start event listeners and recursive execution
-setupEventListeners(baseContract);
+setupEventListeners();
 monitorAndExecuteStrategy();
 // 🚀 Start the Bot
 //executeArbitrage();
