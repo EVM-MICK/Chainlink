@@ -114,12 +114,57 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "attemptedBorrow",
+				"type": "uint256"
+			}
+		],
+		"name": "BorrowFailed",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "amount",
 				"type": "uint256"
 			}
 		],
 		"name": "BorrowRequested",
 		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "attempt",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "retryBorrowPercent",
+				"type": "uint256"
+			}
+		],
+		"name": "BorrowRetryTriggered",
+		"type": "event"
+	},
+	{
+		"inputs": [],
+		"name": "calculateFlashLoanAmount",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"inputs": [],
@@ -158,6 +203,19 @@
 				"type": "uint256"
 			}
 		],
+		"name": "CollateralIncreased",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "newCollateral",
+				"type": "uint256"
+			}
+		],
 		"name": "CollateralUpdated",
 		"type": "event"
 	},
@@ -172,6 +230,19 @@
 			}
 		],
 		"name": "ContractUSDCBalance",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "repaidAmount",
+				"type": "uint256"
+			}
+		],
+		"name": "DebtRepaid",
 		"type": "event"
 	},
 	{
@@ -206,6 +277,68 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "flashLoanAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "borrowAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "reinvestAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "profitExtracted",
+				"type": "uint256"
+			}
+		],
+		"name": "FlashLoanCalculated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "flashLoanAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "finalBorrowAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "profitExtracted",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "reinvestedAmount",
+				"type": "uint256"
+			}
+		],
+		"name": "FlashLoanProcessed",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "amount",
 				"type": "uint256"
 			},
@@ -225,7 +358,7 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
-				"name": "amount",
+				"name": "flashLoanAmount",
 				"type": "uint256"
 			},
 			{
@@ -249,6 +382,19 @@
 			}
 		],
 		"name": "FlashLoanRequested",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "FullCollateralWithdrawn",
 		"type": "event"
 	},
 	{
@@ -335,6 +481,38 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "ProfitExtracted",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "reinvestedAmount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "profitExtracted",
+				"type": "uint256"
+			}
+		],
+		"name": "ProfitReinvested",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "balance",
 				"type": "uint256"
 			}
@@ -355,6 +533,19 @@
 				"indexed": false,
 				"internalType": "uint256",
 				"name": "profit",
+				"type": "uint256"
+			}
+		],
+		"name": "ProfitWithdrawn",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
 				"type": "uint256"
 			}
 		],
@@ -457,24 +648,6 @@
 		"type": "function"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "signer",
-				"type": "address"
-			},
-			{
-				"internalType": "bool",
-				"name": "status",
-				"type": "bool"
-			}
-		],
-		"name": "setSignerApproval",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -492,13 +665,6 @@
 		],
 		"name": "SignerApproved",
 		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "startRecursiveLending",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -520,13 +686,6 @@
 		"type": "event"
 	},
 	{
-		"inputs": [],
-		"name": "withdrawDailyYield",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -544,6 +703,51 @@
 		],
 		"name": "YieldWithdrawn",
 		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "usdcAmount",
+				"type": "uint256"
+			}
+		],
+		"name": "mTokenRewardsRedeemed",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "signer",
+				"type": "address"
+			},
+			{
+				"internalType": "bool",
+				"name": "status",
+				"type": "bool"
+			}
+		],
+		"name": "setSignerApproval",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "startRecursiveLending",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "withdrawDailyYield",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"inputs": [
@@ -579,11 +783,11 @@
 	},
 	{
 		"inputs": [],
-		"name": "calculateFlashLoanAmount",
+		"name": "cycleCount",
 		"outputs": [
 			{
 				"internalType": "uint256",
-				"name": "flashLoanAmount",
+				"name": "",
 				"type": "uint256"
 			}
 		],
