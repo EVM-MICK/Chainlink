@@ -91,6 +91,9 @@ const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
 const BaseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, walletBase);
+const SMART_CONTRACT_ABI = [
+  // Add your contract ABI here
+];
 const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3"; // Permit2 contract address
 // Initialize Redis cache
 const permit2Abi = [
@@ -1574,72 +1577,96 @@ async function executeArbitrage() {
  * Listens for smart contract events and sends Telegram notifications
  */
 
-// ✅ Event Listener Setup
-async function setupEventListeners() {
-    if (!BaseContract) {
-        console.error("❌ Error: BaseContract is undefined. Cannot attach event listeners.");
-        return;
-    }
+function setupEventListeners(BaseContract) {
+    console.log("📡 Setting up event listeners...");
 
-    console.log("🎧 Listening for contract events...");
-
+    // ✅ Flash Loan Events
     BaseContract.on("FlashLoanRequested", async (amount) => {
-        console.log(`📢 Flash Loan Requested: ${ethers.formatUnits(amount, 6)} USDC`);
+        await sendTelegramMessage(`📢 Flash Loan Requested: ${ethers.formatUnits(amount, 6)} USDC`);
     });
 
+    BaseContract.on("FlashLoanReceived", async (amount, currentCollateral) => {
+        await sendTelegramMessage(`💰 Flash Loan Received: ${ethers.formatUnits(amount, 6)} USDC | Current Collateral: ${ethers.formatUnits(currentCollateral, 6)} USDC`);
+    });
+
+    BaseContract.on("FlashLoanRepaid", async (amount, remainingBalance) => {
+        await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(amount, 6)} USDC | Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
+    });
+
+    BaseContract.on("FlashLoanCalculated", async (flashLoanAmount, borrowAmount, reinvestAmount, profitExtracted) => {
+        await sendTelegramMessage(
+            `📝 Flash Loan Calculated:\n` +
+            `🔹 Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n` +
+            `🔹 Borrow Amount: ${ethers.formatUnits(borrowAmount, 6)} USDC\n` +
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestAmount, 6)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC`
+        );
+    });
+
+    BaseContract.on("FlashLoanProcessed", async (flashLoanAmount, finalBorrowAmount, profitExtracted, reinvestedAmount) => {
+        await sendTelegramMessage(
+            `📊 Flash Loan Processed:\n` +
+            `🔹 Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n` +
+            `🔹 Final Borrowed: ${ethers.formatUnits(finalBorrowAmount, 6)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC\n` +
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount, 6)} USDC`
+        );
+    });
+
+    // ✅ Collateral & Borrow Events
     BaseContract.on("CollateralUpdated", async (newCollateral) => {
-        console.log(`🔄 Collateral Updated: ${ethers.formatUnits(newCollateral, 6)} USDC`);
+        await sendTelegramMessage(`🔄 Collateral Updated: ${ethers.formatUnits(newCollateral, 6)} USDC`);
     });
 
     BaseContract.on("BorrowRequested", async (amount) => {
-        console.log(`💳 Borrowing: ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
+        await sendTelegramMessage(`💳 Borrowing: ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
     });
 
     BaseContract.on("CollateralAfterBorrow", async (collateralAfterBorrow) => {
-        console.log(`📉 Collateral After Borrowing: ${ethers.formatUnits(collateralAfterBorrow, 6)} USDC`);
+        await sendTelegramMessage(`📉 Collateral After Borrowing: ${ethers.formatUnits(collateralAfterBorrow, 6)} USDC`);
     });
 
     BaseContract.on("RemainingBalanceAfterRepay", async (remainingBalanceAfterRepay) => {
-        console.log(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalanceAfterRepay, 6)} USDC`);
+        await sendTelegramMessage(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalanceAfterRepay, 6)} USDC`);
     });
 
     BaseContract.on("ProfitAddedToCollateral", async (finalCollateral) => {
-        console.log(`✅ Profit Added to Collateral: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
+        await sendTelegramMessage(`✅ Profit Added to Collateral: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
 
     // ✅ Profit & Reinvestment Events
     BaseContract.on("ProfitReinvested", async (reinvestedAmount, profitExtracted) => {
-        console.log(
+        await sendTelegramMessage(
             `💹 Profit Reinvested:\n` +
             `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount, 6)} USDC\n` +
             `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC`
         );
     });
 
-    BaseContract.on("ProfitWithdrawn", async (amount) => {
-        console.log(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
-    });
+    BaseContract.on("ProfitWithdrawn(uint256)", async (amount) => {
+    await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
+   });
 
     // ✅ Borrow Retry & Failure Handling
     BaseContract.on("BorrowRetryTriggered", async (attempt, retryBorrowPercent) => {
-        console.log(`🔄 Borrow Retry Attempt #${attempt} at ${retryBorrowPercent}%`);
+        await sendTelegramMessage(`🔄 Borrow Retry Attempt #${attempt} at ${retryBorrowPercent}%`);
     });
 
     BaseContract.on("BorrowFailed", async (attemptedBorrow) => {
-        console.log(`❌ Borrow Failed: ${ethers.formatUnits(attemptedBorrow, 6)} USDC`);
+        await sendTelegramMessage(`❌ Borrow Failed: ${ethers.formatUnits(attemptedBorrow, 6)} USDC`);
     });
 
     BaseContract.on("FullCollateralWithdrawn", async (amount) => {
-        console.log(`🚨 Full Collateral Withdrawn: ${ethers.formatUnits(amount, 6)} USDC. Process Halted.`);
+        await sendTelegramMessage(`🚨 Full Collateral Withdrawn: ${ethers.formatUnits(amount, 6)} USDC. Process Halted.`);
     });
 
     // ✅ Process Restart & Error Handling
     BaseContract.on("RecursiveProcessRestarting", async () => {
-        console.log("🔄 Restarting Recursive Lending Process...");
+        await sendTelegramMessage("🔄 Restarting Recursive Lending Process...");
     });
 
     BaseContract.on("ErrorOccurred", async (reason) => {
-        console.log(`❌ Error: ${reason}`);
+        await sendTelegramMessage(`❌ Error: ${reason}`);
     });
 
     console.log("✅ Event listeners initialized successfully.");
