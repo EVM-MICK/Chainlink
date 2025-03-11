@@ -1716,7 +1716,7 @@ async function monitorAndExecuteStrategy() {
         // ✅ Check if borrowed amount exceeds 70% of collateral
         if (ethers.toBigInt(totalBorrowed1) > safeBorrowLimit) {
             console.log("⚠️ Over-Borrowed! Repaying Excess Loan...");
-            const tx = await baseContract.repayExcessLoan();
+            const tx = await baseContract.calculateFlashLoanAmount();
             await tx.wait();
             console.log("✅ Excess Loan Repaid!");
             await sendTelegramMessage("⚠️ Over-Borrowed! Repaying Excess Loan...");
