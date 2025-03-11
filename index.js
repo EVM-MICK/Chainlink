@@ -1589,7 +1589,7 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n🔹 Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
-// ✅ Capture and store the first borrowed amount
+    // ✅ Capture and store the first borrowed amount
     baseContract.on("BorrowRequested", async (amount) => {
         firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Update globally
         console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
@@ -1641,6 +1641,15 @@ function setupEventListeners(baseContract) {
             `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards, 6)} USDC\n` +
             `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards, 6)} WELL`
         );
+    });
+
+    // ✅ New Reward Claim Events (Mint & Borrow)
+    baseContract.on("RewardClaimedAfterMint", async () => {
+        await sendTelegramMessage(`🟢 Reward Claimed After Minting! 🎉`);
+    });
+
+    baseContract.on("RewardClaimedAfterBorrow", async () => {
+        await sendTelegramMessage(`🟢 Reward Claimed After Borrowing! 🎉`);
     });
 
     // ✅ Process Management & Failures
