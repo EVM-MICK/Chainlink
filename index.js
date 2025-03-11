@@ -1712,55 +1712,43 @@ function setupEventListeners(baseContract) {
         if (collateral === 0) {
             console.log("⚠️ No collateral found! Supplying initial $100 USDC...");
             await sendTelegramMessage("⚠️ No collateral found! Supplying initial $100 USDC...");
-            
             const tx = await baseContract.startRecursiveLending();
             await tx.wait();
-            
             console.log("✅ Initial deposit supplied and Flash Loan process started!");
             return;
         }
-
         // ✅ Ensure Credit Remaining is healthy (> 83%) to avoid liquidation risk
         if (creditRemaining < 83) {
             console.log("⚠️ Warning! Low Credit Remaining: " + creditRemaining + "% - Pausing Strategy...");
             await sendTelegramMessage(`⚠️ Warning! Low Credit Remaining: ${creditRemaining}% - Pausing Strategy...`);
             return;
         }
-
         // ✅ Wait for the firstBorrowedAmount to be updated
         while (firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Wait 1 second before retrying
         }
-
         // ✅ Use first borrowed amount from event listener
         console.log(`🔢 Using First Borrowed Amount for Next Cycle: ${firstBorrowedAmount} USDC`);
-
         // ✅ Compute Flash Loan Amount using first borrowed amount
         const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(ethers.parseUnits(firstBorrowedAmount.toString(), 6));
         const flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
-
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             return;
         }
-
         // ✅ Execute Recursive Flash Loan Process
         console.log(`🚀 Executing Recursive Flash Loan: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-
         const tx = await baseContract.startRecursiveLending({
             value: flashLoanAmount
         });
         await tx.wait();
-
         console.log("✅ Strategy Execution Completed!");
         await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
     }
-
     // 🔁 Schedule next execution after 30 seconds
     setTimeout(monitorAndExecuteStrategy, 30000);
 }
