@@ -1746,7 +1746,7 @@ async function monitorAndExecuteStrategy() {
 }
 
 // ✅ Start event listeners and recursive execution
-setupEventListeners();
+setupEventListeners(baseContract);
 monitorAndExecuteStrategy();
 // 🚀 Start the Bot
 //executeArbitrage();
