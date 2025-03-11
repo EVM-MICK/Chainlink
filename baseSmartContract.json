@@ -15,6 +15,16 @@
 				"internalType": "address",
 				"name": "_usdc",
 				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "_well",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "_rewardDistributor",
+				"type": "address"
 			}
 		],
 		"stateMutability": "nonpayable",
@@ -174,13 +184,6 @@
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "checkAPYAndWithdraw",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -238,6 +241,25 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "totalUSDCRewards",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "totalWELLRewards",
+				"type": "uint256"
+			}
+		],
+		"name": "CurrentRewardState",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "repaidAmount",
 				"type": "uint256"
 			}
@@ -284,18 +306,6 @@
 				"indexed": false,
 				"internalType": "uint256",
 				"name": "borrowAmount",
-				"type": "uint256"
-			},
-			{
-				"indexed": false,
-				"internalType": "uint256",
-				"name": "reinvestAmount",
-				"type": "uint256"
-			},
-			{
-				"indexed": false,
-				"internalType": "uint256",
-				"name": "profitExtracted",
 				"type": "uint256"
 			}
 		],
@@ -409,13 +419,6 @@
 		],
 		"name": "LoanRepaid",
 		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "logLendingData",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -623,13 +626,6 @@
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "repayExcessLoan",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"inputs": [
 			{
 				"internalType": "address",
@@ -643,6 +639,49 @@
 			}
 		],
 		"name": "revokeApproval",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "string",
+				"name": "tokenType",
+				"type": "string"
+			}
+		],
+		"name": "RewardsWithdrawn",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "signer",
+				"type": "address"
+			},
+			{
+				"internalType": "bool",
+				"name": "status",
+				"type": "bool"
+			}
+		],
+		"name": "setSignerApproval",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -667,6 +706,13 @@
 		"type": "event"
 	},
 	{
+		"inputs": [],
+		"name": "startRecursiveLending",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -684,6 +730,13 @@
 		],
 		"name": "WithdrawalExecuted",
 		"type": "event"
+	},
+	{
+		"inputs": [],
+		"name": "withdrawDailyYield",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -716,38 +769,6 @@
 		],
 		"name": "mTokenRewardsRedeemed",
 		"type": "event"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "signer",
-				"type": "address"
-			},
-			{
-				"internalType": "bool",
-				"name": "status",
-				"type": "bool"
-			}
-		],
-		"name": "setSignerApproval",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "startRecursiveLending",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "withdrawDailyYield",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"inputs": [
@@ -886,6 +907,19 @@
 	},
 	{
 		"inputs": [],
+		"name": "rewardDistributor",
+		"outputs": [
+			{
+				"internalType": "contract IMultiRewardDistributor",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
 		"name": "SAFE_BORROW_PERCENT",
 		"outputs": [
 			{
@@ -926,6 +960,19 @@
 	{
 		"inputs": [],
 		"name": "usdc",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "well",
 		"outputs": [
 			{
 				"internalType": "contract IERC20",
