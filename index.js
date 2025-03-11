@@ -1080,7 +1080,6 @@ async function validateWbtcToUsdc(wbtcAmount1) {
 }
 
 
-
 // 🔄 Optimize WBTC Amount Until USDC Output is Profitable
 async function optimizeWbtcAmount(usdcCapital) {
     console.log(`📡 Fetching expected WBTC amount for ${usdcCapital} USDC...`);
@@ -1668,12 +1667,20 @@ function setupEventListeners(baseContract) {
 /**
  * Executes the lending strategy and manages collateral
  */
+
 async function monitorAndExecuteStrategy() {
     try {
         console.log("🔄 Checking Lending Data...");
-              // ✅ Fetch lending data
-        const [totalCollateral1, totalBorrowed1, moonweltotalBorrowed, availableLiquidity, totalSupplied, creditRemainingRaw] =
-            await baseContract.getLendingData();
+
+        // ✅ Fetch lending data
+        const [
+            totalCollateral1,
+            totalBorrowed1,
+            moonweltotalBorrowed,
+            availableLiquidity,
+            totalSupplied,
+            creditRemainingRaw
+        ] = await baseContract.getLendingData();
 
         // ✅ Convert values from BigInt to Number
         const collateral = Number(ethers.formatUnits(totalCollateral1, 6)); 
@@ -1681,7 +1688,7 @@ async function monitorAndExecuteStrategy() {
         const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
         const liquidity = Number(ethers.formatUnits(availableLiquidity, 6)); 
         const totalSupplied1 = Number(ethers.formatUnits(totalSupplied, 6));
-        const creditRemaining = Number(creditRemainingRaw) / 100; // ✅ Convert basis points to percentage
+        const creditRemaining = Number(creditRemainingRaw) / 100;
 
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
@@ -1689,7 +1696,6 @@ async function monitorAndExecuteStrategy() {
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
-
 
         // ✅ If no collateral, initialize position with 100 USDC
         if (collateral === 0) {
@@ -1710,40 +1716,33 @@ async function monitorAndExecuteStrategy() {
             return;
         }
 
-        // ✅ Calculate 70% of collateral as safe borrowing limit
-        const safeBorrowLimit = ethers.toBigInt(Math.floor(collateral * 0.7 * 10 ** 6));
-
-        // ✅ Check if borrowed amount exceeds 70% of collateral
-        if (ethers.toBigInt(totalBorrowed1) > safeBorrowLimit) {
-            console.log("⚠️ Over-Borrowed! Repaying Excess Loan...");
-            const tx = await baseContract.calculateFlashLoanAmount();
-            await tx.wait();
-            console.log("✅ Excess Loan Repaid!");
-            await sendTelegramMessage("⚠️ Over-Borrowed! Repaying Excess Loan...");
-        } else {
-            console.log("🚀 Executing Recursive Flash Loan...");
-            
-            // ✅ Fetch flash loan amount only if collateral > $100
-            let flashLoanAmount = 0;
-            if (collateral > 100) {
-                const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount();
-                flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
-            }
-
-            const tx = await baseContract.startRecursiveLending({ value: flashLoanAmount });
-            await tx.wait();
-            
-            console.log("✅ Strategy Execution Completed!");
-            await sendTelegramMessage("🚀 Executing Recursive Flash Loan...");
+        // ✅ Compute correct Flash Loan Amount (at least previous cycle’s debt)
+        const flashLoanAmount = await calculateFlashLoanAmount();
+        if (flashLoanAmount > liquidity) {
+            console.log("❌ Not enough liquidity to request flash loan.");
+            return;
         }
+
+        // ✅ Execute Recursive Flash Loan Process
+        console.log(`🚀 Executing Recursive Flash Loan: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
+        const tx = await baseContract.startRecursiveLending({
+            value: flashLoanAmount
+        });
+        await tx.wait();
+
+        console.log("✅ Strategy Execution Completed!");
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
     }
-    
+
     // 🔁 Schedule next execution after 30 seconds
-    setTimeout(monitorAndExecuteStrategy, 30000);  
+    setTimeout(monitorAndExecuteStrategy, 30000);
 }
+
 
 // ✅ Start event listeners and recursive execution
 setupEventListeners(baseContract);
