@@ -607,13 +607,27 @@
 	},
 	{
 		"anonymous": false,
-		"inputs": [],
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "string",
+				"name": "rewardType",
+				"type": "string"
+			}
+		],
 		"name": "RewardClaimedAfterBorrow",
 		"type": "event"
 	},
 	{
 		"anonymous": false,
-		"inputs": [],
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "string",
+				"name": "rewardType",
+				"type": "string"
+			}
+		],
 		"name": "RewardClaimedAfterMint",
 		"type": "event"
 	},
@@ -777,13 +791,6 @@
 	{
 		"inputs": [],
 		"name": "startRecursiveLending",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "withdrawDailyYield",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
