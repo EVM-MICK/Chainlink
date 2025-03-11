@@ -91,6 +91,7 @@ const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
 const baseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, walletBase);
+const firstBorrowedAmount = 0; // ✅ Global variable to store the latest borrowed amount
 const SMART_CONTRACT_ABI = [
   // Add your contract ABI here
 ];
@@ -1588,9 +1589,11 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n🔹 Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
-    // ✅ Borrowing & Collateral Events
+// ✅ Capture and store the first borrowed amount
     baseContract.on("BorrowRequested", async (amount) => {
-        await sendTelegramMessage(`💳 Borrowing: ${ethers.formatUnits(amount, 6)} USDC from Moonwell.`);
+        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Update globally
+        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
     });
 
     baseContract.on("CollateralUpdated", async (newCollateral) => {
@@ -1667,8 +1670,7 @@ function setupEventListeners(baseContract) {
 /**
  * Executes the lending strategy and manages collateral
  */
-
-async function monitorAndExecuteStrategy() {
+  async function monitorAndExecuteStrategy() {
     try {
         console.log("🔄 Checking Lending Data...");
 
@@ -1716,8 +1718,19 @@ async function monitorAndExecuteStrategy() {
             return;
         }
 
-        // ✅ Compute correct Flash Loan Amount (at least previous cycle’s debt)
-        const flashLoanAmount = await calculateFlashLoanAmount();
+        // ✅ Wait for the firstBorrowedAmount to be updated
+        while (firstBorrowedAmount === 0) {
+            console.log("⏳ Waiting for first borrowed amount update...");
+            await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Wait 1 second before retrying
+        }
+
+        // ✅ Use first borrowed amount from event listener
+        console.log(`🔢 Using First Borrowed Amount for Next Cycle: ${firstBorrowedAmount} USDC`);
+
+        // ✅ Compute Flash Loan Amount using first borrowed amount
+        const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(ethers.parseUnits(firstBorrowedAmount.toString(), 6));
+        const flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
+
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             return;
@@ -1742,7 +1755,6 @@ async function monitorAndExecuteStrategy() {
     // 🔁 Schedule next execution after 30 seconds
     setTimeout(monitorAndExecuteStrategy, 30000);
 }
-
 
 // ✅ Start event listeners and recursive execution
 setupEventListeners(baseContract);
