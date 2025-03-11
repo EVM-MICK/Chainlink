@@ -3,6 +3,19 @@
 		"inputs": [
 			{
 				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			}
+		],
+		"name": "addWhitelistedSpender",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
 				"name": "_balancerVault",
 				"type": "address"
 			},
@@ -23,7 +36,7 @@
 			},
 			{
 				"internalType": "address",
-				"name": "_rewardDistributor",
+				"name": "_comptroller",
 				"type": "address"
 			}
 		],
@@ -60,19 +73,6 @@
 		],
 		"name": "AccrueInterest",
 		"type": "event"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "spender",
-				"type": "address"
-			}
-		],
-		"name": "addWhitelistedSpender",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -164,7 +164,13 @@
 		"type": "event"
 	},
 	{
-		"inputs": [],
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "previousBorrowedAmount",
+				"type": "uint256"
+			}
+		],
 		"name": "calculateFlashLoanAmount",
 		"outputs": [
 			{
@@ -556,19 +562,6 @@
 		"type": "event"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "bytes",
-				"name": "userData",
-				"type": "bytes"
-			}
-		],
-		"name": "receiveFlashLoan",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [],
 		"name": "RecursiveProcessRestarting",
@@ -613,35 +606,16 @@
 		"type": "event"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "spender",
-				"type": "address"
-			}
-		],
-		"name": "removeWhitelistedSpender",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
+		"anonymous": false,
+		"inputs": [],
+		"name": "RewardClaimedAfterBorrow",
+		"type": "event"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "token",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "spender",
-				"type": "address"
-			}
-		],
-		"name": "revokeApproval",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
+		"anonymous": false,
+		"inputs": [],
+		"name": "RewardClaimedAfterMint",
+		"type": "event"
 	},
 	{
 		"anonymous": false,
@@ -669,24 +643,6 @@
 		"type": "event"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "signer",
-				"type": "address"
-			},
-			{
-				"internalType": "bool",
-				"name": "status",
-				"type": "bool"
-			}
-		],
-		"name": "setSignerApproval",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -706,13 +662,6 @@
 		"type": "event"
 	},
 	{
-		"inputs": [],
-		"name": "startRecursiveLending",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -730,13 +679,6 @@
 		],
 		"name": "WithdrawalExecuted",
 		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "withdrawDailyYield",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -773,6 +715,82 @@
 	{
 		"inputs": [
 			{
+				"internalType": "bytes",
+				"name": "userData",
+				"type": "bytes"
+			}
+		],
+		"name": "receiveFlashLoan",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			}
+		],
+		"name": "removeWhitelistedSpender",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "token",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "spender",
+				"type": "address"
+			}
+		],
+		"name": "revokeApproval",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "signer",
+				"type": "address"
+			},
+			{
+				"internalType": "bool",
+				"name": "status",
+				"type": "bool"
+			}
+		],
+		"name": "setSignerApproval",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "startRecursiveLending",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "withdrawDailyYield",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"internalType": "address",
 				"name": "",
 				"type": "address"
@@ -795,6 +813,19 @@
 		"outputs": [
 			{
 				"internalType": "contract IVaultMain",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "comptroller",
+		"outputs": [
+			{
+				"internalType": "contract IComptroller",
 				"name": "",
 				"type": "address"
 			}
@@ -898,19 +929,6 @@
 		"outputs": [
 			{
 				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "rewardDistributor",
-		"outputs": [
-			{
-				"internalType": "contract IMultiRewardDistributor",
 				"name": "",
 				"type": "address"
 			}
