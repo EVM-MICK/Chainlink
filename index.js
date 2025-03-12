@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const Web3 = require("web3");
-const BigNumber = require("bignumber.js");
+//const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
