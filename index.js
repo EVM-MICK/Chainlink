@@ -16,7 +16,6 @@ const fs = require("fs");
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
-// 🔥 Trade Map to Track Executed Swaps
 const tradeMap = new Map();
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
