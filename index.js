@@ -1599,7 +1599,7 @@ function setupEventListeners(baseContract) {
     baseContract.on("BorrowRequested", async (amount) => {
         firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
         console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${} USDC`);
+        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
     });
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
