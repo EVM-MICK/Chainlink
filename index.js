@@ -1737,9 +1737,10 @@ async function monitorAndExecuteStrategy() {
           return;
         }
 
-     const flashLoanAmount = ethers.BigNumber.isBigNumber(flashLoanAmountRaw) 
-              ? flashLoanAmountRaw.toBigInt() 
-              : ethers.BigNumber.from(flashLoanAmountRaw).toBigInt(); // Otherwise, convert first
+    // ✅ Convert flashLoanAmountRaw safely using ethers.js BigNumber
+ const flashLoanAmount = ethers.BigNumber.isBigNumber(flashLoanAmountRaw)
+    ? flashLoanAmountRaw.toBigInt()  // If already a BigNumber, convert to BigInt
+    : ethers.BigNumber.from(flashLoanAmountRaw).toBigInt(); // Otherwise, convert first
 
       console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
