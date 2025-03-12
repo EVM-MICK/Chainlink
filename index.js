@@ -29,8 +29,6 @@ const {
    QuoteParams
 } = require("@1inch/cross-chain-sdk");
 
-// const { HashLock, NetworkEnum, OrderStatus, PresetEnum, PrivateKeyProviderConnector, SDK } = require("@1inch/cross-chain-sdk");
-
 const privateKey = process.env.PRIVATE_KEY;
 // ✅ Ensure __dirname is defined in CommonJS
 //const __dirname = path.resolve();
@@ -91,7 +89,6 @@ const DEBUG_MODE = process.env.DEBUG === "true";
 const polygonContract = new ethers.Contract(POLYGON_CONTRACT_ADDRESS, POLYGON_ABI, walletPolygon);
 const arbitrumContract = new ethers.Contract(ARBITRUM_CONTRACT_ADDRESS, ARBITRUM_ABI, walletArbitrum);
 const baseContract = new ethers.Contract(BASE_CONTRACT_ADDRESS, BASE_ABI, walletBase);
-const firstBorrowedAmount = 0; // ✅ Global variable to store the latest borrowed amount
 const SMART_CONTRACT_ABI = [
   // Add your contract ABI here
 ];
@@ -1577,6 +1574,8 @@ async function executeArbitrage() {
  * Listens for smart contract events and sends Telegram notifications
  */
 // ✅ Set up event listeners for the contract
+// ✅ Ensure global scope for firstBorrowedAmount
+let firstBorrowedAmount = 0;
 function setupEventListeners(baseContract) {
     console.log("📡 Setting up event listeners...");
 
