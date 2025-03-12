@@ -1729,12 +1729,21 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
+       // ✅ Compute correct Flash Loan Amount using the correct borrowed amount
+       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
 
-        console.log(`🔢 Using Previous Borrow Amount: ${firstBorrowedAmount} USDC`);
-        const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-       // ✅ Ensure correct BigInt conversion
-       const flashLoanAmount = ethers.BigNumber.from(flashLoanAmountRaw).toBigInt();
-       console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+       if (!flashLoanAmountRaw) {
+          console.log("❌ Error: Flash loan amount calculation failed (undefined response). Retrying...");
+          isCycleComplete = true;
+          return;
+        }
+
+     const flashLoanAmount = ethers.BigNumber.isBigNumber(flashLoanAmountRaw) 
+              ? flashLoanAmountRaw.toBigInt() 
+              : ethers.toBigInt(flashLoanAmountRaw);
+
+      console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
        // ✅ Ensure `flashLoanAmount` is a valid uint256 before passing it
        if (flashLoanAmount <= 0n) {
           console.error("❌ Invalid Flash Loan Amount! Aborting...");
