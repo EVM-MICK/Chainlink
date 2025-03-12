@@ -1575,7 +1575,7 @@ async function executeArbitrage() {
  */
 // ✅ Set up event listeners for the contract
 // ✅ Ensure global scope for firstBorrowedAmount
-let firstBorrowedAmount = 0;
+let firstBorrowedAmount = 250;
 function setupEventListeners(baseContract) {
     console.log("📡 Setting up event listeners...");
 
