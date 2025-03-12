@@ -1686,6 +1686,7 @@ function setupEventListeners(baseContract) {
 }
 
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
+let cycleCount = 0; // ✅ Initialize cycle count globally
 
 async function monitorAndExecuteStrategy() {
     try {
