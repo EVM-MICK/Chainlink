@@ -1573,8 +1573,9 @@ async function executeArbitrage() {
 /**
  * Listens for smart contract events and sends Telegram notifications
  */
-// ✅ Ensure global scope for firstBorrowedAmount
-let firstBorrowedAmount = 0;
+
+let firstBorrowedAmount = 0; // ✅ Store the latest borrowed amount dynamicall
+
 function setupEventListeners(baseContract) {
     console.log("📡 Setting up event listeners...");
 
@@ -1587,9 +1588,8 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n🔹 Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
-    // ✅ Capture and store the first borrowed amount
-    baseContract.on("BorrowRequested", async (amount) => {
-        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Update globally
+  baseContract.on("BorrowRequested", async (amount) => {
+        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Store latest borrowed amount
         console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
         await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
     });
@@ -1609,6 +1609,18 @@ function setupEventListeners(baseContract) {
 
     baseContract.on("RemainingBalanceAfterRepay", async (remainingBalance) => {
         await sendTelegramMessage(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
+    });
+            // ✅ Listen for RewardsAccumulated events
+    baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
+        const formattedUSDC = ethers.formatUnits(accumulatedUSDC, 6); // Convert from 6 decimals
+        const formattedWELL = ethers.formatUnits(accumulatedWELL, 6); // WELL is converted to 6 decimals
+
+        console.log(`📊 Rewards Accumulated:`);
+        console.log(`💰 USDC: ${formattedUSDC} USDC`);
+        console.log(`🪙 WELL: ${formattedWELL} WELL`);
+
+        // ✅ Send notification via Telegram (optional)
+        await sendTelegramMessage(`📊 Rewards Accumulated:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
     });
 
     // ✅ Profit & Reinvestment Events
@@ -1721,15 +1733,16 @@ function setupEventListeners(baseContract) {
             await sendTelegramMessage(`⚠️ Warning! Low Credit Remaining: ${creditRemaining}% - Pausing Strategy...`);
             return;
         }
-        // ✅ Wait for the firstBorrowedAmount to be updated
-        while (firstBorrowedAmount === 0) {
-            console.log("⏳ Waiting for first borrowed amount update...");
-            await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ Wait 1 second before retrying
+        // ✅ If `firstBorrowedAmount` is still 0, fetch latest borrow amount from contract
+        if (firstBorrowedAmount === 0) {
+            console.log("⏳ No BorrowRequested event detected, fetching manually...");
+            firstBorrowedAmount = borrowed; // ✅ Use last known borrowed amount
+            console.log(`📊 Using Borrowed (Contract) as firstBorrowedAmount: ${firstBorrowedAmount} USDC`);
         }
-        // ✅ Use first borrowed amount from event listener
-        console.log(`🔢 Using First Borrowed Amount for Next Cycle: ${firstBorrowedAmount} USDC`);
-        // ✅ Compute Flash Loan Amount using first borrowed amount
-        const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(ethers.parseUnits(firstBorrowedAmount.toString(), 6));
+
+        // ✅ Compute correct Flash Loan Amount
+        console.log(`🔢 Using Previous Borrow Amount: ${firstBorrowedAmount} USDC`);
+        const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
         const flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
@@ -1747,8 +1760,8 @@ function setupEventListeners(baseContract) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
     }
-    // 🔁 Schedule next execution after 30 seconds
-    setTimeout(monitorAndExecuteStrategy, 30000);
+    // 🔁 Schedule next execution after 2 seconds
+    setTimeout(monitorAndExecuteStrategy, 200);
 }
 
 // ✅ Start event listeners and recursive execution
