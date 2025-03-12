@@ -1598,7 +1598,7 @@ function setupEventListeners(baseContract) {
     // ✅ Capture the first borrowed amount when the event is emitted
     baseContract.on("BorrowRequested", async (amount) => {
         firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
-        console.log(`🟢 Updated First Borrowed Amount: ${} USDC`);
+        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
         await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${} USDC`);
     });
     // ✅ Debt Management Events
