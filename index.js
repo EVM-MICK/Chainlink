@@ -1740,7 +1740,7 @@ async function monitorAndExecuteStrategy() {
 
      const flashLoanAmount = ethers.BigNumber.isBigNumber(flashLoanAmountRaw) 
               ? flashLoanAmountRaw.toBigInt() 
-              : ethers.toBigInt(flashLoanAmountRaw);
+              : ethers.BigNumber.from(flashLoanAmountRaw).toBigInt(); // Otherwise, convert first
 
       console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
