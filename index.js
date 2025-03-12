@@ -1588,12 +1588,6 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`💸 Flash Loan Repaid: ${ethers.formatUnits(flashLoanAmount, 6)} USDC\n🔹 Remaining Balance: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
 
-  baseContract.on("BorrowRequested", async (amount) => {
-        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Store latest borrowed amount
-        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-    });
-
     baseContract.on("CollateralUpdated", async (newCollateral) => {
         await sendTelegramMessage(`🔄 Collateral Updated: ${ethers.formatUnits(newCollateral, 6)} USDC`);
     });
@@ -1601,7 +1595,12 @@ function setupEventListeners(baseContract) {
     baseContract.on("CollateralIncreased", async (finalCollateral) => {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
-
+    // ✅ Capture the first borrowed amount when the event is emitted
+    baseContract.on("BorrowRequested", async (amount) => {
+        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
+        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+    });
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
         await sendTelegramMessage(`✅ Debt Repaid: ${ethers.formatUnits(repaidAmount, 6)} USDC`);
@@ -1613,7 +1612,7 @@ function setupEventListeners(baseContract) {
             // ✅ Listen for RewardsAccumulated events
     baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
         const formattedUSDC = ethers.formatUnits(accumulatedUSDC, 6); // Convert from 6 decimals
-        const formattedWELL = ethers.formatUnits(accumulatedWELL, 6); // WELL is converted to 6 decimals
+        const formattedWELL = ethers.formatUnits(accumulatedWELL, 18); // WELL is converted to 6 decimals
 
         console.log(`📊 Rewards Accumulated:`);
         console.log(`💰 USDC: ${formattedUSDC} USDC`);
@@ -1649,7 +1648,7 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(
             `📊 Current Reward Status:\n` +
             `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards, 6)} USDC\n` +
-            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards, 6)} WELL`
+            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards, 18)} WELL`
         );
     });
 
@@ -1686,11 +1685,16 @@ function setupEventListeners(baseContract) {
     console.log("✅ Event listeners initialized successfully.");
 }
 
-/**
- * Executes the lending strategy and manages collateral
- */
-  async function monitorAndExecuteStrategy() {
+let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
+
+async function monitorAndExecuteStrategy() {
     try {
+        if (!isCycleComplete) {
+            console.log("⏳ Previous cycle still running, waiting...");
+            return;
+        }
+
+        isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
 
         // ✅ Fetch lending data
@@ -1703,11 +1707,11 @@ function setupEventListeners(baseContract) {
             creditRemainingRaw
         ] = await baseContract.getLendingData();
 
-        // ✅ Convert values from BigInt to Number
-        const collateral = Number(ethers.formatUnits(totalCollateral1, 6)); 
-        const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6)); 
-        const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6)); 
-        const liquidity = Number(ethers.formatUnits(availableLiquidity, 6)); 
+        // ✅ Convert values correctly from BigInt to Number
+        const collateral = Number(ethers.formatUnits(totalCollateral1, 6));
+        const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6));
+        const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6));
+        const liquidity = Number(ethers.formatUnits(availableLiquidity, 6));
         const totalSupplied1 = Number(ethers.formatUnits(totalSupplied, 6));
         const creditRemaining = Number(creditRemainingRaw) / 100;
 
@@ -1718,50 +1722,55 @@ function setupEventListeners(baseContract) {
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
-        // ✅ If no collateral, initialize position with 100 USDC
-        if (collateral === 0) {
-            console.log("⚠️ No collateral found! Supplying initial $100 USDC...");
-            await sendTelegramMessage("⚠️ No collateral found! Supplying initial $100 USDC...");
-            const tx = await baseContract.startRecursiveLending();
-            await tx.wait();
-            console.log("✅ Initial deposit supplied and Flash Loan process started!");
+        // ✅ Ensure we have a valid firstBorrowedAmount for cycle continuation
+        if (cycleCount > 0 && firstBorrowedAmount === 0) {
+            console.log("⏳ Waiting for first borrowed amount update...");
+            isCycleComplete = true; // ✅ Allow next attempt
             return;
-        }
-        // ✅ Ensure Credit Remaining is healthy (> 83%) to avoid liquidation risk
-        if (creditRemaining < 83) {
-            console.log("⚠️ Warning! Low Credit Remaining: " + creditRemaining + "% - Pausing Strategy...");
-            await sendTelegramMessage(`⚠️ Warning! Low Credit Remaining: ${creditRemaining}% - Pausing Strategy...`);
-            return;
-        }
-        // ✅ If `firstBorrowedAmount` is still 0, fetch latest borrow amount from contract
-        if (firstBorrowedAmount === 0) {
-            console.log("⏳ No BorrowRequested event detected, fetching manually...");
-            firstBorrowedAmount = borrowed; // ✅ Use last known borrowed amount
-            console.log(`📊 Using Borrowed (Contract) as firstBorrowedAmount: ${firstBorrowedAmount} USDC`);
         }
 
-        // ✅ Compute correct Flash Loan Amount
         console.log(`🔢 Using Previous Borrow Amount: ${firstBorrowedAmount} USDC`);
         const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-        const flashLoanAmount = ethers.toBigInt(flashLoanAmountRaw);
+       // ✅ Ensure correct BigInt conversion
+       const flashLoanAmount = ethers.BigNumber.from(flashLoanAmountRaw).toBigInt();
+       console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+       // ✅ Ensure `flashLoanAmount` is a valid uint256 before passing it
+       if (flashLoanAmount <= 0n) {
+          console.error("❌ Invalid Flash Loan Amount! Aborting...");
+          return;
+        }
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
+            isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-        // ✅ Execute Recursive Flash Loan Process
-        console.log(`🚀 Executing Recursive Flash Loan: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-        const tx = await baseContract.startRecursiveLending({
-            value: flashLoanAmount
-        });
-        await tx.wait();
-        console.log("✅ Strategy Execution Completed!");
+
+        // ✅ Correct Cycle Execution Logic
+        let tx;
+        if (cycleCount === 0) {
+            console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+            tx = await baseContract.startRecursiveLending();
+        } else {
+            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+            tx = await baseContract.executeFlashLoan(flashLoanAmount);
+        }
+        // ✅ Wait for transaction receipt
+        const receipt = await tx.wait();
+        console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
         await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
+        // ✅ Increment cycle count
+        cycleCount++;
+
+        // ✅ Mark cycle as complete and restart after 1 second
+        isCycleComplete = true;
+        setTimeout(monitorAndExecuteStrategy, 100);
+
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
+        isCycleComplete = true; // ✅ Ensure next attempt can happen
     }
-    // 🔁 Schedule next execution after 2 seconds
-    setTimeout(monitorAndExecuteStrategy, 200);
 }
 
 // ✅ Start event listeners and recursive execution
