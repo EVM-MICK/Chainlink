@@ -7,7 +7,7 @@ const BigNumber = require("bignumber.js");
 const retry = require("async-retry");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
-const { parseUnits, AbiCoder, ethers, Wallet, WebSocketProvider, JsonRpcProvider, Contract } = require("ethers");
+const { parseUnits, AbiCoder, ethers, Wallet, WebSocketProvider, JsonRpcProvider, Contract, BigNumber } = require("ethers");
 //const ethers = require("ethers");
 const cron = require("node-cron");
 const { promisify } = require("util");
@@ -1597,9 +1597,9 @@ function setupEventListeners(baseContract) {
     });
     // ✅ Capture the first borrowed amount when the event is emitted
     baseContract.on("BorrowRequested", async (amount) => {
-        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
-        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+         = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
+        console.log(`🟢 Updated First Borrowed Amount: ${} USDC`);
+        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${} USDC`);
     });
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
