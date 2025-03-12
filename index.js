@@ -1573,9 +1573,8 @@ async function executeArbitrage() {
 /**
  * Listens for smart contract events and sends Telegram notifications
  */
-// ✅ Set up event listeners for the contract
 // ✅ Ensure global scope for firstBorrowedAmount
-let firstBorrowedAmount = 250;
+let firstBorrowedAmount = 0;
 function setupEventListeners(baseContract) {
     console.log("📡 Setting up event listeners...");
 
