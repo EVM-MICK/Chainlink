@@ -1733,12 +1733,6 @@ async function monitorAndExecuteStrategy() {
    const flashLoanAmountRaw = firstBorrowedAmount;
    // ✅ Debugging: Check the actual value returned
    console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
-
-  // // ✅ Validate the returned value
-  //  if (!flashLoanAmountRaw || typeof flashLoanAmountRaw !== "object" || !flashLoanAmountRaw.toString) {
-  //   console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
-  //   return;
-  //  }
    // ✅ Convert correctly (works for both Ethers v5 and v6)
     const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
    // ✅ Log the computed flash loan amount in human-readable USDC
@@ -1748,15 +1742,7 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-
-      if (!flashLoanAmountRaw) {
-         console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
-         isCycleComplete = true;
-         return;
-        }
-       
-        let tx;
-
+      let tx;
       if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             isCycleComplete = true; // ✅ Allow next attempt
@@ -1779,7 +1765,6 @@ async function monitorAndExecuteStrategy() {
         // ✅ Mark cycle as complete and restart after 1 second
         isCycleComplete = true;
         setTimeout(monitorAndExecuteStrategy, 100);
-
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
