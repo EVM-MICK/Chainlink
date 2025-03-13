@@ -1735,7 +1735,7 @@ async function monitorAndExecuteStrategy() {
             return;
         }
        const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-       const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+       const flashLoanAmount = flashLoanAmountRaw;
        console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
       if (!flashLoanAmountRaw) {
          console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
