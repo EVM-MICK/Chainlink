@@ -1726,30 +1726,31 @@ async function monitorAndExecuteStrategy() {
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
-
+      
+        // ✅ Correct Cycle Execution Logic
         // ✅ Ensure we have a valid firstBorrowedAmount for cycle continuation
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-
-        if (flashLoanAmount > liquidity) {
-            console.log("❌ Not enough liquidity to request flash loan.");
-            isCycleComplete = true; // ✅ Allow next attempt
-            return;
-        }
-      const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+       const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
       if (!flashLoanAmountRaw) {
          console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
          isCycleComplete = true;
          return;
         }
-       // ✅ Convert correctly for Ethers v6
-       const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
-       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-        // ✅ Correct Cycle Execution Logic
+       
         let tx;
+
+      if (flashLoanAmount > liquidity) {
+            console.log("❌ Not enough liquidity to request flash loan.");
+            isCycleComplete = true; // ✅ Allow next attempt
+            return;
+        }
+
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             tx = await baseContract.startRecursiveLending();
