@@ -1600,11 +1600,12 @@ function setupEventListeners(baseContract) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
       }
-    // ✅ Ensure amount is a BigInt (Ethers v6) or convert from BigNumber (Ethers v5)
-      //const formattedUSDC =  Convert from 6 decimals BigInt(formattedUSDC.toString());
-       firstBorrowedAmount = ethers.formatUnits(amount); 
-       console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} usdc`);
-       await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} usdc`);
+            // ✅ Convert amount to BigInt (raw value in WEI)
+    firstBorrowedAmount = BigInt(amount.toString()); 
+    // ✅ Convert to readable USDC value (6 decimals)
+    const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
+    console.log(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
+    await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
      });
 
     // ✅ Debt Management Events
@@ -1730,15 +1731,27 @@ async function monitorAndExecuteStrategy() {
       
         // ✅ Correct Cycle Execution Logic
         // ✅ Ensure we have a valid firstBorrowedAmount for cycle continuation
-        if (cycleCount > 0 && firstBorrowedAmount === 0) {
+     
+     if (firstBorrowedAmount === 0n) {
+        console.error("❌ ERROR: First Borrowed Amount is not set yet. Waiting for event...");
+    } else {
+      // ✅ firstBorrowedAmount is already a BigInt
+      const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+     // ✅ Ensure output is BigInt
+      const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+      console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+     }
+
+       if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-       const firstBorrowedAmount1 = BigInt(firstBorrowedAmount.toString());
-       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount1);
-       const flashLoanAmount = flashLoanAmountRaw;
-       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+       // const firstBorrowedAmount1 = BigInt(firstBorrowedAmount.toString());
+       // const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount1);
+       // const flashLoanAmount = flashLoanAmountRaw;
+       // console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
       if (!flashLoanAmountRaw) {
          console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
          isCycleComplete = true;
