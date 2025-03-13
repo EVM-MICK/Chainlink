@@ -1595,18 +1595,18 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
   // ✅ Capture the first borrowed amount correctly
-  baseContract.on("BorrowRequested", async (amount) => {
+baseContract.on("BorrowRequested", async (amount) => {
     if (!amount || typeof amount !== "object" || !amount.toString) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
-      }
-            // ✅ Convert amount to BigInt (raw value in WEI)
-    firstBorrowedAmount = BigInt(amount.toString()); 
-    // ✅ Convert to readable USDC value (6 decimals)
+    }
+    // ✅ Convert amount to BigInt for safe math operations
+    firstBorrowedAmount = BigInt(amount.toString());
+    // ✅ Convert to USDC format (6 decimals)
     const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
-    console.log(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
+    console.log(`🟢 BorrowRequested event listener attached!`);
     await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
-     });
+});
 
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
@@ -1618,8 +1618,8 @@ function setupEventListeners(baseContract) {
     });
             // ✅ Listen for RewardsAccumulated events
     baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
-        const formattedUSDC = ethers.formatUnits(accumulatedUSDC, 6); // Convert from 6 decimals
-        const formattedWELL = ethers.formatUnits(accumulatedWELL, 18); // WELL is converted to 6 decimals
+        const formattedUSDC = ethers.formatUnits(accumulatedUSDC); // Convert from 6 decimals
+        const formattedWELL = ethers.formatUnits(accumulatedWELL); // WELL is converted to 6 decimals
 
         console.log(`📊 Rewards Accumulated:`);
         console.log(`💰 USDC: ${formattedUSDC} USDC`);
@@ -1633,18 +1633,18 @@ function setupEventListeners(baseContract) {
     baseContract.on("ProfitReinvested", async (reinvestedAmount, profitExtracted) => {
         await sendTelegramMessage(
             `💹 Profit Reinvested:\n` +
-            `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount, 6)} USDC\n` +
-            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted, 6)} USDC`
+            `🔹 Reinvested: ${ethers.formatUnits(reinvestedAmount)} USDC\n` +
+            `🔹 Profit Extracted: ${ethers.formatUnits(profitExtracted)} USDC`
         );
     });
 
     baseContract.on("ProfitWithdrawn(uint256)", async (amount) => {
-        await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount, 6)} USDC`);
+        await sendTelegramMessage(`💰 Profit Withdrawn: ${ethers.formatUnits(amount)} USDC`);
     });
 
     // ✅ Reward Tracking: mToken, USDC & WELL
     baseContract.on("mTokenRewardsRedeemed", async (usdcAmount) => {
-        await sendTelegramMessage(`🎁 mToken Rewards Redeemed: ${ethers.formatUnits(usdcAmount, 6)} USDC`);
+        await sendTelegramMessage(`🎁 mToken Rewards Redeemed: ${ethers.formatUnits(usdcAmount)} USDC`);
     });
 
     baseContract.on("RewardsWithdrawn", async (owner, amount, tokenType) => {
@@ -1654,8 +1654,8 @@ function setupEventListeners(baseContract) {
     baseContract.on("CurrentRewardState", async (totalUSDCRewards, totalWELLRewards) => {
         await sendTelegramMessage(
             `📊 Current Reward Status:\n` +
-            `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards, 6)} USDC\n` +
-            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards, 18)} WELL`
+            `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards)} USDC\n` +
+            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards} WELL`
         );
     });
 
@@ -1685,10 +1685,30 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage("🔄 Restarting Recursive Lending Process...");
     });
 
+ let firstBorrowedAmountPromise = new Promise((resolve) => {
+    baseContract.on("BorrowRequested", async (amount) => {
+        if (!amount || typeof amount !== "object" || !amount.toString) {
+            console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
+            return;
+        }
+
+        // ✅ Convert amount safely
+        firstBorrowedAmount = BigInt(amount.toString());
+        const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
+        
+        console.log(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
+        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
+
+        // ✅ Resolve the promise once the amount is updated
+        resolve(firstBorrowedAmount);
+    });
+  });
+
     baseContract.on("ErrorOccurred", async (reason) => {
         await sendTelegramMessage(`❌ Error: ${reason}`);
     });
 
+    console.log(`Listeners for BorrowRequested:`, baseContract.listenerCount("BorrowRequested"));
     console.log("✅ Event listeners initialized successfully.");
 }
 
@@ -1714,14 +1734,14 @@ async function monitorAndExecuteStrategy() {
             creditRemainingRaw
         ] = await baseContract.getLendingData();
 
-        // ✅ Convert values correctly from BigInt to Number
+        // ✅ Convert values correctly
         const collateral = Number(ethers.formatUnits(totalCollateral1, 6));
         const borrowed = Number(ethers.formatUnits(totalBorrowed1, 6));
         const moonweltotalBorrowed1 = Number(ethers.formatUnits(moonweltotalBorrowed, 6));
         const liquidity = Number(ethers.formatUnits(availableLiquidity, 6));
         const totalSupplied1 = Number(ethers.formatUnits(totalSupplied, 6));
         const creditRemaining = Number(creditRemainingRaw) / 100;
-        
+
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
         console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed1} USDC`);
@@ -1729,23 +1749,24 @@ async function monitorAndExecuteStrategy() {
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
-    // ✅ Use callStatic to prevent sending a transaction
-   const flashLoanAmountRaw = firstBorrowedAmount;
-   // ✅ Debugging: Check the actual value returned
-   console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
-   // ✅ Convert correctly (works for both Ethers v5 and v6)
-    const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
-   // ✅ Log the computed flash loan amount in human-readable USDC
-     console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-       if (cycleCount > 0 && firstBorrowedAmount === 0) {
+        // ✅ Wait for BorrowRequested event before proceeding
+        console.log("⏳ Waiting for BorrowRequested event...");
+        const flashLoanAmountRaw = await firstBorrowedAmountPromise;
+
+        // ✅ Convert correctly
+        const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+        console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
+        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
-            isCycleComplete = true; // ✅ Allow next attempt
+            isCycleComplete = true;
             return;
         }
-      let tx;
-      if (flashLoanAmount > liquidity) {
+
+        let tx;
+        if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
-            isCycleComplete = true; // ✅ Allow next attempt
+            isCycleComplete = true;
             return;
         }
 
@@ -1754,21 +1775,32 @@ async function monitorAndExecuteStrategy() {
             tx = await baseContract.startRecursiveLending();
         } else {
             console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+            baseContract.once("BorrowRequested", async (amount) => {
+              firstBorrowedAmount = BigInt(amount.toString());
+             console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${ethers.formatUnits(firstBorrowedAmount, 6)} USDC`);
+             });
             tx = await baseContract.executeFlashLoan(flashLoanAmount);
         }
+
         // ✅ Wait for transaction receipt
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-        // ✅ Increment cycle count
+
+        // ✅ Increment cycle count immediately
         cycleCount++;
-        // ✅ Mark cycle as complete and restart after 1 second
+        console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
+
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
+        // ✅ Mark cycle as complete
         isCycleComplete = true;
-        setTimeout(monitorAndExecuteStrategy, 100);
+
+        // ✅ Restart process after 1 second
+        setTimeout(monitorAndExecuteStrategy, 1000);
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
-        isCycleComplete = true; // ✅ Ensure next attempt can happen
+        isCycleComplete = true;
     }
 }
 
