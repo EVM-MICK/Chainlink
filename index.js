@@ -1594,12 +1594,18 @@ function setupEventListeners(baseContract) {
     baseContract.on("CollateralIncreased", async (finalCollateral) => {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
-    // ✅ Capture the first borrowed amount when the event is emitted
-    baseContract.on("BorrowRequested", async (amount) => {
-        firstBorrowedAmount = Number(ethers.formatUnits(amount, 6)); // ✅ Convert and store dynamically
-        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-    });
+  // ✅ Capture the first borrowed amount correctly
+   baseContract.on("BorrowRequested", async (amount) => {
+    if (!amount || typeof amount !== "object" || !amount.toString) {
+        console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
+        return;
+    }
+    // ✅ Convert BigNumber to Number safely
+    firstBorrowedAmount = Number(ethers.formatUnits(amount.toString(), 6));
+    console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+    await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
+      });
+
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
         await sendTelegramMessage(`✅ Debt Repaid: ${ethers.formatUnits(repaidAmount, 6)} USDC`);
@@ -1693,7 +1699,6 @@ async function monitorAndExecuteStrategy() {
             console.log("⏳ Previous cycle still running, waiting...");
             return;
         }
-
         isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
 
@@ -1714,7 +1719,7 @@ async function monitorAndExecuteStrategy() {
         const liquidity = Number(ethers.formatUnits(availableLiquidity, 6));
         const totalSupplied1 = Number(ethers.formatUnits(totalSupplied, 6));
         const creditRemaining = Number(creditRemainingRaw) / 100;
-
+        
         console.log(`💰 Collateral: ${collateral} USDC`);
         console.log(`💳 Borrowed (Contract): ${borrowed} USDC`);
         console.log(`🏦 Borrowed (Total Moonwell): ${moonweltotalBorrowed1} USDC`);
@@ -1739,11 +1744,6 @@ async function monitorAndExecuteStrategy() {
       // ✅ Convert correctly for Ethers v6
       const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-       // ✅ Ensure `flashLoanAmount` is a valid uint256 before passing it
-       // if (flashLoanAmount <= 0n) {
-       //    console.error("❌ Invalid Flash Loan Amount! Aborting...");
-       //    return;
-       //  }
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             isCycleComplete = true; // ✅ Allow next attempt
