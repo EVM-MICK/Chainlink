@@ -1728,22 +1728,17 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-       // ✅ Compute correct Flash Loan Amount using the correct borrowed amount
-       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-
-       if (!flashLoanAmountRaw) {
-          console.log("❌ Error: Flash loan amount calculation failed (undefined response). Retrying...");
-          isCycleComplete = true;
-          return;
-        }
-
-    // ✅ Convert flashLoanAmountRaw safely using ethers.js BigNumber
- const flashLoanAmount = ethers.BigNumber.isBigNumber(flashLoanAmountRaw)
-    ? flashLoanAmountRaw.toBigInt()  // If already a BigNumber, convert to BigInt
-    : ethers.BigNumber.from(flashLoanAmountRaw).toBigInt(); // Otherwise, convert first
-
-      console.log(`📊 Calculated Flash Loan Amount: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-
+      // ✅ Compute correct Flash Loan Amount using the correct borrowed amount
+      const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+     // ✅ Check if flashLoanAmountRaw is valid before using it
+      if (!flashLoanAmountRaw) {
+        console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
+        isCycleComplete = true;
+        return;
+       }
+      // ✅ Convert correctly for Ethers v6
+      const flashLoanAmount = BigInt(flashLoanAmountRaw);
+      console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
        // ✅ Ensure `flashLoanAmount` is a valid uint256 before passing it
        if (flashLoanAmount <= 0n) {
           console.error("❌ Invalid Flash Loan Amount! Aborting...");
@@ -1754,7 +1749,6 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-
         // ✅ Correct Cycle Execution Logic
         let tx;
         if (cycleCount === 0) {
@@ -1768,10 +1762,8 @@ async function monitorAndExecuteStrategy() {
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
         await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-
         // ✅ Increment cycle count
         cycleCount++;
-
         // ✅ Mark cycle as complete and restart after 1 second
         isCycleComplete = true;
         setTimeout(monitorAndExecuteStrategy, 100);
