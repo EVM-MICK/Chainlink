@@ -1730,7 +1730,7 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
     // ✅ Use callStatic to prevent sending a transaction
-   const flashLoanAmountRaw = await baseContract.callStatic.calculateFlashLoanAmount(firstBorrowedAmount);
+   const flashLoanAmountRaw = firstBorrowedAmount;
    // ✅ Debugging: Check the actual value returned
    console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
 
@@ -1739,12 +1739,9 @@ async function monitorAndExecuteStrategy() {
     console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
     return;
    }
-
    // ✅ Convert correctly (works for both Ethers v5 and v6)
     const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
    // ✅ Log the computed flash loan amount in human-readable USDC
-    console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-
      console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
