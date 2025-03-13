@@ -1734,11 +1734,11 @@ async function monitorAndExecuteStrategy() {
    // ✅ Debugging: Check the actual value returned
    console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
 
-  // ✅ Validate the returned value
-   if (!flashLoanAmountRaw || typeof flashLoanAmountRaw !== "object" || !flashLoanAmountRaw.toString) {
-    console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
-    return;
-   }
+  // // ✅ Validate the returned value
+  //  if (!flashLoanAmountRaw || typeof flashLoanAmountRaw !== "object" || !flashLoanAmountRaw.toString) {
+  //   console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
+  //   return;
+  //  }
    // ✅ Convert correctly (works for both Ethers v5 and v6)
     const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
    // ✅ Log the computed flash loan amount in human-readable USDC
