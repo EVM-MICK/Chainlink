@@ -1599,11 +1599,12 @@ function setupEventListeners(baseContract) {
     if (!amount || typeof amount !== "object" || !amount.toString) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
+      }
     // ✅ Ensure amount is a BigInt (Ethers v6) or convert from BigNumber (Ethers v5)
        firstBorrowedAmount = BigInt(amount.toString()); 
        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} WEI`);
        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} WEI`);
-   });
+     });
 
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
