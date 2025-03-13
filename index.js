@@ -1601,8 +1601,8 @@ function setupEventListeners(baseContract) {
         return;
       }
     // ✅ Ensure amount is a BigInt (Ethers v6) or convert from BigNumber (Ethers v5)
-      const formattedUSDC = ethers.formatUnits(amount); // Convert from 6 decimals
-       firstBorrowedAmount = BigInt(formattedUSDC.toString()); 
+      //const formattedUSDC =  Convert from 6 decimals BigInt(formattedUSDC.toString());
+       firstBorrowedAmount = ethers.formatUnits(amount); 
        console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} usdc`);
        await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} usdc`);
      });
