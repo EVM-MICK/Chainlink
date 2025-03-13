@@ -1595,7 +1595,7 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
   // ✅ Capture the first borrowed amount correctly
- baseContract.on("BorrowRequested", async (amount) => {
+  baseContract.on("BorrowRequested", async (amount) => {
     if (!amount || typeof amount !== "object" || !amount.toString) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
@@ -1735,7 +1735,8 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+       const firstBorrowedAmount1 = BigInt(firstBorrowedAmount.toString());
+       const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount1);
        const flashLoanAmount = flashLoanAmountRaw;
        console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
       if (!flashLoanAmountRaw) {
