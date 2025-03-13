@@ -1729,20 +1729,21 @@ async function monitorAndExecuteStrategy() {
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
-    const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-       // ✅ Debugging to check the actual value
-      console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
-     let flashLoanAmount;
-     if (typeof flashLoanAmountRaw === "bigint") {
-       // Ethers v6 already returns BigInt
-      flashLoanAmount = flashLoanAmountRaw;
-    } else if (flashLoanAmountRaw && typeof flashLoanAmountRaw === "object" && flashLoanAmountRaw._hex) {
-        // Ethers v5: Convert from BigNumber
-        flashLoanAmount = BigInt(flashLoanAmountRaw._hex);
-     } else {
-       console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
-       return;
-     }
+    // ✅ Use callStatic to prevent sending a transaction
+   const flashLoanAmountRaw = await baseContract.callStatic.calculateFlashLoanAmount(firstBorrowedAmount);
+   // ✅ Debugging: Check the actual value returned
+   console.log("flashLoanAmountRaw:", flashLoanAmountRaw);
+
+  // ✅ Validate the returned value
+   if (!flashLoanAmountRaw || typeof flashLoanAmountRaw !== "object" || !flashLoanAmountRaw.toString) {
+    console.error("❌ ERROR: Unexpected format of flashLoanAmountRaw:", flashLoanAmountRaw);
+    return;
+   }
+
+   // ✅ Convert correctly (works for both Ethers v5 and v6)
+    const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+   // ✅ Log the computed flash loan amount in human-readable USDC
+    console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
      console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
