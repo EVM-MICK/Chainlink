@@ -1595,16 +1595,15 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
   // ✅ Capture the first borrowed amount correctly
-   baseContract.on("BorrowRequested", async (amount) => {
+ baseContract.on("BorrowRequested", async (amount) => {
     if (!amount || typeof amount !== "object" || !amount.toString) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
-    }
-    // ✅ Convert BigNumber to Number safely
-    firstBorrowedAmount = Number(ethers.formatUnits(amount.toString(), 6));
-    console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-    await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} USDC`);
-      });
+    // ✅ Ensure amount is a BigInt (Ethers v6) or convert from BigNumber (Ethers v5)
+       firstBorrowedAmount = BigInt(amount.toString()); 
+       console.log(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} WEI`);
+       await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${firstBorrowedAmount} WEI`);
+   });
 
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
@@ -1733,22 +1732,21 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
-      // ✅ Compute correct Flash Loan Amount using the correct borrowed amount
-      const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
-     // ✅ Check if flashLoanAmountRaw is valid before using it
-      if (!flashLoanAmountRaw) {
-        console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
-        isCycleComplete = true;
-        return;
-       }
-      // ✅ Convert correctly for Ethers v6
-      const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
-      console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             isCycleComplete = true; // ✅ Allow next attempt
             return;
         }
+      const flashLoanAmountRaw = await baseContract.calculateFlashLoanAmount(firstBorrowedAmount);
+      if (!flashLoanAmountRaw) {
+         console.error("❌ ERROR: Flash loan amount calculation failed (returned undefined). Retrying...");
+         isCycleComplete = true;
+         return;
+        }
+       // ✅ Convert correctly for Ethers v6
+       const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
         // ✅ Correct Cycle Execution Logic
         let tx;
         if (cycleCount === 0) {
