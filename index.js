@@ -1737,13 +1737,13 @@ async function monitorAndExecuteStrategy() {
         return;
        }
       // ✅ Convert correctly for Ethers v6
-      const flashLoanAmount = BigInt(flashLoanAmountRaw);
+      const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
       console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
        // ✅ Ensure `flashLoanAmount` is a valid uint256 before passing it
-       if (flashLoanAmount <= 0n) {
-          console.error("❌ Invalid Flash Loan Amount! Aborting...");
-          return;
-        }
+       // if (flashLoanAmount <= 0n) {
+       //    console.error("❌ Invalid Flash Loan Amount! Aborting...");
+       //    return;
+       //  }
         if (flashLoanAmount > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             isCycleComplete = true; // ✅ Allow next attempt
