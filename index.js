@@ -1755,10 +1755,11 @@ async function monitorAndExecuteStrategy() {
         // ✅ Wait for BorrowRequested event or use fallback
         let flashLoanAmountRaw;
         try {
-            flashLoanAmountRaw = await Promise.race([
-                firstBorrowedAmountPromise,
-                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 2000)) // 2s timeout
-            ]);
+
+         flashLoanAmountRaw = await Promise.race([
+            firstBorrowedAmountPromise,
+            new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 2000)) // 2s timeout
+             ]);
             console.log("📊 BorrowRequested event received.");
         } catch (error) {
             console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
@@ -1802,8 +1803,9 @@ async function monitorAndExecuteStrategy() {
         // ✅ Mark cycle as complete
         isCycleComplete = true;
 
-        // ✅ Restart process after 1 second
-        setTimeout(monitorAndExecuteStrategy, 1000);
+       // ✅ Restart process immediately if the transaction succeeded
+  console.log(`🚀 Cycle ${cycleCount} completed. Restarting immediately...`);
+  process.nextTick(monitorAndExecuteStrategy);
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
