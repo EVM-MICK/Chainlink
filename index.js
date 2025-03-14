@@ -1765,9 +1765,9 @@ async function monitorAndExecuteStrategy() {
             console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
             flashLoanAmountRaw = fallbackBorrowAmount;
         }
-
         // ✅ Convert correctly
-        const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
+        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw) * 1e6));
+        const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
         console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
