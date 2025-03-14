@@ -1776,11 +1776,6 @@ async function monitorAndExecuteStrategy() {
         }
 
         let tx;
-        if (flashLoanAmount > liquidity) {
-            console.log("❌ Not enough liquidity to request flash loan.");
-            isCycleComplete = true;
-            return;
-        }
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
