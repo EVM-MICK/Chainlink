@@ -1750,7 +1750,7 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
                                  
         // ✅ Compute fallback BorrowRequested amount as 75% of collateral
-        const fallbackBorrowAmount = BigInt(Math.ceil(collateral * 0.75 * 1e6)); // Convert to WEI
+        const fallbackBorrowAmount = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6); // Convert to WEI
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount, 6)} USDC`);
 
         // ✅ Wait for BorrowRequested event or use fallback
@@ -1777,12 +1777,6 @@ async function monitorAndExecuteStrategy() {
         }
 
         let tx;
-        if (flashLoanAmountRaw > liquidity) {
-            console.log("❌ Not enough liquidity to request flash loan.");
-            isCycleComplete = true;
-            return;
-        }
-
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             tx = await baseContract.startRecursiveLending();
