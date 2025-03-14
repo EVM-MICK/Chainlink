@@ -1777,7 +1777,7 @@ async function monitorAndExecuteStrategy() {
         }
 
         let tx;
-        if (flashLoanAmount > liquidity) {
+        if (flashLoanAmountRaw > liquidity) {
             console.log("❌ Not enough liquidity to request flash loan.");
             isCycleComplete = true;
             return;
@@ -1787,12 +1787,12 @@ async function monitorAndExecuteStrategy() {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             tx = await baseContract.startRecursiveLending();
         } else {
-            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountRaw, 6)} USDC`);
             baseContract.once("BorrowRequested", async (amount) => {
               firstBorrowedAmount = BigInt(amount.toString());
              console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${ethers.formatUnits(firstBorrowedAmount, 6)} USDC`);
              });
-            tx = await baseContract.executeFlashLoan(flashLoanAmount);
+            tx = await baseContract.executeFlashLoan(flashLoanAmountRaw);
         }
 
         // ✅ Wait for transaction receipt
