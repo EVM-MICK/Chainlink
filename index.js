@@ -1724,7 +1724,7 @@ async function monitorAndExecuteStrategy() {
         isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
 
-        // ✅ Fetch lending data
+        // ✅ Fetch latest lending data from contract before each cycle
         const [
             totalCollateral1,
             totalBorrowed1,
@@ -1748,9 +1748,8 @@ async function monitorAndExecuteStrategy() {
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
-                                 
-        // ✅ Compute fallback BorrowRequested amount as 75% of collateral
-        const fallbackBorrowAmount = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6); // Convert to WEI
+        // ✅ Compute fallback BorrowRequested amount as 75% of latest collateral
+        const fallbackBorrowAmount = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount, 6)} USDC`);
 
         // ✅ Wait for BorrowRequested event or use fallback
@@ -1758,7 +1757,7 @@ async function monitorAndExecuteStrategy() {
         try {
             flashLoanAmountRaw = await Promise.race([
                 firstBorrowedAmountPromise,
-                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 5000)) // 5s timeout
+                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 2000)) // 2s timeout
             ]);
             console.log("📊 BorrowRequested event received.");
         } catch (error) {
@@ -1777,16 +1776,22 @@ async function monitorAndExecuteStrategy() {
         }
 
         let tx;
+        if (flashLoanAmount > liquidity) {
+            console.log("❌ Not enough liquidity to request flash loan.");
+            isCycleComplete = true;
+            return;
+        }
+
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             tx = await baseContract.startRecursiveLending();
         } else {
-            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountRaw, 6)} USDC`);
+            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
             baseContract.once("BorrowRequested", async (amount) => {
-              firstBorrowedAmount = BigInt(amount.toString());
-             console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${ethers.formatUnits(firstBorrowedAmount, 6)} USDC`);
-             });
-            tx = await baseContract.executeFlashLoan(flashLoanAmountRaw);
+                firstBorrowedAmount = BigInt(amount.toString());
+                console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${ethers.formatUnits(firstBorrowedAmount, 6)} USDC`);
+            });
+            tx = await baseContract.executeFlashLoan(flashLoanAmount);
         }
 
         // ✅ Wait for transaction receipt
@@ -1810,6 +1815,7 @@ async function monitorAndExecuteStrategy() {
         isCycleComplete = true;
     }
 }
+
 
 // ✅ Start event listeners and recursive execution
 setupEventListeners(baseContract);
