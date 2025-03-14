@@ -1655,7 +1655,7 @@ baseContract.on("BorrowRequested", async (amount) => {
         await sendTelegramMessage(
             `📊 Current Reward Status:\n` +
             `🔹 USDC Rewards: ${ethers.formatUnits(totalUSDCRewards)} USDC\n` +
-            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards} WELL`
+            `🔹 WELL Rewards: ${ethers.formatUnits(totalWELLRewards)} WELL`
         );
     });
 
