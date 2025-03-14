@@ -1750,7 +1750,7 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
         // ✅ Compute fallback BorrowRequested amount as 75% of latest collateral
         const fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
-        console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount, 6)} USDC`);
+        console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
         // ✅ Wait for BorrowRequested event or use fallback
         let flashLoanAmountRaw;
@@ -1758,7 +1758,7 @@ async function monitorAndExecuteStrategy() {
 
          flashLoanAmountRaw = await Promise.race([
             firstBorrowedAmountPromise,
-            new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 2000)) // 2s timeout
+            new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
              ]);
             console.log("📊 BorrowRequested event received.");
         } catch (error) {
