@@ -1815,7 +1815,20 @@ async function monitorAndExecuteStrategy() {
 
 
 // ✅ Start event listeners and recursive execution
-setupEventListeners(baseContract);
-monitorAndExecuteStrategy();
+async function startScript() {
+    console.log("🚀 Starting script...");
+
+    // ✅ Attach event listeners before running strategy
+    await setupEventListeners(baseContract);
+
+    console.log("✅ Event listeners initialized. Starting strategy...");
+
+    // ✅ Start the lending strategy
+    monitorAndExecuteStrategy();
+}
+
+// ✅ Start execution
+startScript();
+
 // 🚀 Start the Bot
 //executeArbitrage();
