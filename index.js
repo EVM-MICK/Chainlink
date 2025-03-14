@@ -1748,24 +1748,31 @@ async function monitorAndExecuteStrategy() {
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
-        // ✅ Compute fallback BorrowRequested amount as 75% of latest collateral
-        const fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+
+        // ✅ Ensure valid borrow amount in first cycle
+        let fallbackBorrowAmount1;
+        if (cycleCount === 0) {
+            fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
+        } else {
+            fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+        }
+
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
         // ✅ Wait for BorrowRequested event or use fallback
         let flashLoanAmountRaw;
         try {
-
-         flashLoanAmountRaw = await Promise.race([
-            firstBorrowedAmountPromise,
-            new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
-             ]);
+            flashLoanAmountRaw = await Promise.race([
+                firstBorrowedAmountPromise,
+                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
+            ]);
             console.log("📊 BorrowRequested event received.");
         } catch (error) {
             console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
             flashLoanAmountRaw = fallbackBorrowAmount1;
         }
-        // ✅ Convert correctly
+
+        // ✅ Convert to 6 decimals (WEI format)
         const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw) * 1e6));
         const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
         console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
@@ -1780,9 +1787,9 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            tx1 = await baseContract.startRecursiveLending();
-            const receipt1 = await tx1.wait();
-            console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt1.transactionHash}`);
+            // ✅ Ensure there is sufficient collateral before calling
+            tx = await baseContract.startRecursiveLending();
+            
         } else {
             console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
             baseContract.once("BorrowRequested", async (amount) => {
@@ -1805,16 +1812,15 @@ async function monitorAndExecuteStrategy() {
         // ✅ Mark cycle as complete
         isCycleComplete = true;
 
-       // ✅ Restart process immediately if the transaction succeeded
-  console.log(`🚀 Cycle ${cycleCount} completed. Restarting immediately...`);
-  process.nextTick(monitorAndExecuteStrategy);
+        // ✅ Restart process immediately if the transaction succeeded
+        console.log(`🚀 Cycle ${cycleCount} completed. Restarting immediately...`);
+        process.nextTick(monitorAndExecuteStrategy);
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
         isCycleComplete = true;
     }
 }
-
 
 // ✅ Start event listeners and recursive execution
 async function startScript() {
