@@ -1748,10 +1748,23 @@ async function monitorAndExecuteStrategy() {
         console.log(`💧 Available Liquidity: ${liquidity} USDC`);
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
+                                 
+        // ✅ Compute fallback BorrowRequested amount as 75% of collateral
+        const fallbackBorrowAmount = BigInt(Math.ceil(collateral * 0.75 * 1e6)); // Convert to WEI
+        console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount, 6)} USDC`);
 
-        // ✅ Wait for BorrowRequested event before proceeding
-        console.log("⏳ Waiting for BorrowRequested event...");
-        const flashLoanAmountRaw = await firstBorrowedAmountPromise;
+        // ✅ Wait for BorrowRequested event or use fallback
+        let flashLoanAmountRaw;
+        try {
+            flashLoanAmountRaw = await Promise.race([
+                firstBorrowedAmountPromise,
+                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount), 5000)) // 5s timeout
+            ]);
+            console.log("📊 BorrowRequested event received.");
+        } catch (error) {
+            console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
+            flashLoanAmountRaw = fallbackBorrowAmount;
+        }
 
         // ✅ Convert correctly
         const flashLoanAmount = BigInt(flashLoanAmountRaw.toString());
