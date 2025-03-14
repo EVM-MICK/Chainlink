@@ -1780,7 +1780,9 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            tx = await baseContract.startRecursiveLending();
+            tx1 = await baseContract.startRecursiveLending();
+            const receipt1 = await tx1.wait();
+            console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt1.transactionHash}`);
         } else {
             console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
             baseContract.once("BorrowRequested", async (amount) => {
