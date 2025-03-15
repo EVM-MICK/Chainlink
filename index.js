@@ -1763,6 +1763,7 @@ async function monitorAndExecuteStrategy() {
         }
 
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+         let finalBorrowAmount1;
 
         // ✅ Wait for BorrowRequested event or use fallback
         // let flashLoanAmountRaw;
@@ -1823,7 +1824,7 @@ async function monitorAndExecuteStrategy() {
     });
 
     // ✅ Wait for either event update or fallback value
-    const finalBorrowAmount = await updatedBorrowAmountPromise;
+    finalBorrowAmount = await updatedBorrowAmountPromise;
 
     // ✅ Convert `finalBorrowAmount` to proper WEI format
     const flashLoanAmountWei = BigInt(Math.round(Number(finalBorrowAmount) * 1e6)); // Convert USDC to WEI format
