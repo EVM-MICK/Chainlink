@@ -1595,18 +1595,23 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`📈 Collateral Increased: ${ethers.formatUnits(finalCollateral, 6)} USDC`);
     });
   // ✅ Capture the first borrowed amount correctly
-baseContract.on("BorrowRequested", async (amount) => {
-    if (!amount || typeof amount !== "object" || !amount.toString) {
+ baseContract.on("BorrowRequested", async (amount) => {
+    // ✅ Ensure `amount` is a valid `BigInt`
+    if (typeof amount !== "bigint" || amount <= 0) {
         console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
         return;
     }
-    // ✅ Convert amount to BigInt for safe math operations
-    firstBorrowedAmount = BigInt(amount.toString());
-    // ✅ Convert to USDC format (6 decimals)
+
+    // ✅ Store `amount` correctly (Ethers v6 uses `BigInt`)
+    firstBorrowedAmount = amount;
+
+    // ✅ Convert `BigInt` to readable USDC (6 decimals)
     const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
-    console.log(`🟢 BorrowRequested event listener attached!`);
+
+    console.log(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
     await sendTelegramMessage(`🟢 Updated First Borrowed Amount: ${formattedUSDC} USDC`);
 });
+
 
     // ✅ Debt Management Events
     baseContract.on("DebtRepaid", async (repaidAmount) => {
