@@ -1763,7 +1763,7 @@ async function monitorAndExecuteStrategy() {
         }
 
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-         let finalBorrowAmount;
+         let flashLoanAmount3;
 
         // ✅ Wait for BorrowRequested event or use fallback
         // let flashLoanAmountRaw;
@@ -1825,16 +1825,15 @@ async function monitorAndExecuteStrategy() {
 
     // ✅ Wait for either event update or fallback value
     finalBorrowAmount = await updatedBorrowAmountPromise;
-
     // ✅ Convert `finalBorrowAmount` to proper WEI format
     const flashLoanAmountWei = BigInt(Math.round(Number(finalBorrowAmount) * 1e6)); // Convert USDC to WEI format
-
+    const flashLoanAmount3 = BigInt(flashLoanAmountWei.toString());
     console.log(`🔄 Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC (${flashLoanAmountWei.toString()} WEI)`);
 
     tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
     }
 
-        // ✅ Wait for transaction receipt
+        // ✅ Wait for transaction receip
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
 
@@ -1842,7 +1841,7 @@ async function monitorAndExecuteStrategy() {
         cycleCount++;
         console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
 
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(finalBorrowAmount, 6)} USDC`);
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount3, 6)} USDC`);
 
         // ✅ Mark cycle as complete
         isCycleComplete = true;
