@@ -1765,22 +1765,22 @@ async function monitorAndExecuteStrategy() {
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
         // ✅ Wait for BorrowRequested event or use fallback
-        let flashLoanAmountRaw;
-        try {
-            flashLoanAmountRaw = await Promise.race([
-                firstBorrowedAmountPromise,
-                new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
-            ]);
-            console.log("📊 BorrowRequested event received.");
-        } catch (error) {
-            console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
-            flashLoanAmountRaw = fallbackBorrowAmount1;
-        }
+        // let flashLoanAmountRaw;
+        // try {
+        //     flashLoanAmountRaw = await Promise.race([
+        //         firstBorrowedAmountPromise,
+        //         new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
+        //     ]);
+        //     console.log("📊 BorrowRequested event received.");
+        // } catch (error) {
+        //     console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
+        //     flashLoanAmountRaw = fallbackBorrowAmount1;
+        // }
 
-        // ✅ Convert to 6 decimals (WEI format)
-        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw) * 1e6));
-        const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
-        console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+        // // ✅ Convert to 6 decimals (WEI format)
+        // const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw) * 1e6));
+        // const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
+        // console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
@@ -1797,13 +1797,41 @@ async function monitorAndExecuteStrategy() {
             tx = await baseContract.startRecursiveLending();
             
         } else {
-            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Executing Flash Loan of ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-            baseContract.once("BorrowRequested", async (amount) => {
-                firstBorrowedAmount = BigInt(amount.toString());
-                console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${ethers.formatUnits(firstBorrowedAmount, 6)} USDC`);
-            });
-            tx = await baseContract.executeFlashLoan(flashLoanAmount);
-        }
+    console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
+
+    // ✅ Set up a promise to wait for `BorrowRequested`, but timeout after 2 seconds
+    let updatedBorrowAmountPromise = new Promise((resolve) => {
+        baseContract.once("BorrowRequested", async (amount) => {
+            // ✅ Ensure `amount` is a valid `BigInt`
+            if (typeof amount !== "bigint" || amount <= 0) {
+                console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
+                return;
+            }
+
+            // ✅ Convert `BigInt` to USDC format (6 decimals)
+            firstBorrowedAmount = amount;
+            const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
+            console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${formattedUSDC} USDC`);
+            resolve(firstBorrowedAmount); // ✅ Resolve the promise with the new amount fallbackBorrowAmount1
+        });
+
+        // ✅ Fallback: If no event is received within 2 seconds, use `fallbackBorrowAmount1`
+        setTimeout(() => {
+            console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
+            resolve(fallbackBorrowAmount1); // ✅ Use fallback amount
+        }, 2000);
+    });
+
+    // ✅ Wait for either event update or fallback value
+    const finalBorrowAmount = await updatedBorrowAmountPromise;
+
+    // ✅ Convert `finalBorrowAmount` to proper WEI format
+    const flashLoanAmountWei = BigInt(Math.round(Number(finalBorrowAmount) * 1e6)); // Convert USDC to WEI format
+
+    console.log(`🔄 Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC (${flashLoanAmountWei.toString()} WEI)`);
+
+    tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
+    }
 
         // ✅ Wait for transaction receipt
         const receipt = await tx.wait();
