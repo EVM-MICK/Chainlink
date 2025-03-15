@@ -1845,23 +1845,33 @@ async function fetchMoonwellData() {
 
     // Print results
     console.log("📈 Position:", position);
-   console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
-    typeof value === "bigint" ? value.toString() : value, 2
-   ));
+  console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
+  typeof value === "bigint" ? value.toString() : value, 2
+));
 
+// Initialize message
 let rewardMessage = "📊 Rewards Claimed:\n";
 
-if (reward && Array.isArray(reward.tokens)) {
-  reward.tokens.forEach((token) => {
-    const formattedAmount = formatRewardAmount(token.amount, token.decimals);
-    console.log(`💰 ${token.symbol}: ${formattedAmount} Tokens`);
-    rewardMessage += `💰 ${token.symbol}: ${formattedAmount} Tokens\n`;
-  });
+// Check if reward object contains expected fields
+if (reward && reward.supplyRewards && reward.borrowRewards && reward.rewardToken) {
+  // Extract reward token details
+  const tokenSymbol = reward.rewardToken.symbol || "UNKNOWN";
+  const tokenDecimals = reward.rewardToken.decimals || 18; // Default to 18 if unknown
+
+  // Convert rewards using the correct decimals
+  const supplyReward = formatRewardAmount(reward.supplyRewards.value, tokenDecimals);
+  const borrowReward = formatRewardAmount(reward.borrowRewards.value, tokenDecimals);
+
+  console.log(`💰 Supply Rewards: ${supplyReward} ${tokenSymbol}`);
+  console.log(`💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}`);
+
+  rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
+  rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
 } else {
   console.log("⚠️ Unexpected reward format:", reward);
 }
 
-// Only send the Telegram message if we actually have rewards
+// Send message only if there are rewards
 if (rewardMessage !== "📊 Rewards Claimed:\n") {
   console.log(rewardMessage);
   await sendTelegramMessage(rewardMessage);
@@ -1876,7 +1886,7 @@ if (rewardMessage !== "📊 Rewards Claimed:\n") {
 
 // Function to safely convert and format BigInt token amounts
 function formatRewardAmount(amount, decimals) {
-  return Number(amount) / 10 ** decimals; // Convert BigInt -> Number safely
+  return Number(amount) / 10 ** decimals; // Convert BigInt -> Number before division
 }
 
 // ✅ Start event listeners and recursive execution
