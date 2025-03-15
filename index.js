@@ -1622,15 +1622,15 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
             // ✅ Listen for RewardsAccumulated events
-    baseContract.on("RewardsAccumulated1", async (claimedUSDC, claimedWELL) => {
-        const formattedUSDC = ethers.formatUnits(claimedUSDC); // Convert from 6 decimals
-        const formattedWELL = ethers.formatUnits(claimedWELL); // WELL is converted to 6 decimals
-        console.log(`📊 Rewards claimed:`);
-        console.log(`💰 USDC: ${formattedUSDC} USDC`);
-        console.log(`🪙 WELL: ${formattedWELL} WELL`);
-        // ✅ Send notification via Telegram (optional)
-        await sendTelegramMessage(`📊  Rewards claimed:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
-    });
+    // baseContract.on("RewardsAccumulated1", async (claimedUSDC, claimedWELL) => {
+    //     const formattedUSDC = ethers.formatUnits(claimedUSDC); // Convert from 6 decimals
+    //     const formattedWELL = ethers.formatUnits(claimedWELL); // WELL is converted to 6 decimals
+    //     console.log(`📊 Rewards claimed:`);
+    //     console.log(`💰 USDC: ${formattedUSDC} USDC`);
+    //     console.log(`🪙 WELL: ${formattedWELL} WELL`);
+    //     // ✅ Send notification via Telegram (optional)
+    //     await sendTelegramMessage(`📊  Rewards claimed:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
+    // });
 
     // baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
     //     const formattedUSDC = ethers.formatUnits(accumulatedUSDC); // Convert from 6 decimals
@@ -1815,14 +1815,60 @@ async function monitorAndExecuteStrategy() {
     }
 }
 
+async function fetchMoonwellData() {
+  try {
+    console.log("🚀 Fetching Moonwell data...");
+
+    // Import the package dynamically
+    const { createMoonwellClient } = await import('@moonwell-fi/moonwell-sdk');
+
+    // Initialize the Moonwell client
+    const moonwellClient = createMoonwellClient({
+      networks: {
+        base: {
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/ae5b09c6-2794-49a5-a951-74d4d57a2539'],
+        },
+      },
+    });
+
+    // Fetch data from Moonwell
+    const markets = await moonwellClient.getMarkets({ chainId: 8453 });
+
+    const position = await moonwellClient.getUserPosition({ 
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      chainId: 8453,
+      marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
+    });
+
+    const reward = await moonwellClient.getUserReward({ 
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      chainId: 8453,
+      marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
+    });
+
+    // Print results
+    console.log("📊 Market Data:", markets);
+    console.log("📈 Position:", position);
+    console.log(`💰 Rewards Claimed: ${reward} Token`);
+
+    // Send a notification via Telegram
+    await sendTelegramMessage(`📊 Rewards claimed: 💰 REWARD: ${reward}`);
+
+  } catch (error) {
+    console.error("❌ Error fetching Moonwell data:", error);
+  }
+}
+
 // ✅ Start event listeners and recursive execution
 async function startScript() {
     console.log("🚀 Starting script...");
     // ✅ Attach event listeners before running strategy
     await setupEventListeners(baseContract);
     console.log("✅ Event listeners initialized. Starting strategy...");
-    // ✅ Start the lending strategy
+     // Fetch Moonwell data
+     await fetchMoonwellData();
     monitorAndExecuteStrategy();
+       // ✅ Start the lending strategy
 }
 
 // ✅ Start execution
