@@ -1788,7 +1788,6 @@ async function monitorAndExecuteStrategy() {
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             // ✅ Ensure there is sufficient collateral before calling
-            await baseContract.callStatic.startRecursiveLending();
             console.log("✅ Simulation passed: Calling startRecursiveLending()... startRecursiveLending");
             tx = await baseContract.startRecursiveLending();
             
