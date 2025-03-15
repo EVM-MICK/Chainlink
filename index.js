@@ -1841,7 +1841,7 @@ async function monitorAndExecuteStrategy() {
         cycleCount++;
         console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
 
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC`);
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(finalBorrowAmount, 6)} USDC`);
 
         // ✅ Mark cycle as complete
         isCycleComplete = true;
