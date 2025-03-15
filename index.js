@@ -1844,36 +1844,39 @@ async function fetchMoonwellData() {
     });
 
     // Print results
-    //console.log("📊 Market Data:", markets);
     console.log("📈 Position:", position);
-    console.log("💰 Raw Reward Data:", JSON.stringify(reward, null, 2));
- 
-  if (reward && Array.isArray(reward.tokens)) {
-     reward.tokens.forEach((token) => {
-      const formattedAmount = formatRewardAmount(token.amount, token.decimals);
-      console.log(`💰 ${token.symbol}: ${formattedAmount} Tokens`);
-    });
-    } else {
-    console.log("⚠️ Unexpected reward format:", reward);
-   }
-  let rewardMessage = "📊 Rewards Claimed:\n";
+   console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
+    typeof value === "bigint" ? value.toString() : value, 2
+   ));
 
-reward.tokens.forEach((token) => {
-  const formattedAmount = formatRewardAmount(token.amount, token.decimals);
-  rewardMessage += `💰 ${token.symbol}: ${formattedAmount} Tokens\n`;
-});
+let rewardMessage = "📊 Rewards Claimed:\n";
 
-console.log(rewardMessage);
-await sendTelegramMessage(rewardMessage);
+if (reward && Array.isArray(reward.tokens)) {
+  reward.tokens.forEach((token) => {
+    const formattedAmount = formatRewardAmount(token.amount, token.decimals);
+    console.log(`💰 ${token.symbol}: ${formattedAmount} Tokens`);
+    rewardMessage += `💰 ${token.symbol}: ${formattedAmount} Tokens\n`;
+  });
+} else {
+  console.log("⚠️ Unexpected reward format:", reward);
+}
+
+// Only send the Telegram message if we actually have rewards
+if (rewardMessage !== "📊 Rewards Claimed:\n") {
+  console.log(rewardMessage);
+  await sendTelegramMessage(rewardMessage);
+} else {
+  console.log("ℹ️ No rewards to claim.");
+}
 
   } catch (error) {
     console.error("❌ Error fetching Moonwell data:", error);
   }
 }
 
-// Function to format token rewards correctly
+// Function to safely convert and format BigInt token amounts
 function formatRewardAmount(amount, decimals) {
-  return amount / 10 ** decimals;
+  return Number(amount) / 10 ** decimals; // Convert BigInt -> Number safely
 }
 
 // ✅ Start event listeners and recursive execution
