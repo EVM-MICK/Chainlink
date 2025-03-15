@@ -1806,14 +1806,14 @@ async function monitorAndExecuteStrategy() {
             // ✅ Ensure `amount` is a valid `BigInt`
             if (typeof amount !== "bigint" || amount <= 0) {
                 console.error("❌ ERROR: Received invalid BorrowRequested amount:", amount);
-                return;
+                return resolve(fallbackBorrowAmount1); // ✅ Use fallback amount if invalid
             }
 
-            // ✅ Convert `BigInt` to USDC format (6 decimals)
+            // ✅ Store and format `firstBorrowedAmount`
             firstBorrowedAmount = amount;
             const formattedUSDC = ethers.formatUnits(firstBorrowedAmount, 6);
             console.log(`🟢 Cycle ${cycleCount + 1}: BorrowRequested Amount Updated: ${formattedUSDC} USDC`);
-            resolve(firstBorrowedAmount); // ✅ Resolve the promise with the new amount fallbackBorrowAmount1
+            resolve(firstBorrowedAmount);
         });
 
         // ✅ Fallback: If no event is received within 2 seconds, use `fallbackBorrowAmount1`
@@ -1824,15 +1824,30 @@ async function monitorAndExecuteStrategy() {
     });
 
     // ✅ Wait for either event update or fallback value
-    finalBorrowAmount = await updatedBorrowAmountPromise;
-    // ✅ Convert `finalBorrowAmount` to proper WEI format
-    const flashLoanAmountWei = BigInt(Math.round(Number(finalBorrowAmount) * 1e6)); // Convert USDC to WEI format
-    const flashLoanAmount3 = BigInt(flashLoanAmountWei.toString());
-    console.log(`🔄 Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC (${flashLoanAmountWei.toString()} WEI)`);
+    let finalBorrowAmount = await updatedBorrowAmountPromise;
 
-    tx = await baseContract.executeFlashLoan(flashLoanAmount3);
+    // ✅ Ensure `finalBorrowAmount` is a valid number
+    if (!finalBorrowAmount || isNaN(Number(finalBorrowAmount))) {
+        console.error("❌ ERROR: finalBorrowAmount is invalid, using fallback.");
+        finalBorrowAmount = fallbackBorrowAmount1;
     }
 
+    // ✅ Convert `finalBorrowAmount` to proper WEI format
+    const flashLoanAmountWei = BigInt(Math.round(Number(finalBorrowAmount) * 1e6)); // Convert USDC to WEI format
+
+    // ✅ Validate final `flashLoanAmountWei`
+    if (!flashLoanAmountWei || flashLoanAmountWei <= 0) {
+        console.error("❌ ERROR: Invalid flashLoanAmountWei:", flashLoanAmountWei);
+        isCycleComplete = true;
+        return;
+    }
+
+    console.log(`🔄 Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC (${flashLoanAmountWei.toString()} WEI)`);
+      await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmountWei)} USDC`);
+
+    // ✅ Call executeFlashLoan with correctly formatted value
+    tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
+   }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
@@ -1840,9 +1855,6 @@ async function monitorAndExecuteStrategy() {
         // ✅ Increment cycle count immediately
         cycleCount++;
         console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
-
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount3, 6)} USDC`);
-
         // ✅ Mark cycle as complete
         isCycleComplete = true;
 
