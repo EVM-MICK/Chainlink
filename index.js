@@ -1763,7 +1763,7 @@ async function monitorAndExecuteStrategy() {
         }
 
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-         let finalBorrowAmount1;
+         let finalBorrowAmount;
 
         // ✅ Wait for BorrowRequested event or use fallback
         // let flashLoanAmountRaw;
