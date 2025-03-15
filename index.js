@@ -1622,17 +1622,27 @@ function setupEventListeners(baseContract) {
         await sendTelegramMessage(`✅ Remaining Balance After Repayment: ${ethers.formatUnits(remainingBalance, 6)} USDC`);
     });
             // ✅ Listen for RewardsAccumulated events
-    baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
-        const formattedUSDC = ethers.formatUnits(accumulatedUSDC); // Convert from 6 decimals
-        const formattedWELL = ethers.formatUnits(accumulatedWELL); // WELL is converted to 6 decimals
-
-        console.log(`📊 Rewards Accumulated:`);
+    baseContract.on("RewardsAccumulated1", async (claimedUSDC, claimedWELL) => {
+        const formattedUSDC = ethers.formatUnits(claimedUSDC); // Convert from 6 decimals
+        const formattedWELL = ethers.formatUnits(claimedWELL); // WELL is converted to 6 decimals
+        console.log(`📊 Rewards claimed:`);
         console.log(`💰 USDC: ${formattedUSDC} USDC`);
         console.log(`🪙 WELL: ${formattedWELL} WELL`);
-
         // ✅ Send notification via Telegram (optional)
-        await sendTelegramMessage(`📊 Rewards Accumulated:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
+        await sendTelegramMessage(`📊  Rewards claimed:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
     });
+
+    // baseContract.on("RewardsAccumulated", async (accumulatedUSDC, accumulatedWELL) => {
+    //     const formattedUSDC = ethers.formatUnits(accumulatedUSDC); // Convert from 6 decimals
+    //     const formattedWELL = ethers.formatUnits(accumulatedWELL); // WELL is converted to 6 decimals
+
+    //     console.log(`📊 Rewards Accumulated:`);
+    //     console.log(`💰 USDC: ${formattedUSDC} USDC`);
+    //     console.log(`🪙 WELL: ${formattedWELL} WELL`);
+
+    //     // ✅ Send notification via Telegram (optional)
+    //     await sendTelegramMessage(`📊 Rewards Accumulated:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
+    // });
 
     // ✅ Profit & Reinvestment Events
     baseContract.on("ProfitReinvested", async (reinvestedAmount, profitExtracted) => {
@@ -1808,12 +1818,9 @@ async function monitorAndExecuteStrategy() {
 // ✅ Start event listeners and recursive execution
 async function startScript() {
     console.log("🚀 Starting script...");
-
     // ✅ Attach event listeners before running strategy
     await setupEventListeners(baseContract);
-
     console.log("✅ Event listeners initialized. Starting strategy...");
-
     // ✅ Start the lending strategy
     monitorAndExecuteStrategy();
 }
