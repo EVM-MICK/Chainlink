@@ -1830,7 +1830,7 @@ async function monitorAndExecuteStrategy() {
     const flashLoanAmount3 = BigInt(flashLoanAmountWei.toString());
     console.log(`🔄 Executing Flash Loan of ${ethers.formatUnits(flashLoanAmountWei, 6)} USDC (${flashLoanAmountWei.toString()} WEI)`);
 
-    tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
+    tx = await baseContract.executeFlashLoan(flashLoanAmount3);
     }
 
         // ✅ Wait for transaction receip
