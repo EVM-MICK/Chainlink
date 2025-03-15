@@ -1832,7 +1832,7 @@ async function fetchMoonwellData() {
     });
 
     // Fetch data from Moonwell
-    const markets = await moonwellClient.getMarkets({ chainId: 8453 });
+    //const markets = await moonwellClient.getMarkets({ chainId: 8453 });
 
     const position = await moonwellClient.getUserPosition({ 
       userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
@@ -1847,7 +1847,7 @@ async function fetchMoonwellData() {
     });
 
     // Print results
-    console.log("📊 Market Data:", markets);
+    //console.log("📊 Market Data:", markets);
     console.log("📈 Position:", position);
     console.log(`💰 Rewards Claimed: ${reward} Token`);
 
