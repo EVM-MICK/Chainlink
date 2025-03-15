@@ -1831,9 +1831,6 @@ async function fetchMoonwellData() {
       },
     });
 
-    // Fetch data from Moonwell
-    //const markets = await moonwellClient.getMarkets({ chainId: 8453 });
-
     const position = await moonwellClient.getUserPosition({ 
       userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
@@ -1849,14 +1846,34 @@ async function fetchMoonwellData() {
     // Print results
     //console.log("📊 Market Data:", markets);
     console.log("📈 Position:", position);
-    console.log(`💰 Rewards Claimed: ${reward} Token`);
+    console.log("💰 Raw Reward Data:", JSON.stringify(reward, null, 2));
+ 
+  if (reward && Array.isArray(reward.tokens)) {
+     reward.tokens.forEach((token) => {
+      const formattedAmount = formatRewardAmount(token.amount, token.decimals);
+      console.log(`💰 ${token.symbol}: ${formattedAmount} Tokens`);
+    });
+    } else {
+    console.log("⚠️ Unexpected reward format:", reward);
+   }
+  let rewardMessage = "📊 Rewards Claimed:\n";
 
-    // Send a notification via Telegram
-    await sendTelegramMessage(`📊 Rewards claimed: 💰 REWARD: ${reward}`);
+reward.tokens.forEach((token) => {
+  const formattedAmount = formatRewardAmount(token.amount, token.decimals);
+  rewardMessage += `💰 ${token.symbol}: ${formattedAmount} Tokens\n`;
+});
+
+console.log(rewardMessage);
+await sendTelegramMessage(rewardMessage);
 
   } catch (error) {
     console.error("❌ Error fetching Moonwell data:", error);
   }
+}
+
+// Function to format token rewards correctly
+function formatRewardAmount(amount, decimals) {
+  return amount / 10 ** decimals;
 }
 
 // ✅ Start event listeners and recursive execution
