@@ -1765,7 +1765,7 @@ async function monitorAndExecuteStrategy() {
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
          //let flashLoanAmountRaw = fallbackBorrowAmount1;
         // ✅ Convert to 6 decimals (WEI format)
-        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw)));
+        const flashLoanAmountRawWei = BigInt(Math.round(Number(fallbackBorrowAmount1)));
         const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
         console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
@@ -1774,9 +1774,7 @@ async function monitorAndExecuteStrategy() {
             isCycleComplete = true;
             return;
         }
-
         let tx;
-
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             // ✅ Ensure there is sufficient collateral before calling
