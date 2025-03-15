@@ -1763,22 +1763,9 @@ async function monitorAndExecuteStrategy() {
         }
 
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-         let flashLoanAmountRaw = fallbackBorrowAmount1;
-        // ✅ Wait for BorrowRequested event or use fallback
-        // let flashLoanAmountRaw;
-        // try {
-        //     flashLoanAmountRaw = await Promise.race([
-        //         firstBorrowedAmountPromise,
-        //         new Promise((resolve) => setTimeout(() => resolve(fallbackBorrowAmount1), 2000)) // 2s timeout
-        //     ]);
-        //     console.log("📊 BorrowRequested event received.");
-        // } catch (error) {
-        //     console.warn("⚠️ BorrowRequested event not received in time, using fallback value.");
-        //     flashLoanAmountRaw = fallbackBorrowAmount1;
-        // }
-
-        // // ✅ Convert to 6 decimals (WEI format)
-        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw) * 1e6));
+         //let flashLoanAmountRaw = fallbackBorrowAmount1;
+        // ✅ Convert to 6 decimals (WEI format)
+        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw)));
         const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
         console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
@@ -1799,12 +1786,12 @@ async function monitorAndExecuteStrategy() {
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-          tx = await baseContract.executeFlashLoan(flashLoanAmountRaw);
+          tx = await baseContract.executeFlashLoan(flashLoanAmount);
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmountRaw, 6)} USDC`);
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
         // ✅ Increment cycle count immediately
         cycleCount++;
         console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
