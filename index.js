@@ -1845,25 +1845,25 @@ async function fetchMoonwellData() {
 
     // Print results
     console.log("📈 Position:", position);
-  console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
-  typeof value === "bigint" ? value.toString() : value, 2
-));
+   console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
+        typeof value === "bigint" ? value.toString() : value, 2
+   ));
 
 // Initialize message
 let rewardMessage = "📊 Rewards Claimed:\n";
 
-// Check if reward object contains expected fields
+// Check if `reward` contains expected fields
 if (reward && reward.supplyRewards && reward.borrowRewards && reward.rewardToken) {
-  // Extract reward token details
-  const tokenSymbol = reward.rewardToken.symbol || "UNKNOWN";
-  const tokenDecimals = reward.rewardToken.decimals || 18; // Default to 18 if unknown
+  // Extract token details
+  const tokenSymbol = reward.rewardToken.symbol || "UNKNOWN"; // Get token symbol
+  const tokenDecimals = reward.rewardToken.decimals || 18; // Default to 18 if missing
 
-  // Convert rewards using the correct decimals
+  // Extract rewards
   const supplyReward = formatRewardAmount(reward.supplyRewards.value, tokenDecimals);
   const borrowReward = formatRewardAmount(reward.borrowRewards.value, tokenDecimals);
 
-  console.log(`💰 Supply Rewards: ${supplyReward} ${tokenSymbol}`);
-  console.log(`💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}`);
+  console.log(`💰 Supply Rewards (USD): $${reward.supplyRewardsUsd.toFixed(6)}`);
+  console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd.toFixed(6)}`);
 
   rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
   rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
