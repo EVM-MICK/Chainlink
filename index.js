@@ -1769,7 +1769,7 @@ async function monitorAndExecuteStrategy() {
         if (cycleCount === 0) {
             fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
         } else {
-            fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+            fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6 * 4) + 1e6);
         }
 
         console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
