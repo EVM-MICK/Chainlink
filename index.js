@@ -1770,8 +1770,8 @@ async function monitorAndExecuteStrategy() {
         if (cycleCount === 0) {
             fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
         } else {
-            fallbackBorrowAmount11 = BigInt(Math.floor(collateral * 0.75 * 1e6 ) + 1e6);
-            fallbackBorrowAmount1 = fallbackBorrowAmount11 * 4;
+           fallbackBorrowAmount11 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+           fallbackBorrowAmount1 = fallbackBorrowAmount11 * BigInt(4); // Convert 4 to BigInt
            //fallbackBorrowAmount1 = BigInt(Math.floor((collateral * 0.75) * 1e6) * 4) + BigInt(1e6);
         }
 
