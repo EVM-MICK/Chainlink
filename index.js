@@ -1644,6 +1644,7 @@ function setupEventListeners(baseContract) {
     //     await sendTelegramMessage(`📊 Rewards Accumulated:\n💰 USDC: ${formattedUSDC} USDC\n🪙 WELL: ${formattedWELL} WELL`);
     // });
 
+
     // ✅ Profit & Reinvestment Events
     baseContract.on("ProfitReinvested", async (reinvestedAmount, profitExtracted) => {
         await sendTelegramMessage(
