@@ -1845,7 +1845,7 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/b785ac58-7903-472e-b36f-ccca870584fa'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/97487814-90e0-41d4-bfdd-c69466852106'],
         },
       },
     });
