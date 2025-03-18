@@ -1831,19 +1831,32 @@ async function monitorAndExecuteStrategy() {
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
         await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
       
-        // ✅ Save transaction hash to prevent duplicate execution
-        fs.writeFileSync(lastTxFile, receipt.transactionHash);
-        lastTransactionHash = receipt.transactionHash;
+       // ✅ Wait for transaction receipt
+const receipt = await tx.wait();
 
-        // ✅ Increment cycle count
-        cycleCount++;
-        fs.writeFileSync(cycleCountFile, cycleCount.toString());
-        console.log(`✅ Cycle ${cycleCount} saved.`);
+// ✅ Check if transactionHash is valid
+if (!receipt.transactionHash) {
+    console.error("❌ Error: Transaction hash is undefined. Cannot save transaction.");
+    isCycleComplete = true;
+    return; // Stop execution to prevent further errors
+}
 
-        isCycleComplete = true;
+console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
+await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
-        console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 2 seconds...`);
-        setTimeout(startScript, 2000);
+// ✅ Save transaction hash to prevent duplicate execution
+fs.writeFileSync(lastTxFile, receipt.transactionHash.toString()); // Ensure it's a string
+lastTransactionHash = receipt.transactionHash;
+
+// ✅ Increment cycle count
+cycleCount++;
+fs.writeFileSync(cycleCountFile, cycleCount.toString());
+console.log(`✅ Cycle ${cycleCount} saved.`);
+
+isCycleComplete = true;
+console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 2 seconds...`);
+setTimeout(startScript, 2000);
+
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
