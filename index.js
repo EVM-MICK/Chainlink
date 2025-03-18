@@ -1772,11 +1772,10 @@ if (cycleCount === 0) {
     // ✅ First cycle: Use fixed value (233 USDC)
     fallbackBorrowAmount1 = BigInt(233 * 1e6);
 } else {
-   
-      // ✅ Ensure previous debt is in BigInt
+ // ✅ Ensure previous debt is in BigInt
     const previousDebt = BigInt(Math.floor(Number(borrowed) * 1e6)); // Convert borrowed to WEI
 
-    // ✅ Ensure fallbackBorrowAmount1 is initialized before use
+    // ✅ Ensure `fallbackBorrowAmount1` is initialized before use
     const fallbackBorrowAmountBigInt = fallbackBorrowAmount1 ? BigInt(fallbackBorrowAmount1) : previousDebt;
 
     // ✅ Compute new collateral AFTER deducting debt
@@ -1784,10 +1783,10 @@ if (cycleCount === 0) {
     const newCollateral = BigInt(Math.floor(Number(collateral) * 1e6)) + remainingFlashLoanBalance;
 
     // ✅ Compute the new borrow amount (Bₙ = 0.75 × Cₙ)
-    const borrowedAmount = (newCollateral * BigInt(75)) / BigInt(100); // Equivalent to newCollateral * 0.75 in BigInt
+    const borrowedAmount = (newCollateral * BigInt(75)) / BigInt(100); // 75% of new collateral
 
-    // ✅ Ensure Borrowed Amount is always enough to cover Flash Loan Repayment
-    let flashLoanAmount = borrowedAmount - previousDebt; // Ensuring enough is left for servicing debt
+    // ✅ Compute Flash Loan Amount (Fₙ = Bₙ + Dₙ)
+    let flashLoanAmount = borrowedAmount + previousDebt; 
 
     // ✅ Apply a safety check to avoid over-borrowing
     if (flashLoanAmount > borrowedAmount) {
