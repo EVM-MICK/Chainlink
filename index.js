@@ -1731,6 +1731,15 @@ function setupEventListeners(baseContract) {
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
 let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
 
+// Function to calculate borrowing amount per cycle
+function calculateBorrowAmount(collateral, cycleCount) {
+    const growthFactor = 1.5; // 50% increase per cycle
+    const updatedCollateral = collateral * Math.pow(growthFactor, cycleCount); // Cn = C0 * r^n
+    const borrowAmount = updatedCollateral * 0.75; // Xn = 0.75 * Cn
+
+    return BigInt(Math.floor(borrowAmount * 1e6)); // Convert to USDC (6 decimals)
+}
+
 async function monitorAndExecuteStrategy() {
     try {
         if (!isCycleComplete) {
@@ -1771,15 +1780,17 @@ let fallbackBorrowAmount1;
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
     console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-    fallbackBorrowAmount1 = BigInt(233 * 1e6); // Initial flash loan for Cycle 0
+    fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial flash loan for Cycle 0
 } else {
-    fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+    //fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
+     fallbackBorrowAmount1 = calculateBorrowAmount(collateral, cycleCount);
+            console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 }
 
 // ✅ Convert to WEI format before sending to smart contract
-const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
+//const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
+const flashLoanAmountWei = fallbackBorrowAmount1.toString();
 
-//const flashLoanAmountWei = fallbackBorrowAmount1.toString(); // Convert BigInt to string for Solidity `uint256`
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} (USDC)`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
@@ -1831,7 +1842,7 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/603acbd3-0046-4bf6-9d68-ca63c85b3a35'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/b785ac58-7903-472e-b36f-ccca870584fa'],
         },
       },
     });
