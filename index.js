@@ -13,8 +13,6 @@ const cron = require("node-cron");
 const { promisify } = require("util");
 const pkg = require("telegraf");
 const fs = require("fs");
-const cycleCountFile = 'cycle_count.json';
-const lastTxFile = 'last_transaction.json';
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
@@ -1732,7 +1730,6 @@ function setupEventListeners(baseContract) {
 
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
 let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
-let lastTransactionHash = null;
 
 
 if (fs.existsSync(cycleCountFile)) {
@@ -1746,7 +1743,6 @@ if (fs.existsSync(lastTxFile)) {
     lastTransactionHash = fs.readFileSync(lastTxFile, 'utf8').trim();
     console.log(`🔄 Last transaction hash: ${lastTransactionHash}`);
 }
-
 
 async function monitorAndExecuteStrategy() {
     try {
@@ -1783,35 +1779,36 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
         // ✅ Ensure valid borrow amount in first cycle
-        let fallbackBorrowAmount1;
-        if (cycleCount === 0) {
-            fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
-        } else {
-           fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 4 * 1e6) + 1e6);
-           console.log(`🔄 Corrected Fallback BorrowRequested Amount after mulitplying by it by 4: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-        }
+        // ✅ Ensure valid borrow amount in first cycle
+let fallbackBorrowAmount1;
 
+if (cycleCount === 0) {
+    fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
+} else {
+    // ✅ Fetch previous debt dynamically
+    const previousDebt = BigInt(Math.floor(borrowed * 1e6)); // Convert to WEI
+
+    // ✅ Compute remaining balance after repaying previous debt
+    const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt;
+
+    // ✅ Compute new collateral by adding remaining flash loan balance
+    const newCollateral = collateral + Number(ethers.formatUnits(remainingFlashLoanBalance, 6));
+
+    // ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
+    const safeMultiplier = Math.max(2, (fallbackBorrowAmount1 / (0.75 * newCollateral)));
+
+    // ✅ Compute Flash Loan for the Next Cycle
+    fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * safeMultiplier * 1e6) + 1e6);
+
+    console.log(`🔄 Corrected Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+   }
         //console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-     //   let flashLoanAmountRaw = fallbackBorrowAmount1;
-     //  const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw))); // ✅ Ensure proper rounding
-     // const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
-     // console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
      const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
-   
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             isCycleComplete = true;
             return;
-        }
-      // ✅ Prevent repeating a previous transaction
-        if (fs.existsSync(lastTxFile) && cycleCount > 0) {
-            const lastTx = fs.readFileSync(lastTxFile, 'utf8').trim();
-            if (lastTx === lastTransactionHash) {
-                console.log("⚠️ Last transaction already executed. Skipping duplicate cycle.");
-                isCycleComplete = true;
-                return;
-            }
         }
 
         let tx;
@@ -1830,25 +1827,11 @@ async function monitorAndExecuteStrategy() {
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
     // ✅ Check if transactionHash is valid
-  // ✅ Try to get transaction hash from both `tx` and `receipt`
-const transactionHash = receipt?.transactionHash || tx?.hash;
-if (!transactionHash) {
-    console.error("❌ Error: Transaction hash is still undefined. Cannot save transaction.");
-    isCycleComplete = true;
-    return; // Stop execution to prevent further errors
-}
-
-console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
 await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-
-// ✅ Save transaction hash to prevent duplicate execution
-fs.writeFileSync(lastTxFile, receipt.transactionHash.toString()); // Ensure it's a string
-lastTransactionHash = receipt.transactionHash;
 
 // ✅ Increment cycle count
 cycleCount++;
-fs.writeFileSync(cycleCountFile, cycleCount.toString());
-console.log(`✅ Cycle ${cycleCount} saved.`);
+//fs.writeFileSync(cycleCountFile, cycleCount.toString());
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 2 seconds...`);
