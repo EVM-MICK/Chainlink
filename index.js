@@ -1772,22 +1772,28 @@ if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
     fallbackBorrowAmount1 = BigInt(300 * 1e6);
 } else {
+    // ✅ Ensure `collateral` is converted to BigInt safely
+    const collateralBigInt = BigInt(Math.floor(Number(collateral) * 1e6));
+
     // ✅ Compute flash loan amount using 25:75 ratio
-    const flashLoanAmount = (BigInt(collateral) * BigInt(75) / BigInt(25)) * BigInt(1e6); // Apply ratio
+    let flashLoanAmount = (collateralBigInt * BigInt(75)) / BigInt(25); // Apply ratio safely
+
+    // ✅ Add buffer for gas fees
+    flashLoanAmount += BigInt(2e6);  
 
     // ✅ Ensure flashLoanAmount does not exceed Solidity uint256 limit
-    if (flashLoanAmount > BigInt(2 ** 256 - 1)) {
+    if (flashLoanAmount > BigInt(2) ** BigInt(256) - BigInt(1)) {
         console.warn("⚠️ Warning: Flash loan amount exceeds Solidity uint256 limit! Reducing value.");
-        flashLoanAmount = BigInt(2 ** 256 - 1);
+        flashLoanAmount = BigInt(2) ** BigInt(256) - BigInt(1);
     }
 
     // ✅ Compute new total collateral after receiving the flash loan
-    const newCollateral = (BigInt(collateral) * BigInt(1e6)) + flashLoanAmount;
+    const newCollateral = collateralBigInt + flashLoanAmount;
 
     // ✅ Compute the new borrowable amount (Bₙ = 0.75 × Cₙ)
     const borrowedAmount = (newCollateral * BigInt(75)) / BigInt(100); // 75% of new collateral
 
-    // ✅ Ensure `fallbackBorrowAmount1` is correctly assigned to `flashLoanAmount`
+    // ✅ Assign `flashLoanAmount` to `fallbackBorrowAmount1`
     fallbackBorrowAmount1 = flashLoanAmount;
 
     console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
@@ -1795,7 +1801,6 @@ if (cycleCount === 0) {
 }
  // ✅ Convert to WEI format before sending to smart contract
 const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6);
-
 console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
@@ -1808,9 +1813,8 @@ console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WE
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             // ✅ Ensure there is sufficient collateral before calling
-            console.log("✅ Simulation passed: Calling startRecursiveLending()... startRecursiveLending");
+            console.log("✅ Simulation passed: Calling startRecursiveLending()... ");
             tx = await baseContract.startRecursiveLending();
-            
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
@@ -1848,19 +1852,19 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/ae5b09c6-2794-49a5-a951-74d4d57a2539'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/5f131bae-516f-45b2-bf7e-5d7f15353373'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0xDB6650305e900C2a61DCae0D762eD0e5cabc61eE",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0xDB6650305e900C2a61DCae0D762eD0e5cabc61eE",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
