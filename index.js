@@ -1791,16 +1791,14 @@ if (cycleCount === 0) {
 }
 
 // ✅ Convert to WEI format before sending to smart contract
-// ✅ Ensure fallbackBorrowAmount1 is in USDC (6 decimals)
+// ✅ Ensure `fallbackBorrowAmount1` is in correct decimal format (USDC = 6 decimals)
 const usdcAmount = ethers.formatUnits(fallbackBorrowAmount1, 6);
 
-// ✅ Convert to BigInt then back to string with correct formatting
+// ✅ Convert to WEI properly (6 decimals for USDC)
 const flashLoanAmountWei = ethers.parseUnits(usdcAmount, 6).toString();
 
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} WEI`);
 
-
-console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} (USDC)`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
