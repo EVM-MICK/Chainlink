@@ -1800,7 +1800,8 @@ if (cycleCount === 0) {
     console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
 }
  // ✅ Convert to WEI format before sending to smart contract
-const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6);
+//const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6);
+const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
 console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
