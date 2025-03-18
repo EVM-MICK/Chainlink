@@ -1770,7 +1770,7 @@ let fallbackBorrowAmount1;
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
      console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-      fallbackBorrowAmount1 = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
+      fallbackBorrowAmounting = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
 } else {
     // ✅ Ensure `collateral` is converted to BigInt safely
     const collateralBigInt = BigInt(Math.floor(Number(collateral) * 1e6));
