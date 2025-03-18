@@ -1770,22 +1770,23 @@ let fallbackBorrowAmount1;
 
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
-         console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-        fallbackBorrowAmount1 = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
+    console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+    fallbackBorrowAmount1 = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
 } else {
-    // ✅ Ensure `collateral` is converted to BigInt safely
+   // ✅ Convert `collateral` to BigInt safely
     const collateralBigInt = BigInt(Math.floor(Number(collateral) * 1e6));
 
     // ✅ Compute flash loan amount using 25:75 ratio
-    let flashLoanAmount = (collateralBigInt * BigInt(75)) / BigInt(25); // Apply ratio safely
+    let flashLoanAmount = (collateralBigInt * BigInt(75)) / BigInt(25); // Correct ratio calculation
 
     // ✅ Add buffer for gas fees
     flashLoanAmount += BigInt(2e6);  
 
-    // ✅ Ensure flashLoanAmount does not exceed Solidity uint256 limit
-    if (flashLoanAmount > BigInt(2) ** BigInt(256) - BigInt(1)) {
+    // ✅ Ensure `flashLoanAmount` does not exceed Solidity uint256 limit
+    const maxUint256 = BigInt(2) ** BigInt(256) - BigInt(1);
+    if (flashLoanAmount > maxUint256) {
         console.warn("⚠️ Warning: Flash loan amount exceeds Solidity uint256 limit! Reducing value.");
-        flashLoanAmount = BigInt(2) ** BigInt(256) - BigInt(1);
+        flashLoanAmount = maxUint256;
     }
 
     // ✅ Compute new total collateral after receiving the flash loan
@@ -1800,11 +1801,10 @@ if (cycleCount === 0) {
     console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
     console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
 }
- // ✅ Convert to WEI format before sending to smart contract
-// ✅ Convert USDC amount to WEI (6 decimal places)
-const flashLoanAmountRaw = fallbackBorrowAmount1;
-const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(flashLoanAmountRaw, 6), 6); // Convert to correct WEI format
-console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} (USDC)`);
+
+// ✅ Convert to WEI format before sending to smart contract
+const flashLoanAmountWei = fallbackBorrowAmount1.toString(); // Convert BigInt to string for Solidity `uint256`
+console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} (USDC)`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
