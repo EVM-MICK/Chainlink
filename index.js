@@ -1,4 +1,4 @@
-iconst dotenv = require("dotenv");
+const dotenv = require("dotenv");
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
