@@ -1733,7 +1733,7 @@ let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
 
 // Function to calculate borrowing amount per cycle
 function calculateBorrowAmount(collateral, cycleCount) {
-    const growthFactor = 1.5; // 50% growth per cycle
+    const growthFactor = 1.25; // 25% growth per cycle
     const updatedCollateral = collateral * Math.pow(growthFactor, cycleCount); // Cn = C0 * r^n
 
     // Compute borrow amount with a buffer to prevent underpayment
@@ -1791,8 +1791,14 @@ if (cycleCount === 0) {
 }
 
 // ✅ Convert to WEI format before sending to smart contract
-//const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
-const flashLoanAmountWei = fallbackBorrowAmount1.toString();
+// ✅ Ensure fallbackBorrowAmount1 is in USDC (6 decimals)
+const usdcAmount = ethers.formatUnits(fallbackBorrowAmount1, 6);
+
+// ✅ Convert to BigInt then back to string with correct formatting
+const flashLoanAmountWei = ethers.parseUnits(usdcAmount, 6).toString();
+
+console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} WEI`);
+
 
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} (USDC)`);
 
