@@ -1767,6 +1767,7 @@ async function monitorAndExecuteStrategy() {
 
         // ✅ Ensure valid borrow amount in first cycle
 let fallbackBorrowAmount1;
+let fallbackBorrowAmounting;
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
      console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
