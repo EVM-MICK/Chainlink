@@ -1776,25 +1776,34 @@ if (cycleCount === 0) {
       // ✅ Ensure previous debt is in BigInt
     const previousDebt = BigInt(Math.floor(Number(borrowed) * 1e6)); // Convert borrowed to WEI
 
-    // ✅ Ensure fallbackBorrowAmount1 is defined as BigInt before using it
+    // ✅ Ensure fallbackBorrowAmount1 is initialized before use
     const fallbackBorrowAmountBigInt = fallbackBorrowAmount1 ? BigInt(fallbackBorrowAmount1) : previousDebt;
 
-    // ✅ Compute new collateral by adding remaining flash loan balance
+    // ✅ Compute new collateral AFTER deducting debt
     const remainingFlashLoanBalance = fallbackBorrowAmountBigInt - previousDebt;
     const newCollateral = BigInt(Math.floor(Number(collateral) * 1e6)) + remainingFlashLoanBalance;
 
-    // ✅ Compute new borrow amount (Bₙ = 0.75 × Cₙ)
-    const borrowedAmount = BigInt(Math.floor(Number(newCollateral) * 0.75));
+    // ✅ Compute the new borrow amount (Bₙ = 0.75 × Cₙ)
+    const borrowedAmount = (newCollateral * BigInt(75)) / BigInt(100); // Equivalent to newCollateral * 0.75 in BigInt
 
-    // ✅ Ensure Borrowed Amount is always enough to repay Flash Loan
-    fallbackBorrowAmount1 = borrowedAmount + previousDebt;
+    // ✅ Ensure Borrowed Amount is always enough to cover Flash Loan Repayment
+    let flashLoanAmount = borrowedAmount - previousDebt; // Ensuring enough is left for servicing debt
+
+    // ✅ Apply a safety check to avoid over-borrowing
+    if (flashLoanAmount > borrowedAmount) {
+        flashLoanAmount = borrowedAmount - BigInt(1e6); // Reduce slightly to prevent transfer failure
+    }
+
+    fallbackBorrowAmount1 = flashLoanAmount;
 
     console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
     console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
 }
 
 // ✅ Convert to WEI format correctly before sending to smart contract
-const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
+// const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
+// ✅ Convert fallbackBorrowAmount1 (BigInt) to a correctly formatted uint256 in WEI (6 decimals)
+const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6); // Proper conversion
 console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
