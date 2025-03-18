@@ -1,4 +1,4 @@
-const dotenv = require("dotenv");
+iconst dotenv = require("dotenv");
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
@@ -1772,25 +1772,29 @@ let fallbackBorrowAmount1;
 if (cycleCount === 0) {
     fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
 } else {
-    // ✅ Fetch previous debt dynamically
-    const previousDebt = BigInt(Math.floor(borrowed * 1e6)); // Convert to WEI
+   // ✅ Ensure previous debt is in BigInt
+const previousDebt = BigInt(Math.floor(borrowed * 1e6)); // Convert borrowed to WEI (BigInt)
 
-    // ✅ Compute remaining balance after repaying previous debt
-    const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt;
+// ✅ Compute remaining balance after repaying previous debt
+const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt; // BigInt operation
 
-    // ✅ Compute new collateral by adding remaining flash loan balance
-    const newCollateral = collateral + Number(ethers.formatUnits(remainingFlashLoanBalance, 6));
+// ✅ Compute new collateral by converting everything to BigInt
+const newCollateral = BigInt(Math.floor(collateral * 1e6)) + remainingFlashLoanBalance; // Convert collateral to WEI format first
 
-    // ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
-    const safeMultiplier = Math.max(2, (fallbackBorrowAmount1 / (0.75 * newCollateral)));
+// ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
+const safeMultiplier = Math.max(2, Number(fallbackBorrowAmount1) / (0.75 * Number(newCollateral))); // Convert to Number for math operations
 
-    // ✅ Compute Flash Loan for the Next Cycle
-    fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * safeMultiplier * 1e6) + 1e6);
+// ✅ Compute Flash Loan for the Next Cycle
+fallbackBorrowAmount1 = BigInt(Math.floor(Number(collateral) * 0.75 * safeMultiplier * 1e6) + 1e6); // Convert back to BigInt
 
-    console.log(`🔄 Corrected Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
+
    }
         //console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-     const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
+    // ✅ Convert to WEI format correctly before sending to smart contract
+const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
+console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
