@@ -1770,15 +1770,14 @@ async function monitorAndExecuteStrategy() {
         if (cycleCount === 0) {
             fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
         } else {
-           fallbackBorrowAmount11 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
-           fallbackBorrowAmount1 = fallbackBorrowAmount11 * BigInt(4); // Convert 4 to BigInt
-           //fallbackBorrowAmount1 = BigInt(Math.floor((collateral * 0.75) * 1e6) * 4) + BigInt(1e6);
+           fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 4 * 1e6) + 1e6);
+           console.log(`🔄 Corrected Fallback BorrowRequested Amount after mulitplying by it by 4: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
 
-        console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-         //let flashLoanAmountRaw = fallbackBorrowAmount1;
+        //console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+         let flashLoanAmountRaw = fallbackBorrowAmount1;
         // ✅ Convert to 6 decimals (WEI format)
-        const flashLoanAmountRawWei = BigInt(Math.round(Number(fallbackBorrowAmount1)));
+        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw)));
         const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
         console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
 
