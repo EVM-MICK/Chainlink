@@ -13,6 +13,7 @@ const cron = require("node-cron");
 const { promisify } = require("util");
 const pkg = require("telegraf");
 const fs = require("fs");
+const cycleCountFile = 'cycle_count.json';
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
@@ -1729,7 +1730,14 @@ function setupEventListeners(baseContract) {
 }
 
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
-let cycleCount = 0; // ✅ Initialize cycle count globally
+let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
+
+if (fs.existsSync(cycleCountFile)) {
+    const savedCycle = fs.readFileSync(cycleCountFile, 'utf8');
+    cycleCount = parseInt(savedCycle, 10) || 0;
+    console.log(`🔄 Resuming from Cycle: ${cycleCount}`);
+}
+
 
 async function monitorAndExecuteStrategy() {
     try {
@@ -1775,17 +1783,28 @@ async function monitorAndExecuteStrategy() {
         }
 
         //console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-         let flashLoanAmountRaw = fallbackBorrowAmount1;
-        // ✅ Convert to 6 decimals (WEI format)
-        const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw)));
-        const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
-        console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+     //   let flashLoanAmountRaw = fallbackBorrowAmount1;
+     //  const flashLoanAmountRawWei = BigInt(Math.round(Number(flashLoanAmountRaw))); // ✅ Ensure proper rounding
+     // const flashLoanAmount = BigInt(flashLoanAmountRawWei.toString());
+     // console.log(`📊 Flash Loan Amount Computed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
+     const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6); // ✅ Correct conversion
+   
 
         if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             isCycleComplete = true;
             return;
         }
+      // ✅ Prevent repeating a previous transaction
+        if (fs.existsSync(lastTxFile) && cycleCount > 0) {
+            const lastTx = fs.readFileSync(lastTxFile, 'utf8').trim();
+            if (lastTx === lastTransactionHash) {
+                console.log("⚠️ Last transaction already executed. Skipping duplicate cycle.");
+                isCycleComplete = true;
+                return;
+            }
+        }
+
         let tx;
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
@@ -1796,21 +1815,26 @@ async function monitorAndExecuteStrategy() {
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-          tx = await baseContract.executeFlashLoan(flashLoanAmount);
+          tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(flashLoanAmount, 6)} USDC`);
-        // ✅ Increment cycle count immediately
+        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+      
+        // ✅ Save transaction hash to prevent duplicate execution
+        fs.writeFileSync(lastTxFile, receipt.transactionHash);
+        lastTransactionHash = receipt.transactionHash;
+
+        // ✅ Increment cycle count
         cycleCount++;
-        console.log(`🚀 Starting Next Cycle: ${cycleCount}`);
-        // ✅ Mark cycle as complete
+        fs.writeFileSync(cycleCountFile, cycleCount.toString());
+        console.log(`✅ Cycle ${cycleCount} saved.`);
+
         isCycleComplete = true;
-        // ✅ Restart process immediately if the transaction succeeded
-        console.log(`🚀 Cycle ${cycleCount} completed. Restarting immediately...`);
-        //process.nextTick(startScript);
-       setTimeout(startScript, 2000); // ✅ Delay restart to prevent race conditions
+
+        console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 2 seconds...`);
+        setTimeout(startScript, 2000);
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
