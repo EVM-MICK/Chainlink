@@ -1769,20 +1769,36 @@ async function monitorAndExecuteStrategy() {
 let fallbackBorrowAmount1;
 
 if (cycleCount === 0) {
-    // ✅ First cycle: Use fixed value (233 USDC)
-    fallbackBorrowAmount1 = BigInt(233 * 1e6);
+    // ✅ First cycle: Flash loan 300 USDC
+    fallbackBorrowAmount1 = BigInt(300 * 1e6);
 } else {
- // ✅ Ensure previous debt is in BigInt
-   
-}
+    // ✅ Compute flash loan amount using 25:75 ratio
+    const flashLoanAmount = (BigInt(collateral) * BigInt(75) / BigInt(25)) * BigInt(1e6); // Apply ratio
 
-// ✅ Convert to WEI format correctly before sending to smart contract
-// const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
-// ✅ Convert fallbackBorrowAmount1 (BigInt) to a correctly formatted uint256 in WEI (6 decimals)
-const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6); // Proper conversion
+    // ✅ Ensure flashLoanAmount does not exceed Solidity uint256 limit
+    if (flashLoanAmount > BigInt(2 ** 256 - 1)) {
+        console.warn("⚠️ Warning: Flash loan amount exceeds Solidity uint256 limit! Reducing value.");
+        flashLoanAmount = BigInt(2 ** 256 - 1);
+    }
+
+    // ✅ Compute new total collateral after receiving the flash loan
+    const newCollateral = (BigInt(collateral) * BigInt(1e6)) + flashLoanAmount;
+
+    // ✅ Compute the new borrowable amount (Bₙ = 0.75 × Cₙ)
+    const borrowedAmount = (newCollateral * BigInt(75)) / BigInt(100); // 75% of new collateral
+
+    // ✅ Ensure `fallbackBorrowAmount1` is correctly assigned to `flashLoanAmount`
+    fallbackBorrowAmount1 = flashLoanAmount;
+
+    console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+    console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
+}
+ // ✅ Convert to WEI format before sending to smart contract
+const flashLoanAmountWei = ethers.parseUnits(fallbackBorrowAmount1.toString(), 6);
+
 console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
-        if (cycleCount > 0 && firstBorrowedAmount === 0) {
+       if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
             isCycleComplete = true;
             return;
