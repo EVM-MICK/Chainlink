@@ -1830,8 +1830,10 @@ async function monitorAndExecuteStrategy() {
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
     // ✅ Check if transactionHash is valid
-if (!receipt.transactionHash) {
-    console.error("❌ Error: Transaction hash is undefined. Cannot save transaction.");
+  // ✅ Try to get transaction hash from both `tx` and `receipt`
+const transactionHash = receipt?.transactionHash || tx?.hash;
+if (!transactionHash) {
+    console.error("❌ Error: Transaction hash is still undefined. Cannot save transaction.");
     isCycleComplete = true;
     return; // Stop execution to prevent further errors
 }
