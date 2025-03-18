@@ -1809,7 +1809,8 @@ async function monitorAndExecuteStrategy() {
         isCycleComplete = true;
         // ✅ Restart process immediately if the transaction succeeded
         console.log(`🚀 Cycle ${cycleCount} completed. Restarting immediately...`);
-        process.nextTick(startScript);
+        //process.nextTick(startScript);
+       setTimeout(startScript, 2000); // ✅ Delay restart to prevent race conditions
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
         await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
