@@ -1773,11 +1773,14 @@ if (cycleCount === 0) {
     fallbackBorrowAmount1 = BigInt(233 * 1e6);
 } else {
    
-   // ✅ Ensure previous debt is in BigInt
+      // ✅ Ensure previous debt is in BigInt
     const previousDebt = BigInt(Math.floor(Number(borrowed) * 1e6)); // Convert borrowed to WEI
 
+    // ✅ Ensure fallbackBorrowAmount1 is defined as BigInt before using it
+    const fallbackBorrowAmountBigInt = fallbackBorrowAmount1 ? BigInt(fallbackBorrowAmount1) : previousDebt;
+
     // ✅ Compute new collateral by adding remaining flash loan balance
-    const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt;
+    const remainingFlashLoanBalance = fallbackBorrowAmountBigInt - previousDebt;
     const newCollateral = BigInt(Math.floor(Number(collateral) * 1e6)) + remainingFlashLoanBalance;
 
     // ✅ Compute new borrow amount (Bₙ = 0.75 × Cₙ)
