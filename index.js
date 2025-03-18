@@ -1772,23 +1772,19 @@ if (cycleCount === 0) {
     // ✅ First cycle: Use fixed value (233 USDC)
     fallbackBorrowAmount1 = BigInt(233 * 1e6);
 } else {
-    // ✅ Ensure previous debt is in BigInt
+   
+   // ✅ Ensure previous debt is in BigInt
     const previousDebt = BigInt(Math.floor(Number(borrowed) * 1e6)); // Convert borrowed to WEI
 
-    // ✅ Compute new fallback borrow amount before using it
-    let previousFallbackBorrowAmount = fallbackBorrowAmount1 || previousDebt; // Use previous value if undefined
-
-    // ✅ Compute remaining balance after repaying previous debt
-    const remainingFlashLoanBalance = previousFallbackBorrowAmount - previousDebt;
-
-    // ✅ Compute new collateral by converting everything to BigInt
+    // ✅ Compute new collateral by adding remaining flash loan balance
+    const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt;
     const newCollateral = BigInt(Math.floor(Number(collateral) * 1e6)) + remainingFlashLoanBalance;
 
-    // ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
-    const safeMultiplier = Math.max(2, Number(previousFallbackBorrowAmount) / (0.75 * Number(newCollateral))); // Convert to Number
+    // ✅ Compute new borrow amount (Bₙ = 0.75 × Cₙ)
+    const borrowedAmount = BigInt(Math.floor(Number(newCollateral) * 0.75));
 
-    // ✅ Compute Flash Loan for the Next Cycle
-    fallbackBorrowAmount1 = BigInt(Math.floor(Number(collateral) * 0.75 * safeMultiplier * 1e6) + 1e6);
+    // ✅ Ensure Borrowed Amount is always enough to repay Flash Loan
+    fallbackBorrowAmount1 = borrowedAmount + previousDebt;
 
     console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
     console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
