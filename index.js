@@ -1766,33 +1766,35 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
         // ✅ Ensure valid borrow amount in first cycle
-        // ✅ Ensure valid borrow amount in first cycle
 let fallbackBorrowAmount1;
 
 if (cycleCount === 0) {
-    fallbackBorrowAmount1 = BigInt(233 * 1e6); // ✅ Use 233 USDC for first cycle
+    // ✅ First cycle: Use fixed value (233 USDC)
+    fallbackBorrowAmount1 = BigInt(233 * 1e6);
 } else {
-   // ✅ Ensure previous debt is in BigInt
-const previousDebt = BigInt(Math.floor(borrowed * 1e6)); // Convert borrowed to WEI (BigInt)
+    // ✅ Ensure previous debt is in BigInt
+    const previousDebt = BigInt(Math.floor(Number(borrowed) * 1e6)); // Convert borrowed to WEI
 
-// ✅ Compute remaining balance after repaying previous debt
-const remainingFlashLoanBalance = fallbackBorrowAmount1 - previousDebt; // BigInt operation
+    // ✅ Compute new fallback borrow amount before using it
+    let previousFallbackBorrowAmount = fallbackBorrowAmount1 || previousDebt; // Use previous value if undefined
 
-// ✅ Compute new collateral by converting everything to BigInt
-const newCollateral = BigInt(Math.floor(collateral * 1e6)) + remainingFlashLoanBalance; // Convert collateral to WEI format first
+    // ✅ Compute remaining balance after repaying previous debt
+    const remainingFlashLoanBalance = previousFallbackBorrowAmount - previousDebt;
 
-// ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
-const safeMultiplier = Math.max(2, Number(fallbackBorrowAmount1) / (0.75 * Number(newCollateral))); // Convert to Number for math operations
+    // ✅ Compute new collateral by converting everything to BigInt
+    const newCollateral = BigInt(Math.floor(Number(collateral) * 1e6)) + remainingFlashLoanBalance;
 
-// ✅ Compute Flash Loan for the Next Cycle
-fallbackBorrowAmount1 = BigInt(Math.floor(Number(collateral) * 0.75 * safeMultiplier * 1e6) + 1e6); // Convert back to BigInt
+    // ✅ Compute safe multiplier to ensure borrowedAmount >= flashLoanAmount
+    const safeMultiplier = Math.max(2, Number(previousFallbackBorrowAmount) / (0.75 * Number(newCollateral))); // Convert to Number
 
-console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
+    // ✅ Compute Flash Loan for the Next Cycle
+    fallbackBorrowAmount1 = BigInt(Math.floor(Number(collateral) * 0.75 * safeMultiplier * 1e6) + 1e6);
 
-   }
-        //console.log(`🔄 Calculated Fallback BorrowRequested Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-    // ✅ Convert to WEI format correctly before sending to smart contract
+    console.log(`📊 Adjusted Flash Loan Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+    console.log(`✅ Ensured Borrowing Covers Flash Loan Repayment`);
+}
+
+// ✅ Convert to WEI format correctly before sending to smart contract
 const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(fallbackBorrowAmount1, 6), 6);
 console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WEI`);
 
