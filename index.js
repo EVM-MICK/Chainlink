@@ -1785,9 +1785,9 @@ if (cycleCount === 0) {
     fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial flash loan for Cycle 0
 } else {
     //fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
-     fallbackBorrowAmount1 = calculateBorrowAmount(collateral, cycleCount);
-            console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
- fallbackBorrowAmount1  += BigInt(5e6);
+     let fallbackBorrowAmount11 = calculateBorrowAmount(collateral, cycleCount);
+ fallbackBorrowAmount1 = fallbackBorrowAmount11 + BigInt(5e6);
+ console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 }
 
 // ✅ Convert to WEI format before sending to smart contract
