@@ -1828,13 +1828,8 @@ async function monitorAndExecuteStrategy() {
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
-        console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
-        await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-      
-       // ✅ Wait for transaction receipt
-const receipt = await tx.wait();
-
-// ✅ Check if transactionHash is valid
+        console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
+    // ✅ Check if transactionHash is valid
 if (!receipt.transactionHash) {
     console.error("❌ Error: Transaction hash is undefined. Cannot save transaction.");
     isCycleComplete = true;
