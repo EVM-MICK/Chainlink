@@ -14,6 +14,7 @@ const { promisify } = require("util");
 const pkg = require("telegraf");
 const fs = require("fs");
 const cycleCountFile = 'cycle_count.json';
+const lastTxFile = 'last_transaction.json';
 const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
@@ -1731,11 +1732,19 @@ function setupEventListeners(baseContract) {
 
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
 let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
+let lastTransactionHash = null;
+
 
 if (fs.existsSync(cycleCountFile)) {
     const savedCycle = fs.readFileSync(cycleCountFile, 'utf8');
     cycleCount = parseInt(savedCycle, 10) || 0;
     console.log(`🔄 Resuming from Cycle: ${cycleCount}`);
+}
+
+// Load last transaction hash
+if (fs.existsSync(lastTxFile)) {
+    lastTransactionHash = fs.readFileSync(lastTxFile, 'utf8').trim();
+    console.log(`🔄 Last transaction hash: ${lastTransactionHash}`);
 }
 
 
