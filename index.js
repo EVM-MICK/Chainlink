@@ -1733,11 +1733,13 @@ let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
 
 // Function to calculate borrowing amount per cycle
 function calculateBorrowAmount(collateral, cycleCount) {
-    const growthFactor = 1.5; // 50% increase per cycle
+    const growthFactor = 1.5; // 50% growth per cycle
     const updatedCollateral = collateral * Math.pow(growthFactor, cycleCount); // Cn = C0 * r^n
-    const borrowAmount = updatedCollateral * 0.75; // Xn = 0.75 * Cn
 
-    return BigInt(Math.floor(borrowAmount * 1e6)); // Convert to USDC (6 decimals)
+    // Compute borrow amount with a buffer to prevent underpayment
+    const borrowAmount = (updatedCollateral * 0.75) * 1.002; // Extra 0.2% buffer
+
+    return BigInt(Math.floor(borrowAmount * 1e6)); // Convert to 6 decimals (USDC)
 }
 
 async function monitorAndExecuteStrategy() {
@@ -1785,6 +1787,7 @@ if (cycleCount === 0) {
     //fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
      fallbackBorrowAmount1 = calculateBorrowAmount(collateral, cycleCount);
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+ fallbackBorrowAmount1  += BigInt(5e6);
 }
 
 // ✅ Convert to WEI format before sending to smart contract
