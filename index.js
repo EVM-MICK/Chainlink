@@ -1770,7 +1770,7 @@ let fallbackBorrowAmount1;
 
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
-    fallbackBorrowAmount1 = BigInt(300 * 1e6);
+     console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
 } else {
     // ✅ Ensure `collateral` is converted to BigInt safely
     const collateralBigInt = BigInt(Math.floor(Number(collateral) * 1e6));
@@ -1811,7 +1811,6 @@ console.log(`📊 Sending Flash Loan Amount: ${flashLoanAmountWei.toString()} WE
 
         let tx;
         if (cycleCount === 0) {
-            console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
             // ✅ Ensure there is sufficient collateral before calling
             console.log("✅ Simulation passed: Calling startRecursiveLending()... ");
             tx = await baseContract.startRecursiveLending();
