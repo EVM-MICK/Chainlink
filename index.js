@@ -1767,11 +1767,11 @@ async function monitorAndExecuteStrategy() {
 
         // ✅ Ensure valid borrow amount in first cycle
 let fallbackBorrowAmount1;
-let fallbackBorrowAmounting;
+
 if (cycleCount === 0) {
     // ✅ First cycle: Flash loan 300 USDC
      console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-      fallbackBorrowAmounting = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
+   fallbackBorrowAmount1 = BigInt(300 * 1e6); // Initial flash loan for Cycle 0
 } else {
     // ✅ Ensure `collateral` is converted to BigInt safely
     const collateralBigInt = BigInt(Math.floor(Number(collateral) * 1e6));
