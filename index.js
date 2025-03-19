@@ -1793,8 +1793,7 @@ async function monitorAndExecuteStrategy() {
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
                // ✅ Convert to uint256 format for Solidity
-        const flashLoanAmountWei = fallbackBorrowAmount1;
-
+        const flashLoanAmountWei = 150000;
         console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
@@ -1846,7 +1845,7 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/97487814-90e0-41d4-bfdd-c69466852106'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/a21dcaae-7b08-4112-b1f5-fbdafbe712fc'],
         },
       },
     });
