@@ -564,6 +564,12 @@
 	{
 		"anonymous": false,
 		"inputs": [],
+		"name": "RecursiveProcessCompleted",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [],
 		"name": "RecursiveProcessRestarting",
 		"type": "event"
 	},
