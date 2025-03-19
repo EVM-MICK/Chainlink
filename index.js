@@ -1731,16 +1731,22 @@ function setupEventListeners(baseContract) {
 let isCycleComplete = true;  // ✅ Ensures we restart only when the last cycle is completed
 let cycleCount = 0; // ✅ Initialize cycle count globally  Default to 0
 
-// Function to calculate borrowing amount per cycle
-function calculateBorrowAmount(collateral, cycleCount) {
-    const growthFactor = 1.25; // 25% growth per cycle
+// ✅ Compute borrow amount while ensuring enough to cover repayment & reinvestment
+function calculateBorrowAmount(collateral, previousDebt, cycleCount) {
+    const growthFactor = 1.5; // 50% growth per cycle
     const updatedCollateral = collateral * Math.pow(growthFactor, cycleCount); // Cn = C0 * r^n
 
-    // Compute borrow amount with a buffer to prevent underpayment
-    const borrowAmount = (updatedCollateral * 0.75) * 1.002; // Extra 0.2% buffer
+    // ✅ Compute max borrowable amount: 75% of new collateral
+    let borrowAmount = updatedCollateral * 0.75;
+
+    // ✅ Ensure the borrow amount covers debt repayment before reinvesting
+    if (borrowAmount < previousDebt) {
+        borrowAmount += previousDebt - borrowAmount; // Adjust to repay old debt
+    }
 
     return BigInt(Math.floor(borrowAmount * 1e6)); // Convert to 6 decimals (USDC)
 }
+
 
 async function monitorAndExecuteStrategy() {
     try {
@@ -1777,24 +1783,19 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
         // ✅ Ensure valid borrow amount in first cycle
-let fallbackBorrowAmount1;
+    let fallbackBorrowAmount1;
 
-if (cycleCount === 0) {
-    // ✅ First cycle: Flash loan 300 USDC
-    console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-    fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial flash loan for Cycle 0
-} else {
-  // ✅ Compute borrow amount for the current cycle
-            fallbackBorrowAmount1 = calculateBorrowAmount(collateral, cycleCount) + BigInt(5e6);
+        if (cycleCount === 0) {
+            console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+            fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial borrow
+        } else {
+            fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
-
-// ✅ Directly use BigInt (uint256) for Solidity function
+               // ✅ Convert to uint256 format for Solidity
         const flashLoanAmountWei = fallbackBorrowAmount1;
+
         console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
-
-console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} WEI`);
-
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
