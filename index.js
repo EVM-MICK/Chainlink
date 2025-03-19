@@ -1784,20 +1784,14 @@ if (cycleCount === 0) {
     console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
     fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial flash loan for Cycle 0
 } else {
-    //fallbackBorrowAmount1 = BigInt(Math.floor(collateral * 0.75 * 1e6) + 1e6);
-     let fallbackBorrowAmount11 = calculateBorrowAmount(collateral, cycleCount);
- fallbackBorrowAmount1 = fallbackBorrowAmount11 + BigInt(5e6);
- console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-}
+  // ✅ Compute borrow amount for the current cycle
+            fallbackBorrowAmount1 = calculateBorrowAmount(collateral, cycleCount) + BigInt(5e6);
+            console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+        }
 
-// ✅ Convert to WEI format before sending to smart contract
-// const flashLoanAmountRaw = fallbackBorrowAmount1;
-// const flashLoanAmountWei = ethers.parseUnits(ethers.formatUnits(flashLoanAmountRaw, 6), 6);
-// ✅ Ensure `fallbackBorrowAmount1` is in correct decimal format (USDC = 6 decimals)
-const usdcAmount = ethers.formatUnits(fallbackBorrowAmount1, 6);
-
-// ✅ Convert to WEI (USDC has 6 decimals) and ensure it's a BigInt
-const flashLoanAmountWei = BigInt(ethers.parseUnits(usdcAmount, 6));
+// ✅ Directly use BigInt (uint256) for Solidity function
+        const flashLoanAmountWei = fallbackBorrowAmount1;
+        console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei} WEI`);
 
