@@ -1793,7 +1793,7 @@ async function monitorAndExecuteStrategy() {
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
                // ✅ Convert to uint256 format for Solidity
-        const flashLoanAmountWei = 10000;
+        const flashLoanAmountWei = 10000 * 1e6;
         console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
