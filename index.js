@@ -1787,13 +1787,13 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            fallbackBorrowAmount1 = BigInt(90000 * 1e6); // Initial borrow
+            fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Initial borrow
         } else {
             fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
                // ✅ Convert to uint256 format for Solidity
-        const flashLoanAmountWei = 90000;
+        const flashLoanAmountWei = 10000;
         console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
@@ -1851,13 +1851,13 @@ async function fetchMoonwellData() {
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0x572f88B56440c2799d490aE72d8c1B79fD436942",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0x572f88B56440c2799d490aE72d8c1B79fD436942",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
