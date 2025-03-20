@@ -1787,13 +1787,13 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            fallbackBorrowAmount1 = BigInt(150000 * 1e6); // Initial borrow
+            fallbackBorrowAmount1 = BigInt(90000 * 1e6); // Initial borrow
         } else {
             fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
         }
                // ✅ Convert to uint256 format for Solidity
-        const flashLoanAmountWei = 150000;
+        const flashLoanAmountWei = 90000;
         console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
@@ -1845,19 +1845,19 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/4c41b161-bad4-4f15-bec8-cc2a19766889'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/d4bb8fc2-c51c-49e6-af44-9a52d7dce6c3'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0xe610Ea88D14cA482B1aAaB33EB770787d66bFe8d",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0xe610Ea88D14cA482B1aAaB33EB770787d66bFe8d",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
