@@ -1783,18 +1783,41 @@ async function monitorAndExecuteStrategy() {
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
         // ✅ Ensure valid borrow amount in first cycle
-    let fallbackBorrowAmount1;
+    // let fallbackBorrowAmount1;
 
-        if (cycleCount === 0) {
-            console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Initial borrow
-        } else {
-            fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
-            console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-        }
-               // ✅ Convert to uint256 format for Solidity
-        const flashLoanAmountWei = 10000 * 1e6;
-        console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
+    //     if (cycleCount === 0) {
+    //         console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+    //         fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Initial borrow
+    //     } else {
+    //         fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
+    //         console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+    //     }
+    //            // ✅ Convert to uint256 format for Solidity
+    //     const flashLoanAmountWei = 10000 * 1e6;
+    //     console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
+
+   let fallbackBorrowAmount1;
+
+if (cycleCount === 0) {
+    console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+    fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Initial borrow: 10,000 USDC
+} else {
+    // ✅ Dynamically Adjust Flash Loan Amount After First Cycle
+    if (cycleCount >= 1 && cycleCount < 3) {
+        fallbackBorrowAmount1 = BigInt(150000 * 1e6); // Increase to 150,000 USDC
+    } else if (cycleCount >= 3) {
+        fallbackBorrowAmount1 = BigInt(300000 * 1e6); // Increase to 300,000 USDC
+    } else {
+        fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
+    }
+
+    console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+}
+
+// ✅ Convert to uint256 format for Solidity
+const flashLoanAmountWei = fallbackBorrowAmount1;
+
+console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
        if (cycleCount > 0 && firstBorrowedAmount === 0) {
             console.log("⏳ Waiting for first borrowed amount update...");
@@ -1811,7 +1834,7 @@ async function monitorAndExecuteStrategy() {
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-          tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
+          tx = await baseContract.executeFlashLoan(flashLoanAmountWei );
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
@@ -1824,8 +1847,8 @@ cycleCount++;
 //fs.writeFileSync(cycleCountFile, cycleCount.toString());
 
 isCycleComplete = true;
-console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 2 seconds...`);
-setTimeout(startScript, 2000);
+console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 5 seconds...`);
+setTimeout(startScript, 5000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
@@ -1845,19 +1868,19 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/d4bb8fc2-c51c-49e6-af44-9a52d7dce6c3'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/8c63f212-0089-451d-821c-cfdb99287101'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0xe610Ea88D14cA482B1aAaB33EB770787d66bFe8d",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0xe610Ea88D14cA482B1aAaB33EB770787d66bFe8d",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
