@@ -406,6 +406,19 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "flashLoanAmount",
+				"type": "uint256"
+			}
+		],
+		"name": "FlashloanCalculated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "amount",
 				"type": "uint256"
 			}
