@@ -1787,7 +1787,7 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            fallbackBorrowAmount1 = BigInt(75 * 1e6); // Initial borrow
+            fallbackBorrowAmount1 = BigInt(150000 * 1e6); // Initial borrow
         } else {
             fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
             console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
