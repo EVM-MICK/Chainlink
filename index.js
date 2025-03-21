@@ -1848,9 +1848,9 @@ cycleCount++;
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 5 seconds...`);
-// setTimeout(startScript, 5000);
-setTimeout(setupEventListeners, 5000);
-setTimeout(monitorAndExecuteStrategy, 5000);
+setTimeout(startScript, 5000);
+// setTimeout(setupEventListeners, 5000);
+// setTimeout(monitorAndExecuteStrategy, 5000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
@@ -1937,10 +1937,10 @@ function formatRewardAmount(amount, decimals) {
 async function startScript() {
     console.log("🚀 Starting script...");
     // ✅ Attach event listeners before running strategy
+    await fetchMoonwellData();
     await setupEventListeners(baseContract);
     console.log("✅ Event listeners initialized. Starting strategy...");
      // Fetch Moonwell data
-     await fetchMoonwellData();
     monitorAndExecuteStrategy();
        // ✅ Start the lending strategy
 }
