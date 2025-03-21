@@ -1858,6 +1858,7 @@ setTimeout(startScript, 5000);
         isCycleComplete = true;
     }
 }
+
 async function fetchMoonwellData() {
   try {
     console.log("🚀 Fetching Moonwell data...");
@@ -1891,8 +1892,8 @@ async function fetchMoonwellData() {
 
     let rewardMessage = "📊 Rewards Claimed:\n";
 
-    const tokenSymbol = reward.rewardToken?.symbol || "USDC"; // Default to USDC
-    const tokenDecimals = reward.rewardToken?.decimals || 6; // Default to 6 decimals
+     // const tokenSymbol = "WELL"|| "USDC"; // Default to USDC
+     // const tokenDecimals = reward.rewardToken?.decimals || 6; // Default to 6 decimals
 
     const supplyReward = formatRewardAmount(reward.supplyRewards?.value || "0", tokenDecimals);
     const borrowReward = formatRewardAmount(reward.borrowRewards?.value || "0", tokenDecimals);
@@ -1901,8 +1902,8 @@ async function fetchMoonwellData() {
     console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
-        rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
-        rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Rewards: ${supplyReward} \n`;
+        rewardMessage += `💰 Borrow Rewards: ${borrowReward}\n`;
         console.log(rewardMessage);
         await sendTelegramMessage(rewardMessage);
     } else {
