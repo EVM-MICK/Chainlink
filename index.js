@@ -1782,20 +1782,6 @@ async function monitorAndExecuteStrategy() {
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
-        // ✅ Ensure valid borrow amount in first cycle
-    // let fallbackBorrowAmount1;
-
-    //     if (cycleCount === 0) {
-    //         console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-    //         fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Initial borrow
-    //     } else {
-    //         fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
-    //         console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-    //     }
-    //            // ✅ Convert to uint256 format for Solidity
-    //     const flashLoanAmountWei = 10000 * 1e6;
-    //     console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
-
    let fallbackBorrowAmount1;
 
 if (cycleCount === 0) {
@@ -1819,12 +1805,6 @@ const flashLoanAmountWei = fallbackBorrowAmount1;
 
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
-       if (cycleCount > 0 && firstBorrowedAmount === 0) {
-            console.log("⏳ Waiting for first borrowed amount update...");
-            isCycleComplete = true;
-            return;
-        }
-
         let tx;
         if (cycleCount === 0) {
             // ✅ Ensure there is sufficient collateral before calling
@@ -1847,10 +1827,8 @@ cycleCount++;
 //fs.writeFileSync(cycleCountFile, cycleCount.toString());
 
 isCycleComplete = true;
-console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 5 seconds...`);
-setTimeout(startScript, 15000);
-// setTimeout(setupEventListeners, 5000);
-// setTimeout(monitorAndExecuteStrategy, 5000);
+console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 3 seconds...`);
+setTimeout(startScript, 3000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
