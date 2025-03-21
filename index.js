@@ -1875,6 +1875,7 @@ async function fetchMoonwellData() {
       },
     });
 
+    // Fetch position & rewards
     const position = await moonwellClient.getUserPosition({ 
       userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
@@ -1887,50 +1888,44 @@ async function fetchMoonwellData() {
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
-    // Print results
     console.log("📈 Position:", position);
-   console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
+    console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
         typeof value === "bigint" ? value.toString() : value, 2
-   ));
+    ));
 
-// Initialize message
-let rewardMessage = "📊 Rewards Claimed:\n";
+    // Initialize message
+    let rewardMessage = "📊 Rewards Claimed:\n";
 
-// Check if `reward` contains expected fields
-if (reward && reward.supplyRewards && reward.borrowRewards && reward.rewardToken) {
-  // Extract token details
-  const tokenSymbol = reward.rewardToken.symbol || "UNKNOWN"; // Get token symbol
-  const tokenDecimals = reward.rewardToken.decimals || 18; // Default to 18 if missing
+    // Handle missing rewardToken data
+    const tokenSymbol = reward.rewardToken?.symbol || "USDC"; // Default to USDC
+    const tokenDecimals = reward.rewardToken?.decimals || 6; // Default to 6 decimals
 
-  // Extract rewards
-  const supplyReward = formatRewardAmount(reward.supplyRewards.value, tokenDecimals);
-  const borrowReward = formatRewardAmount(reward.borrowRewards.value, tokenDecimals);
+    // Ensure values are properly formatted
+    const supplyReward = formatRewardAmount(reward.supplyRewards?.value || "0", tokenDecimals);
+    const borrowReward = formatRewardAmount(reward.borrowRewards?.value || "0", tokenDecimals);
 
-  console.log(`💰 Supply Rewards (USD): $${reward.supplyRewardsUsd.toFixed(6)}`);
-  console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd.toFixed(6)}`);
+    // Log supply/borrow rewards safely
+    console.log(`💰 Supply Rewards (USD): $${reward.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
+    console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
-  rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
-  rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
-} else {
-  console.log("⚠️ Unexpected reward format:", reward);
-}
-
-// Send message only if there are rewards
-if (rewardMessage !== "📊 Rewards Claimed:\n") {
-  console.log(rewardMessage);
-  await sendTelegramMessage(rewardMessage);
-} else {
-  console.log("ℹ️ No rewards to claim.");
-}
+    // Build message only if rewards exist
+    if (supplyReward > 0 || borrowReward > 0) {
+        rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
+        console.log(rewardMessage);
+        await sendTelegramMessage(rewardMessage);
+    } else {
+        console.log("ℹ️ No rewards to claim.");
+    }
 
   } catch (error) {
     console.error("❌ Error fetching Moonwell data:", error);
   }
 }
 
-// Function to safely convert and format BigInt token amounts
-function formatRewardAmount(amount, decimals) {
-  return Number(amount) / 10 ** decimals; // Convert BigInt -> Number before division
+// 🛠 Function to format rewards properly
+function formatRewardAmount(value, decimals) {
+    return (BigInt(value) / BigInt(10 ** decimals)).toFixed(6);
 }
 
 // ✅ Start event listeners and recursive execution
