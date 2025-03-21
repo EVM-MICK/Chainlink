@@ -1858,15 +1858,12 @@ setTimeout(startScript, 5000);
         isCycleComplete = true;
     }
 }
-
 async function fetchMoonwellData() {
   try {
     console.log("🚀 Fetching Moonwell data...");
 
-    // Import the package dynamically
     const { createMoonwellClient } = await import('@moonwell-fi/moonwell-sdk');
 
-    // Initialize the Moonwell client
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
@@ -1875,7 +1872,6 @@ async function fetchMoonwellData() {
       },
     });
 
-    // Fetch position & rewards
     const position = await moonwellClient.getUserPosition({ 
       userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
@@ -1893,23 +1889,18 @@ async function fetchMoonwellData() {
         typeof value === "bigint" ? value.toString() : value, 2
     ));
 
-    // Initialize message
     let rewardMessage = "📊 Rewards Claimed:\n";
 
-    // Handle missing rewardToken data
     const tokenSymbol = reward.rewardToken?.symbol || "USDC"; // Default to USDC
     const tokenDecimals = reward.rewardToken?.decimals || 6; // Default to 6 decimals
 
-    // Ensure values are properly formatted
     const supplyReward = formatRewardAmount(reward.supplyRewards?.value || "0", tokenDecimals);
     const borrowReward = formatRewardAmount(reward.borrowRewards?.value || "0", tokenDecimals);
 
-    // Log supply/borrow rewards safely
     console.log(`💰 Supply Rewards (USD): $${reward.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
     console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
-    // Build message only if rewards exist
-    if (supplyReward > 0 || borrowReward > 0) {
+    if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
         rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
         rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
         console.log(rewardMessage);
@@ -1923,20 +1914,21 @@ async function fetchMoonwellData() {
   }
 }
 
-// 🛠 Function to format rewards properly
+// ✅ Fix for Decimal Conversion Issue
 function formatRewardAmount(value, decimals) {
-    return (BigInt(value) / BigInt(10 ** decimals)).toFixed(6);
+    return (Number(value) / 10 ** decimals).toFixed(6);
 }
+
 
 // ✅ Start event listeners and recursive execution
 async function startScript() {
     console.log("🚀 Starting script...");
     // ✅ Attach event listeners before running strategy
-    await fetchMoonwellData();
     await setupEventListeners(baseContract);
     console.log("✅ Event listeners initialized. Starting strategy...");
      // Fetch Moonwell data
-    monitorAndExecuteStrategy();
+    await fetchMoonwellData();
+    await monitorAndExecuteStrategy();
        // ✅ Start the lending strategy
 }
 
