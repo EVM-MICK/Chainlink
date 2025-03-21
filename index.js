@@ -1848,7 +1848,9 @@ cycleCount++;
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 5 seconds...`);
-setTimeout(startScript, 5000);
+// setTimeout(startScript, 5000);
+setTimeout(setupEventListeners, 5000);
+setTimeout(monitorAndExecuteStrategy, 5000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
