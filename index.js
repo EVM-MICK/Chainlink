@@ -1848,7 +1848,7 @@ cycleCount++;
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 5 seconds...`);
-setTimeout(startScript, 5000);
+setTimeout(startScript, 15000);
 // setTimeout(setupEventListeners, 5000);
 // setTimeout(monitorAndExecuteStrategy, 5000);
 
@@ -1891,14 +1891,23 @@ async function fetchMoonwellData() {
     ));
 
     let rewardMessage = "📊 Rewards Claimed:\n";
-    const tokenSymbol = reward.rewardToken?.symbol || "USDC"; // Default to USDC
-    const tokenDecimals = reward.rewardToken?.decimals || 6; // Default to 6 decimals
+    // ✅ Ensure rewardToken exists, otherwise default to "USDC"
+    let tokenSymbol = "USDC"; 
+    let tokenDecimals = 6;
 
-    const supplyReward = formatRewardAmount(reward.supplyRewards?.value || "0", tokenDecimals);
-    const borrowReward = formatRewardAmount(reward.borrowRewards?.value || "0", tokenDecimals);
+    if (reward?.rewardToken) {
+        tokenSymbol = reward.rewardToken.symbol || "USDC"; // Default if undefined
+        tokenDecimals = reward.rewardToken.decimals || 6;
+    } else {
+        console.log("⚠️ Warning: rewardToken is undefined. Defaulting to USDC.");
+    }
 
-    console.log(`💰 Supply Rewards (USD): $${reward.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
-    console.log(`💰 Borrow Rewards (USD): $${reward.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
+    // ✅ Handle missing reward values safely
+    const supplyReward = formatRewardAmount(reward?.supplyRewards?.value || "0", tokenDecimals);
+    const borrowReward = formatRewardAmount(reward?.borrowRewards?.value || "0", tokenDecimals);
+
+    console.log(`💰 Supply Rewards (USD): $${reward?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
+    console.log(`💰 Borrow Rewards (USD): $${reward?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
         rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
