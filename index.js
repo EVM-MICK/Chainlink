@@ -1790,9 +1790,9 @@ if (cycleCount === 0) {
 } else {
     // ✅ Dynamically Adjust Flash Loan Amount After First Cycle
     if (cycleCount >= 1 && cycleCount < 3) {
-        fallbackBorrowAmount1 = BigInt(150000 * 1e6); // Increase to 150,000 USDC
+        fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Increase to 150,000 USDC  (150000 * 1e6)
     } else if (cycleCount >= 3) {
-        fallbackBorrowAmount1 = BigInt(300000 * 1e6); // Increase to 300,000 USDC
+        fallbackBorrowAmount1 = BigInt(10000 * 1e6); // Increase to 300,000 USDC (300000 * 1e6)
     } else {
         fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
     }
