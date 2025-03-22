@@ -1846,19 +1846,19 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/19801512-5df6-4b3f-a73d-a158d31eb03e'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/5aa84dee-7b07-4e98-8ee8-b392c9b844af'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0xec508177d2C58b64a98ABFAAE03E703F63E11fd3",
+      userAddress: "0xd9145CCE52D386f254917e481eB44e9943F39138",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0xec508177d2C58b64a98ABFAAE03E703F63E11fd3",
+      userAddress: "0xd9145CCE52D386f254917e481eB44e9943F39138",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
