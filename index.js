@@ -1842,7 +1842,7 @@ async function fetchMoonwellData() {
     console.log("🚀 Fetching Moonwell data...");
 
     const { createMoonwellClient } = await import('@moonwell-fi/moonwell-sdk');
-   const { moonwellClient } = await import('@moonwell-fi/moonwell-sdk');
+  
 
     const moonwellClient = createMoonwellClient({
       networks: {
@@ -1867,7 +1867,6 @@ async function fetchMoonwellData() {
       
   const rewards = await moonwellClient.getUserRewards<typeof base>({
      userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
-      network: "base"
    })
 
     console.log("📈 Position:", position);
