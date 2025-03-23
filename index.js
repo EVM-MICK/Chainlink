@@ -1846,22 +1846,28 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/5aa84dee-7b07-4e98-8ee8-b392c9b844af'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/8aff55a6-5926-4951-8be9-b5ba0f461894'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
+      userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
+    
+      
+  const rewards = await moonwellClient.getUserRewards<typeof base>({
+     userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
+      network: "base"
+   })
 
     console.log("📈 Position:", position);
     console.log("💰 Raw Reward Data:", JSON.stringify(reward, (key, value) =>
@@ -1880,8 +1886,16 @@ async function fetchMoonwellData() {
         console.log("⚠️ Warning: rewardToken is undefined. Defaulting to USDC.");
     }
 
+    if (rewards?.rewardToken) {
+        tokenSymbol = reward.rewardToken.symbol || "USDC"; // Default if undefined
+        tokenDecimals = reward.rewardToken.decimals || 6;
+    } else {
+        console.log("⚠️ Warning: rewardToken Across all markets is undefined. Defaulting to USDC.");
+    }
+
     // ✅ Handle missing reward values safely
     const supplyReward = formatRewardAmount(reward?.supplyRewards?.value || "0", tokenDecimals);
+   const supplyReward1 = formatRewardAmount(rewards?.supplyRewards?.value || "0", tokenDecimals);
     const borrowReward = formatRewardAmount(reward?.borrowRewards?.value || "0", tokenDecimals);
 
     console.log(`💰 Supply Rewards (USD): $${reward?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
@@ -1890,6 +1904,7 @@ async function fetchMoonwellData() {
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
         rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
         rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Rewards: ${supplyReward1} ${tokenSymbol}\n`;
         console.log(rewardMessage);
         await sendTelegramMessage(rewardMessage);
     } else {
