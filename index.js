@@ -1887,8 +1887,8 @@ async function fetchMoonwellData() {
     }
 
     if (rewards?.rewardToken) {
-        tokenSymbol = reward.rewardToken.symbol || "USDC"; // Default if undefined
-        tokenDecimals = reward.rewardToken.decimals || 6;
+        tokenSymbol = rewards.rewardToken.symbol || "USDC"; // Default if undefined
+        tokenDecimals = rewards.rewardToken.decimals || 6;
     } else {
         console.log("⚠️ Warning: rewardToken Across all markets is undefined. Defaulting to USDC.");
     }
