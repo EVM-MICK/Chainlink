@@ -1842,6 +1842,7 @@ async function fetchMoonwellData() {
     console.log("🚀 Fetching Moonwell data...");
 
     const { createMoonwellClient } = await import('@moonwell-fi/moonwell-sdk');
+   const { moonwellClient } = await import('@moonwell-fi/moonwell-sdk');
 
     const moonwellClient = createMoonwellClient({
       networks: {
