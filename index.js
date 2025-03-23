@@ -1886,12 +1886,7 @@ async function fetchMoonwellData() {
         console.log("⚠️ Warning: rewardToken is undefined. Defaulting to USDC.");
     }
 
-    if (rewards?.rewardToken) {
-        tokenSymbol = rewards.rewardToken.symbol || "USDC"; // Default if undefined
-        tokenDecimals = rewards.rewardToken.decimals || 6;
-    } else {
-        console.log("⚠️ Warning: rewardToken Across all markets is undefined. Defaulting to USDC.");
-    }
+
 
     // ✅ Handle missing reward values safely
     const supplyReward = formatRewardAmount(reward?.supplyRewards?.value || "0", tokenDecimals);
@@ -1900,11 +1895,12 @@ async function fetchMoonwellData() {
 
     console.log(`💰 Supply Rewards (USD): $${reward?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
     console.log(`💰 Borrow Rewards (USD): $${reward?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
+     console.log(`💰 Supply Rewards across all markets (USD): $${rewards?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
-        rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Reward: ${supplyReward} ${tokenSymbol}\n`;
         rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
-        rewardMessage += `💰 Supply Rewards: ${supplyReward1} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Rewards across all markets: ${supplyReward1} ${tokenSymbol}\n`;
         console.log(rewardMessage);
         await sendTelegramMessage(rewardMessage);
     } else {
