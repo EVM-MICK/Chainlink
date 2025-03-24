@@ -1828,7 +1828,7 @@ cycleCount++;
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 3 seconds...`);
-setTimeout(startScript, 3000);
+setTimeout(startScript, 120000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
@@ -1847,19 +1847,19 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/8aff55a6-5926-4951-8be9-b5ba0f461894'],
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/3c9f6643-2acb-410b-bec5-ac6e565eedd3'],
         },
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
+      userAddress: "0x572f88B56440c2799d490aE72d8c1B79fD436942",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0x21d176d52f4fb080fc77d7221581237591b17e7c",
+      userAddress: "0x572f88B56440c2799d490aE72d8c1B79fD436942",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
@@ -1886,7 +1886,12 @@ async function fetchMoonwellData() {
         console.log("⚠️ Warning: rewardToken is undefined. Defaulting to USDC.");
     }
 
-
+    if (rewards?.rewardToken) {
+        tokenSymbol = rewards.rewardToken.symbol || "USDC"; // Default if undefined
+        tokenDecimals = rewards.rewardToken.decimals || 6;
+    } else {
+        console.log("⚠️ Warning: rewardToken Across all markets is undefined. Defaulting to USDC.");
+    }
 
     // ✅ Handle missing reward values safely
     const supplyReward = formatRewardAmount(reward?.supplyRewards?.value || "0", tokenDecimals);
@@ -1895,12 +1900,11 @@ async function fetchMoonwellData() {
 
     console.log(`💰 Supply Rewards (USD): $${reward?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
     console.log(`💰 Borrow Rewards (USD): $${reward?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
-     console.log(`💰 Supply Rewards across all markets (USD): $${rewards?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
-        rewardMessage += `💰 Supply Reward: ${supplyReward} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Rewards: ${supplyReward} ${tokenSymbol}\n`;
         rewardMessage += `💰 Borrow Rewards: ${borrowReward} ${tokenSymbol}\n`;
-        rewardMessage += `💰 Supply Rewards across all markets: ${supplyReward1} ${tokenSymbol}\n`;
+        rewardMessage += `💰 Supply Rewards: ${supplyReward1} ${tokenSymbol}\n`;
         console.log(rewardMessage);
         await sendTelegramMessage(rewardMessage);
     } else {
