@@ -1762,7 +1762,7 @@ async function monitorAndExecuteStrategy() {
         isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
         let bundleExecutor;
-        bundleExecutor = new BundleExecutor(signer, flashbotsBundleProvider, process.env.executorContractAddress, config.mainnetBundleAPI, config.percentageToKeep)
+        bundleExecutor = new BundleExecutor(signer, flashbotsBundleProvider, BASE_CONTRACT_ADDRESS, config.mainnetBundleAPI, config.percentageToKeep)
         // ✅ Fetch latest lending data from contract before each cycle
         const [
             totalCollateral1,
