@@ -8,7 +8,6 @@ const retry = require("async-retry");
 const Redis = require("ioredis");
 const { createClient } = require("redis");
 const {  parseUnits, AbiCoder, ethers, Wallet, WebSocketProvider, JsonRpcProvider, Contract } = require("ethers");
-//const ethers = require("ethers");
 const cron = require("node-cron");
 const { promisify } = require("util");
 const pkg = require("telegraf");
@@ -17,6 +16,9 @@ const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
 const tradeMap = new Map();
+const BundleExecutor = require('./bundleExecutor.js');
+const { FlashbotsBundleProvider} = require('@flashbots/ethers-provider-bundle');
+const config = require('./config.json');
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -29,6 +31,9 @@ const {
 } = require("@1inch/cross-chain-sdk");
 
 const privateKey = process.env.PRIVATE_KEY;
+const provider = new ethers.providers.JsonRpcProvider(process.env.rpcUrl)
+    const signer = new ethers.Wallet(process.env.privateKey, provider)
+    const flashbotsBundleProvider = await FlashbotsBundleProvider.create(provider, signer)
 // ✅ Ensure __dirname is defined in CommonJS
 //const __dirname = path.resolve();
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
@@ -161,8 +166,8 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const provider = new ethers.JsonRpcProvider(process.env.INFURA_URL);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+const providerINFURA = new ethers.JsonRpcProvider(process.env.INFURA_URL);
+const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, providerINFURA);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
 const REDIS_PORT = process.env.REDIS_PORT || 13219;
 const REDIS_USERNAME = process.env.REDIS_USERNAME || 'mc-1JAiM';
@@ -1756,7 +1761,8 @@ async function monitorAndExecuteStrategy() {
         }
         isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
-
+        let bundleExecutor;
+        bundleExecutor = new BundleExecutor(signer, flashbotsBundleProvider, process.env.executorContractAddress, config.mainnetBundleAPI, config.percentageToKeep)
         // ✅ Fetch latest lending data from contract before each cycle
         const [
             totalCollateral1,
@@ -1814,7 +1820,10 @@ console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-          tx = await baseContract.executeFlashLoan(flashLoanAmountWei );
+         //   await bundleExecutor.execute(firstPair, secondPair, data.hash) // Execute the bundle if we've made it this far
+          
+          tx = await bundleExecutor.executeFlashLoan(flashLoanAmountWei);
+      //tx = await baseContract.executeFlashLoan(flashLoanAmountWei );
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
@@ -1828,7 +1837,7 @@ cycleCount++;
 
 isCycleComplete = true;
 console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 3 seconds...`);
-setTimeout(startScript, 120000);
+setTimeout(startScript, 3000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
