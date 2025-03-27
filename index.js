@@ -30,10 +30,7 @@ const {
    QuoteParams
 } = require("@1inch/cross-chain-sdk");
 
-const privateKey = process.env.PRIVATE_KEY;
-const provider = new ethers.providers.JsonRpcProvider(process.env.rpcUrl)
-    const signer = new ethers.Wallet(process.env.privateKey, provider)
-    const flashbotsBundleProvider = await FlashbotsBundleProvider.create(provider, signer)
+
 // ✅ Ensure __dirname is defined in CommonJS
 //const __dirname = path.resolve();
 const polygonAbiPath = path.join(__dirname, "PolygonSmartContract.json");
@@ -166,6 +163,9 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const provider = new ethers.providers.JsonRpcProvider(process.env.rpcUrl)
+    const signer = new ethers.Wallet(PRIVATE_KEY, provider)
+    const flashbotsBundleProvider = await FlashbotsBundleProvider.create(provider, signer)
 const providerINFURA = new ethers.JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, providerINFURA);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
