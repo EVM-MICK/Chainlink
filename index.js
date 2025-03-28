@@ -166,15 +166,15 @@ const RPC_URL = "https://virtual.base.rpc.tenderly.co/d36ff6ec-617d-46b3-827b-a6
 const FLASHBOTS_RPC_URL = "https://relay.flashbots.net";
 
 // ✅ Set up providers
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+// const provider = new ethers.JsonRpcProvider(RPC_URL);
+// const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 
-// ✅ Create Flashbots provider
-const flashbotsProvider = await FlashbotsBundleProvider.create(
-    provider,
-    signer,
-    FLASHBOTS_RPC_URL
-);
+// // ✅ Create Flashbots provider
+// const flashbotsProvider = await FlashbotsBundleProvider.create(
+//     provider,
+//     signer,
+//     FLASHBOTS_RPC_URL
+// );
 const providerINFURA = new ethers.JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, providerINFURA);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
