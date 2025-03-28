@@ -1913,6 +1913,7 @@ async function fetchMoonwellData() {
     const borrowReward = formatRewardAmount(reward?.borrowRewards?.value || "0", tokenDecimals);
 
     console.log(`💰 Supply Rewards (USD): $${reward?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
+    console.log(`💰 Total Supply Rewards (USD): $${rewards?.supplyRewardsUsd?.toFixed(6) || "0.000000"}`);
     console.log(`💰 Borrow Rewards (USD): $${reward?.borrowRewardsUsd?.toFixed(6) || "0.000000"}`);
 
     if (parseFloat(supplyReward) > 0 || parseFloat(borrowReward) > 0) {
