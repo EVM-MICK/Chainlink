@@ -16,9 +16,8 @@ const path = require("path");
 const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
 const tradeMap = new Map();
-const BundleExecutor = require('./bundleExecutor.js');
 const { FlashbotsBundleProvider} = require('@flashbots/ethers-provider-bundle');
-const config = require('./config.json');
+
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -163,9 +162,19 @@ const permit2Abi = [
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-const provider = new ethers.providers.JsonRpcProvider(process.env.rpcUrl)
-    const signer = new ethers.Wallet(PRIVATE_KEY, provider)
-    const flashbotsBundleProvider = await FlashbotsBundleProvider.create(provider, signer)
+const RPC_URL = "https://virtual.base.rpc.tenderly.co/d36ff6ec-617d-46b3-827b-a626de4e1cf7";
+const FLASHBOTS_RPC_URL = "https://relay.flashbots.net";
+
+// ✅ Set up providers
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+// ✅ Create Flashbots provider
+const flashbotsProvider = await FlashbotsBundleProvider.create(
+    provider,
+    signer,
+    FLASHBOTS_RPC_URL
+);
 const providerINFURA = new ethers.JsonRpcProvider(process.env.INFURA_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, providerINFURA);
 const REDIS_HOST = process.env.REDIS_HOST || 'memcached-13219.c83.us-east-1-2.ec2.redns.redis-cloud.com';
@@ -1761,8 +1770,7 @@ async function monitorAndExecuteStrategy() {
         }
         isCycleComplete = false; // ✅ Mark cycle as in-progress
         console.log("🔄 Checking Lending Data...");
-        let bundleExecutor;
-        bundleExecutor = new BundleExecutor(signer, flashbotsBundleProvider, BASE_CONTRACT_ADDRESS, config.mainnetBundleAPI, config.percentageToKeep)
+        
         // ✅ Fetch latest lending data from contract before each cycle
         const [
             totalCollateral1,
@@ -1820,16 +1828,13 @@ console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-         //   await bundleExecutor.execute(firstPair, secondPair, data.hash) // Execute the bundle if we've made it this far
-          
-          tx = await bundleExecutor.executeFlashLoan(flashLoanAmountWei);
-      //tx = await baseContract.executeFlashLoan(flashLoanAmountWei );
+      tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
     // ✅ Check if transactionHash is valid
-await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+   await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
 // ✅ Increment cycle count
 cycleCount++;
