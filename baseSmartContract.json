@@ -124,6 +124,25 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "batch",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "totalBatches",
+				"type": "uint256"
+			}
+		],
+		"name": "BatchCompleted",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "attemptedBorrow",
 				"type": "uint256"
 			}
