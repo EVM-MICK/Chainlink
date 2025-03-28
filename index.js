@@ -162,7 +162,6 @@ const permit2Abi = [
 ];
 const CHAIN_ID = 42161;
 const web3 = new Web3(new Web3.providers.HttpProvider(INFURA_URL));
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const RPC_URL = "https://virtual.base.rpc.tenderly.co/d36ff6ec-617d-46b3-827b-a626de4e1cf7";
 const FLASHBOTS_RPC_URL = "https://relay.flashbots.net";
 
