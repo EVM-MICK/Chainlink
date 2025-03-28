@@ -49,6 +49,7 @@ function safeLoadJson(filePath) {
 }
 
 // ✅ Load Smart Contract ABIs
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const POLYGON_ABI = safeLoadJson(polygonAbiPath);
 const ARBITRUM_ABI = safeLoadJson(arbitrumAbiPath);
 const BASE_ABI = safeLoadJson(baseAbiPath);
@@ -61,7 +62,7 @@ if (!POLYGON_ABI || !ARBITRUM_ABI || !BASE_ABI) {
 const sdk = new SDK({
     url: "https://api.1inch.dev/fusion-plus",
     authKey: process.env.ONEINCH_API_KEY,  // ✅ Correctly assigned
-    blockchainProvider: new PrivateKeyProviderConnector(privateKey, new Web3(process.env.INFURA_URL)), // ✅ Ensures `web3` is defined
+    blockchainProvider: new PrivateKeyProviderConnector(PRIVATE_KEY, new Web3(process.env.INFURA_URL)), // ✅ Ensures `web3` is defined
 });
 
 //dotenv.config();
