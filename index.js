@@ -1761,6 +1761,27 @@ function calculateBorrowAmount(collateral, previousDebt, cycleCount) {
     return BigInt(Math.floor(borrowAmount * 1e6)); // Convert to 6 decimals (USDC)
 }
 
+async function getGasPriceInWei() {
+    try {
+        // Get ETH/USD price from an API
+        const response = await axios.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+        );
+        const ethPriceInUsd = response.data.ethereum.usd;
+
+        // Convert 0.0001 USD to ETH
+        const gasPriceInEth = 0.000001 / ethPriceInUsd;
+
+        // Convert ETH to Wei
+        const gasPriceInWei = ethers.parseUnits(gasPriceInEth.toString(), "gwei"); // Use Gwei to keep it realistic
+
+        console.log(`🔹 Gas Price set to: ${gasPriceInWei} Wei`);
+        return gasPriceInWei;
+    } catch (error) {
+        console.error("❌ Error fetching ETH price:", error);
+        throw new Error("Failed to get ETH price for gas calculation.");
+    }
+}
 
 async function monitorAndExecuteStrategy() {
     try {
@@ -1828,7 +1849,12 @@ console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI
         } else {
            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
           // ✅ Call executeFlashLoan with correctly formatted value
-      tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
+         const gasPrice = await getGasPriceInWei(); // Fetch gas price dynamically
+        // Execute the flash loan with custom gas price
+        const tx = await baseContract.executeFlashLoan(flashLoanAmountWei, {
+            gasPrice,
+        });
+      // tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
      }
         // ✅ Wait for transaction receip
         const receipt = await tx.wait();
