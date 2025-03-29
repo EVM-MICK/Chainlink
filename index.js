@@ -17,7 +17,7 @@ const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
 const tradeMap = new Map();
 const { FlashbotsBundleProvider} = require('@flashbots/ethers-provider-bundle');
-
+const SAFE_FALLBACK_GAS_PRICE = ethers.parseUnits("1", "gwei"); // 1 Gwei fallback
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -1842,44 +1842,48 @@ if (cycleCount === 0) {
 const flashLoanAmountWei = fallbackBorrowAmount1;
 
 console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
+let tx;
 
-        let tx;
         if (cycleCount === 0) {
-            // ✅ Ensure there is sufficient collateral before calling
             console.log("✅ Simulation passed: Calling startRecursiveLending()... ");
             tx = await baseContract.startRecursiveLending();
-           
         } else {
-           console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
-          // ✅ Call executeFlashLoan with correctly formatted value
-         const gasPrice = await getGasPriceInWei(); // Fetch gas price dynamically
-        // Execute the flash loan with custom gas price
-        const tx = await baseContract.executeFlashLoan(flashLoanAmountWei, {
-            gasPrice,
-        });
-      const receipt1 = await tx.wait();
-      console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt1.transactionHash}`)
-      // tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
-     }
-        // ✅ Wait for transaction receip
-        const receipt = await tx.wait();
-        console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
-    // ✅ Check if transactionHash is valid
-   //await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+            console.log(`🔄 Starting Cycle ${cycleCount + 1}: Preparing Flash Loan Execution...`);
 
-// ✅ Increment cycle count
-cycleCount++;
-//fs.writeFileSync(cycleCountFile, cycleCount.toString());
+            // ✅ Fetch gas price with fallback to 1 Gwei
+            const SAFE_FALLBACK_GAS_PRICE = ethers.parseUnits("1", "gwei"); // 1 Gwei fallback
+            let gasPrice;
 
-isCycleComplete = true;
-console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 1 seconds...`);
-setTimeout(startScript, 1000);
+            try {
+                gasPrice = await getGasPriceInWei();
+            } catch (error) {
+                console.error("⚠️ Gas price API failed, using fallback gas price: 1 Gwei");
+                gasPrice = SAFE_FALLBACK_GAS_PRICE;
+            }
 
-    } catch (error) {
-        console.error("❌ Error executing strategy:", error);
-        //await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
-        isCycleComplete = true;
-    }
+            console.log(`⛽ Using Gas Price: ${ethers.formatUnits(gasPrice, "gwei")} Gwei`);
+
+            try {
+                tx = await baseContract.executeFlashLoan(flashLoanAmountWei, { gasPrice });
+
+                if (!tx) throw new Error("executeFlashLoan returned undefined transaction.");
+            } catch (error) {
+                console.error("❌ executeFlashLoan() failed:", error);
+                return; // Prevents calling tx.wait() on undefined
+            }
+        }
+    // ✅ Ensure tx is valid before waiting for receipt
+    const receipt = await tx.wait();
+    console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
+    //await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+
+    cycleCount++;
+    isCycleComplete = true;
+    console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 1 second...`);
+    setTimeout(startScript, 1000);
+} catch (error) {
+    console.error("❌ Error executing strategy:", error);
+    isCycleComplete = true;
 }
 
 async function fetchMoonwellData() {
