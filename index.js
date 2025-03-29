@@ -1860,19 +1860,19 @@ console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI
         const receipt = await tx.wait();
         console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`)
     // ✅ Check if transactionHash is valid
-   await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+   //await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
 // ✅ Increment cycle count
 cycleCount++;
 //fs.writeFileSync(cycleCountFile, cycleCount.toString());
 
 isCycleComplete = true;
-console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 3 seconds...`);
-setTimeout(startScript, 3000);
+console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 1 seconds...`);
+setTimeout(startScript, 1000);
 
     } catch (error) {
         console.error("❌ Error executing strategy:", error);
-        await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
+        //await sendTelegramMessage(`❌ Execution Error: ${error.message}`);
         isCycleComplete = true;
     }
 }
