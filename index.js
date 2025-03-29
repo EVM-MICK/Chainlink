@@ -1857,6 +1857,8 @@ console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI
         const tx = await baseContract.executeFlashLoan(flashLoanAmountWei, {
             gasPrice,
         });
+      const receipt1 = await tx.wait();
+      console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt1.transactionHash}`)
       // tx = await baseContract.executeFlashLoan(flashLoanAmountWei);
      }
         // ✅ Wait for transaction receip
