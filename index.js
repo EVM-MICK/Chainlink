@@ -17,7 +17,6 @@ const { randomBytes } = require("crypto");
 const redis = require("redis"); // Ensure Redis client is properly initialized
 const tradeMap = new Map();
 const { FlashbotsBundleProvider} = require('@flashbots/ethers-provider-bundle');
-const SAFE_FALLBACK_GAS_PRICE = ethers.parseUnits("1", "gwei"); // 1 Gwei fallback
 // ✅ Fix 1inch SDK Import for CommonJS
 const { 
    SDK, 
@@ -1777,7 +1776,7 @@ async function getGasPriceInWei() {
 
         // Convert to BigNumber and return gas price in Wei
         const gasPriceInWei = ethers.parseUnits(gasPriceInGwei.toFixed(0), "gwei"); // Convert to Gwei string and parse
-        const gasPriceInWei1 = 100000000;
+        const gasPriceInWei1 = 1000000000;
         console.log(`🔹 Gas Price set to: ${gasPriceInWei1} Wei`);
         return gasPriceInWei1;
     } catch (error) {
