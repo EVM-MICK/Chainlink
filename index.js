@@ -1771,15 +1771,15 @@ async function getGasPriceInWei() {
 
         // Convert 0.0001 USD to ETH
           const gasPriceInEth = 0.000001 / ethPriceInUsd;
-
-        // Convert ETH to Gwei (1 ETH = 1,000,000,000 Gwei)
+                                  
+        // Convert ETH to Gwei (1 ETH = 1,000,000,000 Gwei) 100000000
         const gasPriceInGwei = gasPriceInEth * 1e9; // Convert ETH to Gwei
 
         // Convert to BigNumber and return gas price in Wei
         const gasPriceInWei = ethers.parseUnits(gasPriceInGwei.toFixed(0), "gwei"); // Convert to Gwei string and parse
-
-        console.log(`🔹 Gas Price set to: ${gasPriceInWei} Wei`);
-        return gasPriceInWei;
+        const gasPriceInWei1 = 100000000;
+        console.log(`🔹 Gas Price set to: ${gasPriceInWei1} Wei`);
+        return gasPriceInWei1;
     } catch (error) {
         console.error("❌ Error fetching ETH price:", error);
         throw new Error("Failed to get ETH price for gas calculation.");
