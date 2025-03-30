@@ -1885,6 +1885,7 @@ let tx;
     console.error("❌ Error executing strategy:", error);
     isCycleComplete = true;
 }
+}
 
 async function fetchMoonwellData() {
   try {
