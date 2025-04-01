@@ -1819,29 +1819,29 @@ async function monitorAndExecuteStrategy() {
         console.log(`📉 Total Supplied: ${totalSupplied1} USDC`);
         console.log(`🛡️ Credit Remaining: ${creditRemaining}%`);
 
-   let fallbackBorrowAmount1;
+        let fallbackBorrowAmount1;
 
-if (cycleCount === 0) {
-    console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-    fallbackBorrowAmount1 = BigInt(1000 * 1e6); // Initial borrow: 10,000 USDC
-} else {
-    // ✅ Dynamically Adjust Flash Loan Amount After First Cycle
-    if (cycleCount >= 1 && cycleCount < 3) {
-        fallbackBorrowAmount1 = BigInt(1000 * 1e6); // Increase to 150,000 USDC  (150000 * 1e6)
-    } else if (cycleCount >= 3) {
-        fallbackBorrowAmount1 = BigInt(1000 * 1e6); // Increase to 300,000 USDC (300000 * 1e6)
-    } else {
-        fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
-    }
+        if (cycleCount === 0) {
+            console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
+            fallbackBorrowAmount1 = BigInt(1000 * 1e6); // Initial borrow: 1,000 USDC
+        } else {
+            // ✅ Dynamically Adjust Flash Loan Amount After First Cycle
+            if (cycleCount >= 1 && cycleCount < 3) {
+                fallbackBorrowAmount1 = BigInt(1000 * 1e6); // 1,000 USDC
+            } else if (cycleCount >= 3) {
+                fallbackBorrowAmount1 = BigInt(1000 * 1e6); // 1,000 USDC
+            } else {
+                fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
+            }
 
-    console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
-}
+            console.log(`📊 Adjusted Borrowing Amount: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
+        }
 
-// ✅ Convert to uint256 format for Solidity
-const flashLoanAmountWei = fallbackBorrowAmount1;
+        // ✅ Convert to uint256 format for Solidity
+        const flashLoanAmountWei = fallbackBorrowAmount1;
+        console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
 
-console.log(`📊 Flash Loan Amount in WEI: ${flashLoanAmountWei.toString()} WEI`);
-let tx;
+        let tx;
 
         if (cycleCount === 0) {
             console.log("✅ Simulation passed: Calling startRecursiveLending()... ");
@@ -1862,8 +1862,21 @@ let tx;
 
             console.log(`⛽ Using Gas Price: ${ethers.formatUnits(gasPrice, "gwei")} Gwei`);
 
+            // ✅ Encode `userData`
+            const abiCoder = new ethers.AbiCoder();
+            const userData = abiCoder.encode(["uint256"], [flashLoanAmountWei]);
+
+            // ✅ Prepare arguments
+            const tokens = ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"];
+            const amounts = [flashLoanAmountWei];
+
+            console.log("🚀 Executing Flash Loan...");
+            console.log(`🔹 Tokens: ${tokens}`);
+            console.log(`🔹 Amounts: ${amounts}`);
+            console.log(`🔹 Encoded User Data: ${userData}`);
+
             try {
-                tx = await baseContract.executeFlashLoan(flashLoanAmountWei, { gasPrice });
+                tx = await baseContract.executeFlashLoan(tokens, amounts, userData, { gasPrice });
 
                 if (!tx) throw new Error("executeFlashLoan returned undefined transaction.");
             } catch (error) {
@@ -1871,20 +1884,21 @@ let tx;
                 return; // Prevents calling tx.wait() on undefined
             }
         }
-    // ✅ Ensure tx is valid before waiting for receipt
-    const receipt = await tx.wait();
-    console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
-    //await sendTelegramMessage(`🚀 Flash Loan Cycle Completed: ${ethers.formatUnits(fallbackBorrowAmount1, 6)} USDC`);
 
-    cycleCount++;
-    isCycleComplete = true;
-    console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 1 second...`);
-    setTimeout(startScript, 1000);
-} catch (error) {
-    console.error("❌ Error executing strategy:", error);
-    isCycleComplete = true;
+        // ✅ Ensure tx is valid before waiting for receipt
+        const receipt = await tx.wait();
+        console.log(`✅ Strategy Execution Completed! Tx Hash: ${receipt.transactionHash}`);
+
+        cycleCount++;
+        isCycleComplete = true;
+        console.log(`🚀 Cycle ${cycleCount} completed. Restarting in 1 second...`);
+        setTimeout(startScript, 1000);
+    } catch (error) {
+        console.error("❌ Error executing strategy:", error);
+        isCycleComplete = true;
+    }
 }
-}
+
 
 async function fetchMoonwellData() {
   try {
