@@ -1769,7 +1769,7 @@ async function getGasPriceInWei() {
         const ethPriceInUsd = response.data.ethereum.usd;
 
         // Convert 0.0001 USD to ETH
-          const gasPriceInEth = 0.000001 / ethPriceInUsd;
+          const gasPriceInEth = 0.00001 / ethPriceInUsd;
                                   
         // Convert ETH to Gwei (1 ETH = 1,000,000,000 Gwei) 100000000
         const gasPriceInGwei = gasPriceInEth * 1e9; // Convert ETH to Gwei
@@ -1823,13 +1823,13 @@ async function monitorAndExecuteStrategy() {
 
         if (cycleCount === 0) {
             console.log("🚀 Starting First Cycle: Calling startRecursiveLending()");
-            fallbackBorrowAmount1 = BigInt(1000 * 1e6); // Initial borrow: 1,000 USDC
+            fallbackBorrowAmount1 = BigInt(300000 * 1e6); // Initial borrow: 300,000 USDC
         } else {
             // ✅ Dynamically Adjust Flash Loan Amount After First Cycle
             if (cycleCount >= 1 && cycleCount < 3) {
-                fallbackBorrowAmount1 = BigInt(1000 * 1e6); // 1,000 USDC
+                fallbackBorrowAmount1 = BigInt(300000 * 1e6); // 300,000 USDC
             } else if (cycleCount >= 3) {
-                fallbackBorrowAmount1 = BigInt(1000 * 1e6); // 1,000 USDC
+                fallbackBorrowAmount1 = BigInt(300000 * 1e6); // 300,000 USDC
             } else {
                 fallbackBorrowAmount1 = calculateBorrowAmount(collateral, borrowed, cycleCount) + BigInt(5e6);
             }
@@ -1910,26 +1910,26 @@ async function fetchMoonwellData() {
     const moonwellClient = createMoonwellClient({
       networks: {
         base: {
-          rpcUrls: ['https://virtual.base.rpc.tenderly.co/b4fa2e05-e4d4-4304-ae26-6b5516d27712'],
-        },
+          rpcUrls: ['https://virtual.base.rpc.tenderly.co/2ed92e11-e006-4a1c-939d-1fc6a17c77c1'],
+        }
       },
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0xBc73EE54946A4A8068E94bA450AE8DEB5445fd49",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0xBc73EE54946A4A8068E94bA450AE8DEB5445fd49",
+      userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
     
       
-  const rewards = await moonwellClient.getUserRewards<typeof base>({
-     userAddress: "0xBc73EE54946A4A8068E94bA450AE8DEB5445fd49",
+  const rewards = await moonwellClient.getUserRewards({
+     userAddress: "0x21d176D52f4Fb080FC77D7221581237591B17E7C",
    })
 
     console.log("📈 Position:", position);
