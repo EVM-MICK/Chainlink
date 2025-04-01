@@ -13,33 +13,7 @@
 		"type": "function"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "_balancerVault",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "_moonwellUSDC",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "_usdc",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "_well",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "_comptroller",
-				"type": "address"
-			}
-		],
+		"inputs": [],
 		"stateMutability": "nonpayable",
 		"type": "constructor"
 	},
@@ -289,9 +263,19 @@
 	{
 		"inputs": [
 			{
-				"internalType": "uint256",
-				"name": "amount",
-				"type": "uint256"
+				"internalType": "contract IERC20[]",
+				"name": "tokens",
+				"type": "address[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "amounts",
+				"type": "uint256[]"
+			},
+			{
+				"internalType": "bytes",
+				"name": "userData",
+				"type": "bytes"
 			}
 		],
 		"name": "executeFlashLoan",
@@ -811,6 +795,21 @@
 	{
 		"inputs": [
 			{
+				"internalType": "contract IERC20[]",
+				"name": "tokens",
+				"type": "address[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "amounts",
+				"type": "uint256[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "feeAmounts",
+				"type": "uint256[]"
+			},
+			{
 				"internalType": "bytes",
 				"name": "userData",
 				"type": "bytes"
@@ -946,19 +945,6 @@
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "balancerVault",
-		"outputs": [
-			{
-				"internalType": "contract IVaultMain",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
 		"inputs": [
 			{
 				"internalType": "uint256",
@@ -979,33 +965,7 @@
 	},
 	{
 		"inputs": [],
-		"name": "comptroller",
-		"outputs": [
-			{
-				"internalType": "contract IComptroller",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
 		"name": "cycleCount",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "dailyProfitTarget",
 		"outputs": [
 			{
 				"internalType": "uint256",
@@ -1075,64 +1035,12 @@
 	},
 	{
 		"inputs": [],
-		"name": "moonwellUSDC",
-		"outputs": [
-			{
-				"internalType": "contract IMoonwellUSDC",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
 		"name": "owner",
 		"outputs": [
 			{
 				"internalType": "address",
 				"name": "",
 				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "SAFE_BORROW_PERCENT",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "totalBorrowed",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "totalCollateral",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
 			}
 		],
 		"stateMutability": "view",
@@ -1153,10 +1061,36 @@
 	},
 	{
 		"inputs": [],
+		"name": "usdcToken",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
 		"name": "well",
 		"outputs": [
 			{
 				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "wellToken",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
 				"name": "",
 				"type": "address"
 			}
