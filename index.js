@@ -1916,20 +1916,20 @@ async function fetchMoonwellData() {
     });
 
     const position = await moonwellClient.getUserPosition({ 
-      userAddress: "0x63b7aC6B007308568eD09e639EC1a646B0052604",
+      userAddress: "0x6ACC87BBfE794E81D503BA488C4713f04bBdc037",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
 
     const reward = await moonwellClient.getUserReward({ 
-      userAddress: "0x63b7aC6B007308568eD09e639EC1a646B0052604",
+      userAddress: "0x6ACC87BBfE794E81D503BA488C4713f04bBdc037",
       chainId: 8453,
       marketAddress: "0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22",
     });
     
       
   const rewards = await moonwellClient.getUserRewards({
-     userAddress: "0x63b7aC6B007308568eD09e639EC1a646B0052604",
+     userAddress: "0x6ACC87BBfE794E81D503BA488C4713f04bBdc037",
    })
 
     console.log("📈 Position:", position);
